@@ -1,0 +1,63 @@
+use crate::diagnostics::Span;
+
+#[derive(Debug, Clone)]
+pub struct HirFunction {
+    pub name: Option<String>,
+    pub params: Vec<String>,
+    pub entry_block: HirBlockId,
+    pub blocks: Vec<HirBlock>,
+}
+
+pub type HirBlockId = u32;
+
+#[derive(Debug, Clone)]
+pub struct HirBlock {
+    pub id: HirBlockId,
+    pub ops: Vec<HirOp>,
+    pub terminator: HirTerminator,
+}
+
+#[derive(Debug, Clone)]
+pub enum HirOp {
+    LoadConst { value: HirConst, span: Span },
+    LoadLocal { id: u32, span: Span },
+    StoreLocal { id: u32, span: Span },
+}
+
+#[derive(Debug, Clone)]
+pub enum HirConst {
+    Int(i64),
+    Float(f64),
+}
+
+#[derive(Debug, Clone)]
+pub enum HirTerminator {
+    Return { span: Span },
+    Jump { target: HirBlockId },
+    Branch { cond: u32, then_block: HirBlockId, else_block: HirBlockId },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnostics::Position;
+
+    #[test]
+    fn hir_function_create() {
+        let span = Span::point(Position::start());
+        let func = HirFunction {
+            name: Some("main".to_string()),
+            params: vec![],
+            entry_block: 0,
+            blocks: vec![HirBlock {
+                id: 0,
+                ops: vec![HirOp::LoadConst {
+                    value: HirConst::Int(42),
+                    span,
+                }],
+                terminator: HirTerminator::Return { span },
+            }],
+        };
+        assert_eq!(func.blocks.len(), 1);
+    }
+}
