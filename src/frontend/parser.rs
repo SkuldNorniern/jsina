@@ -450,7 +450,7 @@ impl Parser {
         let mut left = self.parse_unary()?;
 
         loop {
-            let op = match self.peek() {
+            let op = match self.current().map(|t| &t.token_type) {
                 Some(TokenType::Plus) => BinaryOp::Add,
                 Some(TokenType::Minus) => BinaryOp::Sub,
                 Some(TokenType::Multiply) => BinaryOp::Mul,
