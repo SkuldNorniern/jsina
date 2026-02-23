@@ -97,5 +97,23 @@ fn format_expr(expr: &Expression) -> String {
             format!("{}({})", format_expr(&e.callee), args.join(", "))
         }
         Expression::Assign(e) => format!("{} = {}", format_expr(&e.left), format_expr(&e.right)),
+        Expression::ObjectLiteral(e) => {
+            let props: Vec<String> = e.properties.iter()
+                .map(|(k, v)| format!("{}: {}", k, format_expr(v)))
+                .collect();
+            format!("{{{}}}", props.join(", "))
+        }
+        Expression::ArrayLiteral(e) => {
+            let elems: Vec<String> = e.elements.iter().map(format_expr).collect();
+            format!("[{}]", elems.join(", "))
+        }
+        Expression::Member(e) => match &e.property {
+            crate::frontend::ast::MemberProperty::Identifier(s) => {
+                format!("{}.{}", format_expr(&e.object), s)
+            }
+            crate::frontend::ast::MemberProperty::Expression(inner) => {
+                format!("{}[{}]", format_expr(&e.object), format_expr(inner))
+            }
+        },
     }
 }
