@@ -152,6 +152,14 @@ pub fn test262(test262_dir: Option<&str>) -> Result<(), CliError> {
             std::env::var_os("TEST262_ROOT")
                 .map(std::path::PathBuf::from)
                 .filter(|p| p.exists())
+        })
+        .or_else(|| {
+            let default = cwd.join("asset").join("test262");
+            if default.exists() {
+                Some(default)
+            } else {
+                None
+            }
         });
 
     let mut pass = 0;

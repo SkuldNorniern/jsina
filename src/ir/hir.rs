@@ -72,6 +72,9 @@ pub enum BuiltinId {
     MathMax = 6,
     JsonParse = 7,
     JsonStringify = 8,
+    ObjectCreate = 9,
+    ArrayIsArray = 10,
+    ObjectKeys = 11,
 }
 
 #[derive(Debug, Clone)]

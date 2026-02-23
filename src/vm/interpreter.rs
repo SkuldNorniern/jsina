@@ -296,6 +296,31 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                             None => stack.push(Value::Undefined),
                         }
                     }
+                    9 => {
+                        let proto = args.first().ok_or(VmError::StackUnderflow)?;
+                        let prototype = match proto {
+                            Value::Null | Value::Undefined => None,
+                            Value::Object(id) => Some(*id),
+                            _ => None,
+                        };
+                        let id = heap.alloc_object_with_prototype(prototype);
+                        stack.push(Value::Object(id));
+                    }
+                    10 => {
+                        let arg = args.first().ok_or(VmError::StackUnderflow)?;
+                        let is_arr = matches!(arg, Value::Array(_));
+                        stack.push(Value::Bool(is_arr));
+                    }
+                    11 => {
+                        let arg = args.first().ok_or(VmError::StackUnderflow)?;
+                        let arr_id = heap.alloc_array();
+                        if let Value::Object(obj_id) = arg {
+                            for key in heap.object_keys(*obj_id) {
+                                heap.array_push(arr_id, Value::String(key));
+                            }
+                        }
+                        stack.push(Value::Array(arr_id));
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }

@@ -983,6 +983,27 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                             argc: 1,
                             span: e.span,
                         });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "create" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ObjectCreate,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "keys" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ObjectKeys,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Array") && prop == "isArray" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayIsArray,
+                            argc: 1,
+                            span: e.span,
+                        });
                     } else if prop == "push" {
                         compile_expression(&m.object, ctx)?;
                         for arg in &e.args {
@@ -1531,5 +1552,41 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 7, "undefined ?? 7 should return 7");
+    }
+
+    #[test]
+    fn lower_object_create() {
+        let result = crate::driver::Driver::run(
+            "function main() { let proto = { x: 10 }; let o = Object.create(proto); return o.x; }",
+        )
+        .expect("run");
+        assert_eq!(result, 10, "Object.create(proto) inherits proto.x");
+    }
+
+    #[test]
+    fn lower_object_create_null() {
+        let result = crate::driver::Driver::run(
+            "function main() { let o = Object.create(null); o.y = 42; return o.y; }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "Object.create(null) creates object with no prototype");
+    }
+
+    #[test]
+    fn lower_array_is_array() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [1, 2]; if (!Array.isArray(a)) return 0; if (Array.isArray({})) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Array.isArray should detect arrays");
+    }
+
+    #[test]
+    fn lower_object_keys() {
+        let result = crate::driver::Driver::run(
+            "function main() { let o = { a: 1, b: 2 }; let k = Object.keys(o); return k.length; }",
+        )
+        .expect("run");
+        assert_eq!(result, 2, "Object.keys should return array of own keys");
     }
 }

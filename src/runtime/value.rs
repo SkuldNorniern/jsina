@@ -15,6 +15,7 @@ impl Value {
         match self {
             Value::Int(n) => *n as i64,
             Value::Number(n) => *n as i64,
+            Value::Bool(b) => i64::from(*b),
             _ => 0,
         }
     }

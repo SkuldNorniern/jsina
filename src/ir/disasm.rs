@@ -81,6 +81,9 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                     6 => "mathMax",
                     7 => "jsonParse",
                     8 => "jsonStringify",
+                    9 => "objectCreate",
+                    10 => "arrayIsArray",
+                    11 => "objectKeys",
                     _ => "?",
                 };
                 format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)
