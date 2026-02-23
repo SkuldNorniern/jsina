@@ -53,6 +53,7 @@ pub enum HirOp {
 pub enum BuiltinId {
     Print = 0,
     ArrayPush = 1,
+    ArrayPop = 2,
 }
 
 #[derive(Debug, Clone)]

@@ -134,6 +134,7 @@ pub enum Expression {
     Unary(UnaryExpr),
     Call(CallExpr),
     Assign(AssignExpr),
+    Conditional(ConditionalExpr),
     ObjectLiteral(ObjectLiteralExpr),
     ArrayLiteral(ArrayLiteralExpr),
     Member(MemberExpr),
@@ -252,6 +253,15 @@ pub struct AssignExpr {
     pub right: Box<Expression>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ConditionalExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub condition: Box<Expression>,
+    pub then_expr: Box<Expression>,
+    pub else_expr: Box<Expression>,
+}
+
 impl Script {
     pub fn span(&self) -> Span {
         self.span
@@ -286,6 +296,7 @@ impl Expression {
             Expression::Unary(e) => e.span,
             Expression::Call(e) => e.span,
             Expression::Assign(e) => e.span,
+            Expression::Conditional(e) => e.span,
             Expression::ObjectLiteral(e) => e.span,
             Expression::ArrayLiteral(e) => e.span,
             Expression::Member(e) => e.span,

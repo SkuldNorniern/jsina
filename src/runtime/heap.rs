@@ -83,6 +83,14 @@ impl Heap {
             0
         }
     }
+
+    pub fn array_pop(&mut self, arr_id: usize) -> Value {
+        if let Some(elements) = self.arrays.get_mut(arr_id) {
+            elements.pop().unwrap_or(Value::Undefined)
+        } else {
+            Value::Undefined
+        }
+    }
 }
 
 #[cfg(test)]

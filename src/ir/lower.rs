@@ -621,6 +621,57 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                 }
             }
         }
+        Expression::Conditional(e) => {
+            let result_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            compile_expression(&e.condition, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: result_slot,
+                span: e.span,
+            });
+            let else_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: else_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let then_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: then_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let merge_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: merge_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: result_slot,
+                then_block: then_id,
+                else_block: else_id,
+            };
+            ctx.current_block = then_id as usize;
+            compile_expression(&e.then_expr, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: result_slot,
+                span: e.span,
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_id };
+            ctx.current_block = else_id as usize;
+            compile_expression(&e.else_expr, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: result_slot,
+                span: e.span,
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_id };
+            ctx.current_block = merge_id as usize;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: result_slot,
+                span: e.span,
+            });
+        }
         Expression::Unary(e) => {
             match e.op {
                 UnaryOp::Plus => compile_expression(&e.argument, ctx)?,
@@ -693,6 +744,14 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::ArrayPush,
                         argc: (1 + e.args.len()) as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Member(m) if matches!(&m.property, MemberProperty::Identifier(s) if s == "pop") => {
+                    compile_expression(&m.object, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::ArrayPop,
+                        argc: 1,
                         span: e.span,
                     });
                 }
@@ -1046,6 +1105,30 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn lower_array_pop() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [1, 2, 3]; let x = a.pop(); return x; }",
+        )
+        .expect("run");
+        assert_eq!(result, 3, "a.pop() should return 3");
+    }
+
+    #[test]
+    fn lower_ternary() {
+        let result = crate::driver::Driver::run(
+            "function main() { return 1 ? 10 : 20; }",
+        )
+        .expect("run");
+        assert_eq!(result, 10, "1 ? 10 : 20 should return 10");
+
+        let result = crate::driver::Driver::run(
+            "function main() { return 0 ? 10 : 20; }",
+        )
+        .expect("run");
+        assert_eq!(result, 20, "0 ? 10 : 20 should return 20");
     }
 
     #[test]

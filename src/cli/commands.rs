@@ -97,6 +97,7 @@ fn format_expr(expr: &Expression) -> String {
             format!("{}({})", format_expr(&e.callee), args.join(", "))
         }
         Expression::Assign(e) => format!("{} = {}", format_expr(&e.left), format_expr(&e.right)),
+        Expression::Conditional(e) => format!("{} ? {} : {}", format_expr(&e.condition), format_expr(&e.then_expr), format_expr(&e.else_expr)),
         Expression::ObjectLiteral(e) => {
             let props: Vec<String> = e.properties.iter()
                 .map(|(k, v)| format!("{}: {}", k, format_expr(v)))

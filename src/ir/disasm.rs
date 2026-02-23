@@ -72,6 +72,7 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 let name = match builtin_id {
                     0 => "print",
                     1 => "arrayPush",
+                    2 => "arrayPop",
                     _ => "?",
                 };
                 format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)

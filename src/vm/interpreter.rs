@@ -175,6 +175,18 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         let new_len = heap.array_push_values(arr_id, vals);
                         stack.push(Value::Int(new_len));
                     }
+                    2 => {
+                        let arr = args.first().ok_or(VmError::StackUnderflow)?;
+                        let arr_id = match arr {
+                            Value::Array(id) => *id,
+                            _ => {
+                                stack.push(Value::Undefined);
+                                continue;
+                            }
+                        };
+                        let val = heap.array_pop(arr_id);
+                        stack.push(val);
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }

@@ -450,6 +450,21 @@ impl Parser {
 
         let mut left = self.parse_unary()?;
 
+        if min_prec <= 1 && matches!(self.current().map(|t| &t.token_type), Some(TokenType::Question)) {
+            self.advance();
+            let then_expr = self.parse_expression_prec(1)?;
+            self.expect(TokenType::Colon)?;
+            let else_expr = self.parse_expression_prec(0)?;
+            let span = left.span().merge(else_expr.span());
+            left = Expression::Conditional(ConditionalExpr {
+                id: self.next_id(),
+                span,
+                condition: Box::new(left),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+            });
+        }
+
         loop {
             let op = match self.current().map(|t| &t.token_type) {
                 Some(TokenType::Plus) => BinaryOp::Add,
