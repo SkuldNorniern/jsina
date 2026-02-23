@@ -1,0 +1,6 @@
+# test262 allowlist
+# Format: <test-path> | <reason> | <owner> | <date-added>
+# Reason tags: missing-builtin, parser-gap, host-gap, known-bug, (empty = expected pass)
+#
+# Bootstrap: use corpus tests until test262 repo is available
+tests/test262/corpus/simple-return.js | | | 2025-02
