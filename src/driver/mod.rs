@@ -1,6 +1,6 @@
 use crate::backend::translate_to_lamina_ir;
 use crate::diagnostics::Diagnostic;
-use crate::frontend::{Lexer, Parser};
+use crate::frontend::{check_early_errors, Lexer, Parser};
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::vm::{interpret, Completion};
 
@@ -66,7 +66,13 @@ impl Driver {
 
     pub fn ast(source: &str) -> Result<crate::frontend::Script, DriverError> {
         let mut parser = Parser::new(source);
-        parser.parse().map_err(DriverError::Parse)
+        let script = parser.parse().map_err(DriverError::Parse)?;
+        if let Err(early) = check_early_errors(&script) {
+            return Err(DriverError::Diagnostic(
+                early.into_iter().map(|e| e.to_diagnostic()).collect(),
+            ));
+        }
+        Ok(script)
     }
 
     pub fn hir(source: &str) -> Result<String, DriverError> {
