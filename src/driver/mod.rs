@@ -1,11 +1,12 @@
 use crate::backend::{translate_to_lamina_ir, run_via_jit};
 use crate::diagnostics::Diagnostic;
-use crate::frontend::Lexer;
+use crate::frontend::{Lexer, Parser};
 
 #[derive(Debug)]
 pub enum DriverError {
     Backend(crate::backend::BackendError),
     Diagnostic(Vec<Diagnostic>),
+    Parse(crate::frontend::ParseError),
 }
 
 impl std::fmt::Display for DriverError {
@@ -18,6 +19,7 @@ impl std::fmt::Display for DriverError {
                 }
                 Ok(())
             }
+            DriverError::Parse(e) => write!(f, "{}", e),
         }
     }
 }
@@ -30,6 +32,12 @@ impl From<crate::backend::BackendError> for DriverError {
     }
 }
 
+impl From<crate::frontend::ParseError> for DriverError {
+    fn from(e: crate::frontend::ParseError) -> Self {
+        DriverError::Parse(e)
+    }
+}
+
 pub struct Driver;
 
 impl Driver {
@@ -38,12 +46,9 @@ impl Driver {
         lexer.tokenize()
     }
 
-    pub fn ast(_source: &str) -> Result<(), DriverError> {
-        Err(DriverError::Diagnostic(vec![Diagnostic::error(
-            "JSINA-AST-001",
-            "AST output not yet implemented",
-            None,
-        )]))
+    pub fn ast(source: &str) -> Result<crate::frontend::Script, DriverError> {
+        let mut parser = Parser::new(source);
+        parser.parse().map_err(DriverError::Parse)
     }
 
     pub fn hir(source: &str) -> Result<String, DriverError> {
