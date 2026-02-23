@@ -32,6 +32,7 @@ pub enum HirOp {
     LoadConst { value: HirConst, span: Span },
     LoadLocal { id: u32, span: Span },
     StoreLocal { id: u32, span: Span },
+    LoadThis { span: Span },
     Add { span: Span },
     Sub { span: Span },
     Mul { span: Span },

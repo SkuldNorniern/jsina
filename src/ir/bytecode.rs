@@ -32,6 +32,7 @@ pub enum Opcode {
     Swap = 0x07,
     LoadLocal = 0x03,
     StoreLocal = 0x04,
+    LoadThis = 0x05,
     Add = 0x10,
     Sub = 0x11,
     Mul = 0x12,

@@ -722,6 +722,11 @@ impl Parser {
                 self.advance();
                 (Expression::Literal(LiteralExpr { id: self.next_id(), span, value: LiteralValue::Null }), span)
             }
+            TokenType::This => {
+                let span = token.span;
+                self.advance();
+                (Expression::This(ThisExpr { id: self.next_id(), span }), span)
+            }
             TokenType::Identifier => {
                 let span = token.span;
                 let name = token.lexeme.clone();
@@ -1050,6 +1055,19 @@ mod tests {
     fn parse_identifier() {
         let script = parse_ok("function f() { return x; }");
         assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_this() {
+        let script = parse_ok("function main() { return this; }");
+        assert_eq!(script.body.len(), 1);
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::Return(r) = &b.body[0] {
+                    assert!(matches!(r.argument.as_ref().map(|e| e.as_ref()), Some(Expression::This(_))));
+                }
+            }
+        }
     }
 
     #[test]

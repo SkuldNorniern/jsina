@@ -30,6 +30,7 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 pc += 1;
                 format!("  {:04}  StoreLocal  {}", line_start, slot)
             }
+            x if x == Opcode::LoadThis as u8 => format!("  {:04}  LoadThis", line_start),
             x if x == Opcode::Add as u8 => format!("  {:04}  Add", line_start),
             x if x == Opcode::Sub as u8 => format!("  {:04}  Sub", line_start),
             x if x == Opcode::Mul as u8 => format!("  {:04}  Mul", line_start),

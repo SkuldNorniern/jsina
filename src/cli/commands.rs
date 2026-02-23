@@ -107,6 +107,7 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
 fn format_expr(expr: &Expression) -> String {
     match expr {
         Expression::Literal(e) => format!("{:?}", e.value),
+        Expression::This(_) => "this".to_string(),
         Expression::Identifier(e) => e.name.clone(),
         Expression::Binary(e) => format!("({} {:?} {})", format_expr(&e.left), e.op, format_expr(&e.right)),
         Expression::Unary(e) => format!("({:?} {})", e.op, format_expr(&e.argument)),

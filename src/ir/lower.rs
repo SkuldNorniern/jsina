@@ -630,6 +630,9 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                 span: e.span,
             });
         }
+        Expression::This(e) => {
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadThis { span: e.span });
+        }
         Expression::Identifier(e) => {
             let slot = locals.get(&e.name).ok_or_else(|| {
                 LowerError::Unsupported(format!("undefined variable '{}'", e.name), Some(e.span))
@@ -1089,6 +1092,15 @@ mod tests {
     use crate::frontend::Parser;
     use crate::ir::hir_to_bytecode;
     use crate::vm::interpret;
+
+    #[test]
+    fn lower_this() {
+        let result = crate::driver::Driver::run(
+            "function main() { return typeof this; }",
+        )
+        .expect("run");
+        assert_eq!(result, 0, "typeof undefined is 'undefined' string, to_i64=0");
+    }
 
     #[test]
     fn lower_simple_return() {

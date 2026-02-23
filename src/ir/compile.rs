@@ -14,6 +14,7 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
             HirOp::LoadConst { .. } => 2,
             HirOp::Pop { .. } | HirOp::Dup { .. } | HirOp::Swap { .. } => 1,
             HirOp::LoadLocal { .. } | HirOp::StoreLocal { .. } => 2,
+            HirOp::LoadThis { .. } => 1,
             HirOp::Add { .. } | HirOp::Sub { .. } | HirOp::Mul { .. } | HirOp::Div { .. } | HirOp::Mod { .. } | HirOp::Pow { .. }
             | HirOp::Lt { .. } | HirOp::Lte { .. } | HirOp::Gt { .. } | HirOp::Gte { .. } | HirOp::StrictEq { .. } | HirOp::StrictNotEq { .. } | HirOp::Not { .. } | HirOp::Typeof { .. } => 1,
             HirOp::NewObject { .. } | HirOp::NewArray { .. } => 1,
@@ -73,6 +74,9 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                     let slot = (*id).min(255) as u8;
                     code.push(Opcode::StoreLocal as u8);
                     code.push(slot);
+                }
+                HirOp::LoadThis { .. } => {
+                    code.push(Opcode::LoadThis as u8);
                 }
                 HirOp::Add { .. } => code.push(Opcode::Add as u8),
                 HirOp::Sub { .. } => code.push(Opcode::Sub as u8),

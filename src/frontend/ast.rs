@@ -148,6 +148,7 @@ pub struct FunctionDeclStmt {
 #[derive(Debug, Clone)]
 pub enum Expression {
     Literal(LiteralExpr),
+    This(ThisExpr),
     Identifier(IdentifierExpr),
     Binary(BinaryExpr),
     Unary(UnaryExpr),
@@ -185,6 +186,12 @@ pub struct MemberExpr {
 pub enum MemberProperty {
     Identifier(String),
     Expression(Box<Expression>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ThisExpr {
+    pub id: NodeId,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -313,6 +320,7 @@ impl Expression {
     pub fn span(&self) -> Span {
         match self {
             Expression::Literal(e) => e.span,
+            Expression::This(e) => e.span,
             Expression::Identifier(e) => e.span,
             Expression::Binary(e) => e.span,
             Expression::Unary(e) => e.span,

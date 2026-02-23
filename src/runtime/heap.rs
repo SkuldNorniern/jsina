@@ -1,9 +1,15 @@
 use super::Value;
 use std::collections::HashMap;
 
+#[derive(Debug)]
+struct HeapObject {
+    props: HashMap<String, Value>,
+    prototype: Option<usize>,
+}
+
 #[derive(Debug, Default)]
 pub struct Heap {
-    objects: Vec<HashMap<String, Value>>,
+    objects: Vec<HeapObject>,
     arrays: Vec<Vec<Value>>,
 }
 
@@ -13,8 +19,15 @@ impl Heap {
     }
 
     pub fn alloc_object(&mut self) -> usize {
+        self.alloc_object_with_prototype(None)
+    }
+
+    pub fn alloc_object_with_prototype(&mut self, prototype: Option<usize>) -> usize {
         let id = self.objects.len();
-        self.objects.push(HashMap::new());
+        self.objects.push(HeapObject {
+            props: HashMap::new(),
+            prototype,
+        });
         id
     }
 
@@ -25,10 +38,23 @@ impl Heap {
     }
 
     pub fn get_prop(&self, obj_id: usize, key: &str) -> Value {
-        if let Some(props) = self.objects.get(obj_id) {
-            props.get(key).cloned().unwrap_or(Value::Undefined)
-        } else {
-            Value::Undefined
+        let mut current = Some(obj_id);
+        while let Some(id) = current {
+            if let Some(obj) = self.objects.get(id) {
+                if let Some(v) = obj.props.get(key) {
+                    return v.clone();
+                }
+                current = obj.prototype;
+            } else {
+                break;
+            }
+        }
+        Value::Undefined
+    }
+
+    pub fn set_prototype(&mut self, obj_id: usize, prototype: Option<usize>) {
+        if let Some(obj) = self.objects.get_mut(obj_id) {
+            obj.prototype = prototype;
         }
     }
 
@@ -45,8 +71,8 @@ impl Heap {
     }
 
     pub fn set_prop(&mut self, obj_id: usize, key: &str, value: Value) {
-        if let Some(props) = self.objects.get_mut(obj_id) {
-            props.insert(key.to_string(), value);
+        if let Some(obj) = self.objects.get_mut(obj_id) {
+            obj.props.insert(key.to_string(), value);
         }
     }
 
@@ -95,7 +121,7 @@ impl Heap {
     pub fn object_keys(&self, obj_id: usize) -> Vec<String> {
         self.objects
             .get(obj_id)
-            .map(|m| m.keys().cloned().collect())
+            .map(|o| o.props.keys().cloned().collect())
             .unwrap_or_default()
     }
 
@@ -116,5 +142,16 @@ mod tests {
         assert_eq!(heap.get_prop(id, "x").to_i64(), 0);
         heap.set_prop(id, "x", Value::Int(42));
         assert_eq!(heap.get_prop(id, "x").to_i64(), 42);
+    }
+
+    #[test]
+    fn heap_prototype_chain() {
+        let mut heap = Heap::new();
+        let proto = heap.alloc_object();
+        heap.set_prop(proto, "y", Value::Int(10));
+        let obj = heap.alloc_object_with_prototype(Some(proto));
+        heap.set_prop(obj, "x", Value::Int(1));
+        assert_eq!(heap.get_prop(obj, "x").to_i64(), 1);
+        assert_eq!(heap.get_prop(obj, "y").to_i64(), 10);
     }
 }

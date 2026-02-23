@@ -46,6 +46,7 @@ struct Frame {
     chunk_index: usize,
     pc: usize,
     locals: Vec<Value>,
+    this_value: Value,
     rethrow_after_finally: bool,
 }
 
@@ -60,6 +61,7 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
         chunk_index: program.entry,
         pc: 0,
         locals: (0..entry_chunk.num_locals).map(|_| Value::Undefined).collect(),
+        this_value: Value::Undefined,
         rethrow_after_finally: false,
     }];
 
@@ -115,6 +117,9 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     locals[slot] = val;
                 }
             }
+            x if x == Opcode::LoadThis as u8 => {
+                stack.push(frame.this_value.clone());
+            }
             x if x == Opcode::Return as u8 => {
                 let val = stack.pop().unwrap_or(Value::Undefined);
                 frames.pop();
@@ -167,6 +172,7 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     chunk_index: func_idx,
                     pc: 0,
                     locals: callee_locals,
+                    this_value: Value::Undefined,
                     rethrow_after_finally: false,
                 });
             }
