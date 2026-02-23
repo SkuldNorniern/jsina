@@ -85,6 +85,7 @@ impl Lexer {
                 "import" => TokenType::Import,
                 "in" => TokenType::In,
                 "instanceof" => TokenType::Instanceof,
+                "let" => TokenType::Let,
                 "new" => TokenType::New,
                 "return" => TokenType::Return,
                 "super" => TokenType::Super,
