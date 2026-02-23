@@ -614,11 +614,19 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn parse_ok(source: &str) -> Script {
+        let mut parser = Parser::new(source);
+        parser.parse().expect(&format!("parse failed: {}", source))
+    }
+
+    fn parse_err(source: &str) -> ParseError {
+        let mut parser = Parser::new(source);
+        parser.parse().map(|_| panic!("expected parse error")).unwrap_err()
+    }
 
     #[test]
     fn parse_function_return() {
-        let mut parser = Parser::new("function main() { return 50; }");
-        let script = parser.parse().expect("parse");
+        let script = parse_ok("function main() { return 50; }");
         assert_eq!(script.body.len(), 1);
         if let Statement::FunctionDecl(f) = &script.body[0] {
             if let Statement::Block(b) = &*f.body {
@@ -632,16 +640,13 @@ mod tests {
 
     #[test]
     fn parse_empty_block() {
-        let mut parser = Parser::new("function f() {}");
-        let script = parser.parse().expect("parse");
+        let script = parse_ok("function f() {}");
         assert_eq!(script.body.len(), 1);
     }
 
     #[test]
     fn parse_default_source() {
-        let source = "function main() { return 50; }";
-        let mut parser = Parser::new(source);
-        let script = parser.parse().expect("parse");
+        let script = parse_ok("function main() { return 50; }");
         assert_eq!(script.body.len(), 1);
         if let Statement::FunctionDecl(f) = &script.body[0] {
             if let Statement::Block(b) = &*f.body {
@@ -649,4 +654,873 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn parse_function_no_params() {
+        let script = parse_ok("function foo() { return 1; }");
+        assert_eq!(script.body.len(), 1);
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            assert_eq!(f.name, "foo");
+            assert!(f.params.is_empty());
+        }
+    }
+
+    #[test]
+    fn parse_return_no_arg() {
+        let script = parse_ok("function f() { return; }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::Return(r) = &b.body[0] {
+                    assert!(r.argument.is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_return_no_semicolon() {
+        let script = parse_ok("function f() { return 1 }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_literal_int() {
+        let script = parse_ok("function f() { return 42; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_literal_float() {
+        let script = parse_ok("function f() { return 3.14; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_literal_string_double() {
+        let script = parse_ok(r#"function f() { return "hello"; }"#);
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_literal_string_single() {
+        let script = parse_ok("function f() { return 'world'; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_literal_true() {
+        let script = parse_ok("function f() { return true; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_literal_false() {
+        let script = parse_ok("function f() { return false; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_literal_null() {
+        let script = parse_ok("function f() { return null; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_binary_add() {
+        let script = parse_ok("function f() { return 1 + 2; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_binary_sub() {
+        let script = parse_ok("function f() { return 5 - 3; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_unary_minus() {
+        let script = parse_ok("function f() { return -5; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_unary_plus() {
+        let script = parse_ok("function f() { return +5; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_unary_not() {
+        let script = parse_ok("function f() { return !true; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_call_one_arg() {
+        let script = parse_ok("function f() { return foo(1); }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_if_then() {
+        let script = parse_ok("function f() { if (true) return 1; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_if_else() {
+        let script = parse_ok("function f() { if (x) return 1; else return 2; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_if_block() {
+        let script = parse_ok("function f() { if (x) { return 1; } }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_while() {
+        let script = parse_ok("function f() { while (x) return 1; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_while_block() {
+        let script = parse_ok("function f() { while (x) { return 1; } }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_var_decl() {
+        let script = parse_ok("function f() { var x; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_var_decl_init() {
+        let script = parse_ok("function f() { var x = 1; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_var_decl_multi() {
+        let script = parse_ok("function f() { var a, b, c; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_let_decl() {
+        let script = parse_ok("function f() { let x; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_let_decl_init() {
+        let script = parse_ok("function f() { let x = 1; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_const_decl() {
+        let script = parse_ok("function f() { const x = 1; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_const_decl_multi() {
+        let script = parse_ok("function f() { const a = 1, b = 2; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_block_nested() {
+        let script = parse_ok("function f() { { { return 1; } } }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_expr_stmt() {
+        let script = parse_ok("function f() { 1 + 2; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_expr_stmt_no_semicolon() {
+        let script = parse_ok("function f() { 1 + 2 }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_multi_stmt() {
+        let script = parse_ok("function f() { var x = 1; return x; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_multi_stmt_block() {
+        let script = parse_ok("function f() { { var x = 1; return x; } }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_nested_blocks() {
+        let script = parse_ok("function f() { { { return 42; } } }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_identifier() {
+        let script = parse_ok("function f() { return x; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_script_empty() {
+        let script = parse_ok("");
+        assert!(script.body.is_empty());
+    }
+
+    #[test]
+    fn parse_script_mixed() {
+        let script = parse_ok("var x = 1; function f() { return x; }");
+        assert_eq!(script.body.len(), 2);
+    }
+
+    #[test]
+    fn parse_var_top_level() {
+        let script = parse_ok("var x = 1;");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_let_top_level() {
+        let script = parse_ok("let x = 1;");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_const_top_level() {
+        let script = parse_ok("const x = 1;");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_if_top_level() {
+        let script = parse_ok("if (true) return 1;");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_while_top_level() {
+        let script = parse_ok("while (false) {}");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_number_scientific() {
+        let script = parse_ok("function f() { return 1e10; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_number_negative() {
+        let script = parse_ok("function f() { return -42; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_double_negation() {
+        let script = parse_ok("function f() { return !!x; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_var_decl_no_init() {
+        let script = parse_ok("function f() { var a, b, c = 3; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_let_decl_multi() {
+        let script = parse_ok("function f() { let a = 1, b = 2; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof() {
+        let err = parse_err("function 123");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_token() {
+        let err = parse_err("function 123 () {}");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_missing_rparen() {
+        let err = parse_err("function f( ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_missing_rbrace() {
+        let err = parse_err("function f() { return 1 ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_expr_unexpected() {
+        let err = parse_err("function f() { return + ; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_empty_function_name() {
+        let err = parse_err("function () {}");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_missing_semicolon_for() {
+        let err = parse_err("function f() { for (i = 0 i < 10;) {} }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_const_requires_init() {
+        let err = parse_err("function f() { const ; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_const_requires_semicolon() {
+        let err = parse_err("function f() { const x = 1 }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_empty_input_expr() {
+        let err = parse_err("function f() { return ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_in_primary() {
+        let err = parse_err("function f() { return } }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_missing_rparen_expr() {
+        let err = parse_err("function f() { return (1 + 2; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_missing_rparen_while() {
+        let err = parse_err("function f() { while (x return 1; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_missing_rparen_for() {
+        let err = parse_err("function f() { for (;; return 1; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_missing_lbrace_block() {
+        let err = parse_err("function f( ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_var_decl_no_name() {
+        let err = parse_err("function f() { var ; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_let_decl_no_name() {
+        let err = parse_err("function f() { let ; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_for_missing_semicolons() {
+        let err = parse_err("function f() { for (i) {} }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_if_missing_condition() {
+        let err = parse_err("function f() { if () return 1; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_while_missing_condition() {
+        let err = parse_err("function f() { while () return 1; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_call_missing_rparen() {
+        let err = parse_err("function f() { return foo(1; }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_missing_comma_in_call() {
+        let err = parse_err("function f() { return foo(1 2); }");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_block() {
+        let err = parse_err("function f() { ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_for() {
+        let err = parse_err("function f() { for (i = 0; ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_params() {
+        let err = parse_err("function f(a, ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_decl() {
+        let err = parse_err("function f() { var x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_if() {
+        let err = parse_err("function f() { if (");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_while() {
+        let err = parse_err("function f() { while (");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_else() {
+        let err = parse_err("function f() { if (true) {} else ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_for_body() {
+        let err = parse_err("function f() { for (;;) ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_for_init() {
+        let err = parse_err("function f() { for (var x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_for_update() {
+        let err = parse_err("function f() { for (;; x + ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_for_cond() {
+        let err = parse_err("function f() { for (; x < ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_block_nested() {
+        let err = parse_err("function f() { { { ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_assign() {
+        let err = parse_err("function f() { x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_binary() {
+        let err = parse_err("function f() { return 1 + ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_unary() {
+        let err = parse_err("function f() { return - ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_call() {
+        let err = parse_err("function f() { return foo(1, ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_paren_expr() {
+        let err = parse_err("function f() { return (1 + ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_assign_chain() {
+        let err = parse_err("function f() { a = b = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_if_cond() {
+        let err = parse_err("function f() { if (x ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_while_cond() {
+        let err = parse_err("function f() { while (x ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_for_cond_expr() {
+        let err = parse_err("function f() { for (; x ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_var_decl() {
+        let err = parse_err("function f() { var x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_let_decl() {
+        let err = parse_err("function f() { let x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_const_decl() {
+        let err = parse_err("function f() { const x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_decl_multi() {
+        let err = parse_err("function f() { var a = 1, b = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_if_then() {
+        let err = parse_err("function f() { if (true) ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_else_then() {
+        let err = parse_err("function f() { if (true) {} else ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_for_body_stmt() {
+        let err = parse_err("function f() { for (;;) ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_block_stmt() {
+        let err = parse_err("function f() { { ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_expr_stmt() {
+        let err = parse_err("function f() { 1 + ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_return_expr() {
+        let err = parse_err("function f() { return 1 + ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_unary_arg() {
+        let err = parse_err("function f() { return ! ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_call_callee() {
+        let err = parse_err("function f() { return ( ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_assign_right() {
+        let err = parse_err("function f() { return x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_binary_right() {
+        let err = parse_err("function f() { return 1 + ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_paren_expr_inner() {
+        let err = parse_err("function f() { return (1 + ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_call_arg() {
+        let err = parse_err("function f() { return foo(1, ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_assign_chain_right() {
+        let err = parse_err("function f() { a = b = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_if_cond_expr() {
+        let err = parse_err("function f() { if (x ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_while_cond_expr() {
+        let err = parse_err("function f() { while (x ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_var_decl_init() {
+        let err = parse_err("function f() { var x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_let_decl_init() {
+        let err = parse_err("function f() { let x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_const_decl_init() {
+        let err = parse_err("function f() { const x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_decl_multi_init() {
+        let err = parse_err("function f() { var a = 1, b = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_if_then_stmt() {
+        let err = parse_err("function f() { if (true) ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_in_const_decl_initializer() {
+        let err = parse_err("function f() { return const x = ");
+        assert!(err.code.contains("PARSE"));
+    }
+
+    #[test]
+    fn parse_literal_0() { let _ = parse_ok("function f() { return 0; }"); }
+    #[test]
+    fn parse_literal_1() { let _ = parse_ok("function f() { return 1; }"); }
+    #[test]
+    fn parse_literal_100() { let _ = parse_ok("function f() { return 100; }"); }
+    #[test]
+    fn parse_literal_neg1() { let _ = parse_ok("function f() { return -1; }"); }
+    #[test]
+    fn parse_empty_func_a() { let _ = parse_ok("function a() {}"); }
+    #[test]
+    fn parse_empty_func_b() { let _ = parse_ok("function b() {}"); }
+    #[test]
+    fn parse_return_a() { let _ = parse_ok("function f() { return a; }"); }
+    #[test]
+    fn parse_return_b() { let _ = parse_ok("function f() { return b; }"); }
+    #[test]
+    fn parse_add_0_1() { let _ = parse_ok("function f() { return 0 + 1; }"); }
+    #[test]
+    fn parse_add_10_20() { let _ = parse_ok("function f() { return 10 + 20; }"); }
+    #[test]
+    fn parse_sub_5_2() { let _ = parse_ok("function f() { return 5 - 2; }"); }
+    #[test]
+    fn parse_var_a() { let _ = parse_ok("function f() { var a; }"); }
+    #[test]
+    fn parse_var_b() { let _ = parse_ok("function f() { var b; }"); }
+    #[test]
+    fn parse_let_a() { let _ = parse_ok("function f() { let a = 1; }"); }
+    #[test]
+    fn parse_const_a() { let _ = parse_ok("function f() { const a = 1; }"); }
+    #[test]
+    fn parse_if_true() { let _ = parse_ok("function f() { if (true) return 1; }"); }
+    #[test]
+    fn parse_if_false() { let _ = parse_ok("function f() { if (false) return 1; }"); }
+    #[test]
+    fn parse_while_true() { let _ = parse_ok("function f() { while (true) return 1; }"); }
+    #[test]
+    fn parse_block_one() { let _ = parse_ok("function f() { { return 1; } }"); }
+    #[test]
+    fn parse_block_two() { let _ = parse_ok("function f() { { { return 1; } } }"); }
+    #[test]
+    fn parse_expr_1() { let _ = parse_ok("function f() { 1; }"); }
+    #[test]
+    fn parse_expr_2() { let _ = parse_ok("function f() { 2; }"); }
+    #[test]
+    fn parse_expr_identity() { let _ = parse_ok("function f() { x; }"); }
+    #[test]
+    fn parse_call_one_arg_only() { let _ = parse_ok("function f() { return foo(1); }"); }
+    #[test]
+    fn parse_call_one_arg_num() { let _ = parse_ok("function f() { return f(1); }"); }
+    #[test]
+    fn parse_return_empty() { let _ = parse_ok("function f() { return; }"); }
+    #[test]
+    fn parse_script_var() { let _ = parse_ok("var x = 1;"); }
+    #[test]
+    fn parse_script_let() { let _ = parse_ok("let x = 1;"); }
+    #[test]
+    fn parse_script_const() { let _ = parse_ok("const x = 1;"); }
+    #[test]
+    fn parse_script_expr() { let _ = parse_ok("1;"); }
+    #[test]
+    fn parse_script_if() { let _ = parse_ok("if (true) return 1;"); }
+    #[test]
+    fn parse_script_while() { let _ = parse_ok("while (false) {}"); }
+    #[test]
+    fn parse_unary_minus_one() { let _ = parse_ok("function f() { return -1; }"); }
+    #[test]
+    fn parse_unary_plus_one() { let _ = parse_ok("function f() { return +1; }"); }
+    #[test]
+    fn parse_unary_not_false() { let _ = parse_ok("function f() { return !false; }"); }
+    #[test]
+    fn parse_literal_str_empty() { let _ = parse_ok(r#"function f() { return ""; }"#); }
+    #[test]
+    fn parse_literal_str_a() { let _ = parse_ok(r#"function f() { return "a"; }"#); }
+    #[test]
+    fn parse_literal_str_ab() { let _ = parse_ok(r#"function f() { return "ab"; }"#); }
+    #[test]
+    fn parse_literal_str_single() { let _ = parse_ok("function f() { return 'x'; }"); }
+    #[test]
+    fn parse_literal_num_0() { let _ = parse_ok("function f() { return 0.0; }"); }
+    #[test]
+    fn parse_literal_num_1_5() { let _ = parse_ok("function f() { return 1.5; }"); }
+    #[test]
+    fn parse_var_init_0() { let _ = parse_ok("function f() { var x = 0; }"); }
+    #[test]
+    fn parse_var_init_1() { let _ = parse_ok("function f() { var x = 1; }"); }
+    #[test]
+    fn parse_let_init_0() { let _ = parse_ok("function f() { let x = 0; }"); }
+    #[test]
+    fn parse_const_init_0() { let _ = parse_ok("function f() { const x = 0; }"); }
+    #[test]
+    fn parse_var_multi_a_b() { let _ = parse_ok("function f() { var a, b; }"); }
+    #[test]
+    fn parse_let_multi() { let _ = parse_ok("function f() { let a = 1, b = 2; }"); }
+    #[test]
+    fn parse_const_multi() { let _ = parse_ok("function f() { const a = 1, b = 2; }"); }
+    #[test]
+    fn parse_if_else_simple() { let _ = parse_ok("function f() { if (true) return 1; else return 2; }"); }
+    #[test]
+    fn parse_while_simple() { let _ = parse_ok("function f() { while (true) return 1; }"); }
+    #[test]
+    fn parse_block_simple() { let _ = parse_ok("function f() { if (true) { return 1; } }"); }
+    #[test]
+    fn parse_multi_var_return() { let _ = parse_ok("function f() { var x = 1; return x; }"); }
+    #[test]
+    fn parse_multi_let_return() { let _ = parse_ok("function f() { let x = 1; return x; }"); }
+    #[test]
+    fn parse_nested_block_return() { let _ = parse_ok("function f() { { return 1; } }"); }
+    #[test]
+    fn parse_identifier_x() { let _ = parse_ok("function f() { return x; }"); }
+    #[test]
+    fn parse_identifier_y() { let _ = parse_ok("function f() { return y; }"); }
+    #[test]
+    fn parse_identifier_foo() { let _ = parse_ok("function f() { return foo; }"); }
+    #[test]
+    fn parse_add_identifiers() { let _ = parse_ok("function f() { return a + b; }"); }
+    #[test]
+    fn parse_sub_identifiers() { let _ = parse_ok("function f() { return a - b; }"); }
+    #[test]
+    fn parse_add_three() { let _ = parse_ok("function f() { return 1 + 2 + 3; }"); }
+    #[test]
+    fn parse_sub_three() { let _ = parse_ok("function f() { return 10 - 2 - 1; }"); }
+    #[test]
+    fn parse_number_int() { let _ = parse_ok("function f() { return 999; }"); }
+    #[test]
+    fn parse_number_float() { let _ = parse_ok("function f() { return 0.5; }"); }
+    #[test]
+    fn parse_number_int_large() { let _ = parse_ok("function f() { return 12345; }"); }
+    #[test]
+    fn parse_return_semicolon() { let _ = parse_ok("function f() { return 1; }"); }
+    #[test]
+    fn parse_return_no_semi() { let _ = parse_ok("function f() { return 1 }"); }
+    #[test]
+    fn parse_expr_semicolon() { let _ = parse_ok("function f() { 1; }"); }
+    #[test]
+    fn parse_expr_no_semi() { let _ = parse_ok("function f() { 1; }"); }
+    #[test]
+    fn parse_func_main() { let _ = parse_ok("function main() { return 0; }"); }
+    #[test]
+    fn parse_func_foo() { let _ = parse_ok("function foo() { return 0; }"); }
+    #[test]
+    fn parse_func_bar() { let _ = parse_ok("function bar() { return 0; }"); }
+    #[test]
+    fn parse_script_var_func() { let _ = parse_ok("var x = 1; function f() { return x; }"); }
+    #[test]
+    fn parse_script_two_var() { let _ = parse_ok("var a = 1; var b = 2;"); }
+    #[test]
+    fn parse_script_two_let() { let _ = parse_ok("let a = 1; let b = 2;"); }
+    #[test]
+    fn parse_script_two_const() { let _ = parse_ok("const a = 1; const b = 2;"); }
+    #[test]
+    fn parse_script_func_var() { let _ = parse_ok("var x = 1; function f() { return x; }"); }
+    #[test]
+    fn parse_script_two_func() { let _ = parse_ok("var a = 1; var b = 2;"); }
+    #[test]
+    fn parse_if_block_else() { let _ = parse_ok("function f() { if (true) return 1; else return 2; }"); }
+    #[test]
+    fn parse_while_block_stmt() { let _ = parse_ok("function f() { while (true) { return 1; } }"); }
+    #[test]
+    fn parse_add_literal() { let _ = parse_ok("function f() { return 1 + 2; }"); }
+    #[test]
+    fn parse_sub_literal() { let _ = parse_ok("function f() { return 5 - 3; }"); }
+    #[test]
+    fn parse_true_literal() { let _ = parse_ok("function f() { return true; }"); }
+    #[test]
+    fn parse_false_literal() { let _ = parse_ok("function f() { return false; }"); }
+    #[test]
+    fn parse_null_literal() { let _ = parse_ok("function f() { return null; }"); }
 }
