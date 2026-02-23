@@ -43,6 +43,7 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             x if x == Opcode::StrictEq as u8 => format!("  {:04}  StrictEq", line_start),
             x if x == Opcode::StrictNotEq as u8 => format!("  {:04}  StrictNotEq", line_start),
             x if x == Opcode::Not as u8 => format!("  {:04}  Not", line_start),
+            x if x == Opcode::Typeof as u8 => format!("  {:04}  Typeof", line_start),
             x if x == Opcode::NewObject as u8 => format!("  {:04}  NewObject", line_start),
             x if x == Opcode::NewArray as u8 => format!("  {:04}  NewArray", line_start),
             x if x == Opcode::GetProp as u8 => {

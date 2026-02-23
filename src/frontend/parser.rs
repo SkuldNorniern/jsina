@@ -544,6 +544,10 @@ impl Parser {
                     self.advance();
                     (UnaryOp::LogicalNot, t.span)
                 }
+                TokenType::Typeof => {
+                    self.advance();
+                    (UnaryOp::Typeof, t.span)
+                }
                 _ => {
                     self.end_recursion();
                     return self.parse_postfix();

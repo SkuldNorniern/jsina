@@ -210,6 +210,34 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         };
                         stack.push(result);
                     }
+                    5 => {
+                        let nums: Vec<f64> = args.iter().map(value_to_number).collect();
+                        let result = if nums.is_empty() {
+                            Value::Number(f64::INFINITY)
+                        } else {
+                            let m = nums.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                            if m.is_finite() && m.fract() == 0.0 && m >= i32::MIN as f64 && m <= i32::MAX as f64 {
+                                Value::Int(m as i32)
+                            } else {
+                                Value::Number(m)
+                            }
+                        };
+                        stack.push(result);
+                    }
+                    6 => {
+                        let nums: Vec<f64> = args.iter().map(value_to_number).collect();
+                        let result = if nums.is_empty() {
+                            Value::Number(f64::NEG_INFINITY)
+                        } else {
+                            let m = nums.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                            if m.is_finite() && m.fract() == 0.0 && m >= i32::MIN as f64 && m <= i32::MAX as f64 {
+                                Value::Int(m as i32)
+                            } else {
+                                Value::Number(m)
+                            }
+                        };
+                        stack.push(result);
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }
@@ -289,6 +317,18 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
             x if x == Opcode::Not as u8 => {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 stack.push(Value::Bool(!is_truthy(&val)));
+            }
+            x if x == Opcode::Typeof as u8 => {
+                let val = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let s = match &val {
+                    Value::Undefined => "undefined",
+                    Value::Null => "object",
+                    Value::Bool(_) => "boolean",
+                    Value::Int(_) | Value::Number(_) => "number",
+                    Value::String(_) => "string",
+                    Value::Object(_) | Value::Array(_) => "object",
+                };
+                stack.push(Value::String(s.to_string()));
             }
             x if x == Opcode::NewObject as u8 => {
                 let id = heap.alloc_object();
@@ -418,6 +458,18 @@ fn is_truthy(v: &Value) -> bool {
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
         Value::String(_) | Value::Object(_) | Value::Array(_) => true,
+    }
+}
+
+fn value_to_number(v: &Value) -> f64 {
+    match v {
+        Value::Int(n) => *n as f64,
+        Value::Number(n) => *n,
+        Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+        Value::Null => 0.0,
+        Value::Undefined => f64::NAN,
+        Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
+        Value::Object(_) | Value::Array(_) => f64::NAN,
     }
 }
 

@@ -36,6 +36,7 @@ pub enum HirOp {
     StrictEq { span: Span },
     StrictNotEq { span: Span },
     Not { span: Span },
+    Typeof { span: Span },
     NewObject { span: Span },
     NewArray { span: Span },
     GetProp { key: String, span: Span },
@@ -56,6 +57,8 @@ pub enum BuiltinId {
     ArrayPop = 2,
     MathFloor = 3,
     MathAbs = 4,
+    MathMin = 5,
+    MathMax = 6,
 }
 
 #[derive(Debug, Clone)]

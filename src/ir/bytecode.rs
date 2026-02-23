@@ -35,6 +35,7 @@ pub enum Opcode {
     StrictEq = 0x17,
     StrictNotEq = 0x1c,
     Not = 0x18,
+    Typeof = 0x1d,
     NewObject = 0x50,
     NewArray = 0x51,
     GetProp = 0x52,

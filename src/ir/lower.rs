@@ -687,6 +687,10 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                     compile_expression(&e.argument, ctx)?;
                     ctx.blocks[ctx.current_block].ops.push(HirOp::Not { span: e.span });
                 }
+                UnaryOp::Typeof => {
+                    compile_expression(&e.argument, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Typeof { span: e.span });
+                }
             }
         }
         Expression::Assign(e) => {
@@ -753,6 +757,24 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: crate::ir::hir::BuiltinId::MathAbs,
                             argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "min" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MathMin,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "max" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MathMax,
+                            argc: e.args.len() as u32,
                             span: e.span,
                         });
                     } else if prop == "push" {
@@ -1129,6 +1151,29 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn lower_typeof() {
+        let result = crate::driver::Driver::run(
+            "function main() { return (typeof 42 === \"number\") ? 1 : 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "typeof 42 should be \"number\"");
+    }
+
+    #[test]
+    fn lower_math_min_max() {
+        let result = crate::driver::Driver::run(
+            "function main() { return Math.min(3, 1, 2); }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Math.min(3,1,2) should be 1");
+        let result = crate::driver::Driver::run(
+            "function main() { return Math.max(3, 1, 2); }",
+        )
+        .expect("run");
+        assert_eq!(result, 3, "Math.max(3,1,2) should be 3");
     }
 
     #[test]

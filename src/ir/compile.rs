@@ -15,7 +15,7 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
             HirOp::Pop { .. } | HirOp::Dup { .. } | HirOp::Swap { .. } => 1,
             HirOp::LoadLocal { .. } | HirOp::StoreLocal { .. } => 2,
             HirOp::Add { .. } | HirOp::Sub { .. } | HirOp::Mul { .. } | HirOp::Div { .. } | HirOp::Mod { .. } | HirOp::Pow { .. }
-            | HirOp::Lt { .. } | HirOp::Lte { .. } | HirOp::Gt { .. } | HirOp::Gte { .. } | HirOp::StrictEq { .. } | HirOp::StrictNotEq { .. } | HirOp::Not { .. } => 1,
+            | HirOp::Lt { .. } | HirOp::Lte { .. } | HirOp::Gt { .. } | HirOp::Gte { .. } | HirOp::StrictEq { .. } | HirOp::StrictNotEq { .. } | HirOp::Not { .. } | HirOp::Typeof { .. } => 1,
             HirOp::NewObject { .. } | HirOp::NewArray { .. } => 1,
             HirOp::GetProp { .. } | HirOp::SetProp { .. } => 2,
             HirOp::GetPropDyn { .. } | HirOp::SetPropDyn { .. } => 1,
@@ -86,6 +86,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 HirOp::StrictEq { .. } => code.push(Opcode::StrictEq as u8),
                 HirOp::StrictNotEq { .. } => code.push(Opcode::StrictNotEq as u8),
                 HirOp::Not { .. } => code.push(Opcode::Not as u8),
+            HirOp::Typeof { .. } => code.push(Opcode::Typeof as u8),
                 HirOp::NewObject { .. } => code.push(Opcode::NewObject as u8),
                 HirOp::NewArray { .. } => code.push(Opcode::NewArray as u8),
                 HirOp::GetProp { key, .. } => {

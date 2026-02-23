@@ -235,6 +235,7 @@ pub enum UnaryOp {
     Minus,
     Plus,
     LogicalNot,
+    Typeof,
 }
 
 #[derive(Debug, Clone)]
