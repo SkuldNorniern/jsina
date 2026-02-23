@@ -44,7 +44,7 @@ USAGE:
 COMMANDS:
     run     Execute a JavaScript file (default)
     tokens  Dump tokens from source
-    ast     Dump AST (not implemented)
+    ast     Dump AST
     hir     Dump HIR / Lamina IR
     bc      Dump bytecode (not implemented)
     ir      Alias for hir - dump Lamina IR
@@ -68,7 +68,8 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             commands::tokens(&source);
         }
         "ast" => {
-            Driver::ast(&source)?;
+            let script = Driver::ast(&source)?;
+            commands::ast(&script);
         }
         "hir" | "ir" => {
             let ir = Driver::hir(&source)?;
