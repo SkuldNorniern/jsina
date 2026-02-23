@@ -25,7 +25,7 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
     size += match &block.terminator {
         HirTerminator::Return { .. } => 1,
         HirTerminator::Jump { .. } => 3,
-        HirTerminator::Branch { .. } => 2 + 3 + 3,
+        HirTerminator::Branch { .. } | HirTerminator::BranchNullish { .. } => 2 + 3 + 3,
     };
     size
 }
@@ -48,6 +48,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                     constants.push(match value {
                         HirConst::Int(n) => ConstEntry::Int(*n),
                         HirConst::Float(n) => ConstEntry::Float(*n),
+                        HirConst::Null => ConstEntry::Null,
                     });
                     code.push(Opcode::PushConst as u8);
                     code.push(idx);
@@ -135,6 +136,25 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 let rel_then = then_offset as i32 - pc_after_jump as i32 - 3;
                 code.push(Opcode::Jump as u8);
                 code.extend_from_slice(&(rel_then as i16).to_le_bytes());
+            }
+            HirTerminator::BranchNullish {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                let slot = (*cond).min(255) as u8;
+                code.push(Opcode::LoadLocal as u8);
+                code.push(slot);
+                code.push(Opcode::JumpIfNullish as u8);
+                let then_offset = block_offsets.get(*then_block as usize).copied().unwrap_or(0);
+                let pc_after = code.len() + 2;
+                let rel_then = then_offset as i32 - pc_after as i32;
+                code.extend_from_slice(&(rel_then as i16).to_le_bytes());
+                let else_offset = block_offsets.get(*else_block as usize).copied().unwrap_or(0);
+                let pc_after_jump = code.len();
+                let rel_else = else_offset as i32 - pc_after_jump as i32 - 3;
+                code.push(Opcode::Jump as u8);
+                code.extend_from_slice(&(rel_else as i16).to_le_bytes());
             }
         }
     }

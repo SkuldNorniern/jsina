@@ -218,6 +218,7 @@ pub enum BinaryOp {
     Gte,
     LogicalAnd,
     LogicalOr,
+    NullishCoalescing,
 }
 
 #[derive(Debug, Clone)]

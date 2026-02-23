@@ -10,6 +10,7 @@ pub enum ConstEntry {
     Int(i64),
     Float(f64),
     String(String),
+    Null,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +43,7 @@ pub enum Opcode {
     SetPropDyn = 0x55,
     Call = 0x40,
     JumpIfFalse = 0x30,
+    JumpIfNullish = 0x32,
     Jump = 0x31,
     Return = 0x20,
 }

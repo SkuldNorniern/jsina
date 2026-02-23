@@ -433,7 +433,8 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                 LiteralValue::Number(n) => HirConst::Float(*n),
                 LiteralValue::True => HirConst::Int(1),
                 LiteralValue::False => HirConst::Int(0),
-                LiteralValue::Null | LiteralValue::String(_) => {
+                LiteralValue::Null => HirConst::Null,
+                LiteralValue::String(_) => {
                     return Err(LowerError::Unsupported(
                         format!("literal {:?} not yet supported", e.value),
                         Some(e.span),
@@ -552,6 +553,52 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                         span: e.span,
                     });
                 }
+                BinaryOp::NullishCoalescing => {
+                    let result_slot = ctx.next_slot;
+                    ctx.next_slot += 1;
+                    compile_expression(&e.left, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                    let else_id = ctx.blocks.len() as HirBlockId;
+                    ctx.blocks.push(HirBlock {
+                        id: else_id,
+                        ops: Vec::new(),
+                        terminator: HirTerminator::Jump { target: 0 },
+                    });
+                    let right_id = ctx.blocks.len() as HirBlockId;
+                    ctx.blocks.push(HirBlock {
+                        id: right_id,
+                        ops: Vec::new(),
+                        terminator: HirTerminator::Jump { target: 0 },
+                    });
+                    let merge_id = ctx.blocks.len() as HirBlockId;
+                    ctx.blocks.push(HirBlock {
+                        id: merge_id,
+                        ops: Vec::new(),
+                        terminator: HirTerminator::Jump { target: 0 },
+                    });
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::BranchNullish {
+                        cond: result_slot,
+                        then_block: right_id,
+                        else_block: else_id,
+                    };
+                    ctx.current_block = right_id as usize;
+                    compile_expression(&e.right, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_id };
+                    ctx.current_block = else_id as usize;
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_id };
+                    ctx.current_block = merge_id as usize;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                }
                 _ => {
                     compile_expression(&e.left, ctx)?;
                     compile_expression(&e.right, ctx)?;
@@ -568,7 +615,8 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                         BinaryOp::Gte => ctx.blocks[ctx.current_block].ops.push(HirOp::Gte { span: e.span }),
                         BinaryOp::StrictEq => ctx.blocks[ctx.current_block].ops.push(HirOp::StrictEq { span: e.span }),
                         BinaryOp::StrictNotEq => ctx.blocks[ctx.current_block].ops.push(HirOp::StrictNotEq { span: e.span }),
-                        BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
+                        BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::LogicalAnd | BinaryOp::LogicalOr
+                        | BinaryOp::NullishCoalescing => {
                             return Err(LowerError::Unsupported(
                                 format!("binary op {:?} not yet supported", e.op),
                                 Some(e.span),
@@ -971,5 +1019,26 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "1 || 99 should short-circuit to 1");
+    }
+
+    #[test]
+    fn lower_nullish_coalescing() {
+        let result = crate::driver::Driver::run(
+            "function main() { return null ?? 42; }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "null ?? 42 should return 42");
+
+        let result = crate::driver::Driver::run(
+            "function main() { return 0 ?? 99; }",
+        )
+        .expect("run");
+        assert_eq!(result, 0, "0 ?? 99 should return 0 (0 is not nullish)");
+
+        let result = crate::driver::Driver::run(
+            "function main() { let x; return x ?? 7; }",
+        )
+        .expect("run");
+        assert_eq!(result, 7, "undefined ?? 7 should return 7");
     }
 }

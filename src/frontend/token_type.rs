@@ -133,6 +133,7 @@ impl TokenType {
                 | TokenType::Throw | TokenType::Try | TokenType::Typeof
                 | TokenType::Var | TokenType::Void | TokenType::While
                 | TokenType::With | TokenType::Yield
+                | TokenType::Null | TokenType::True | TokenType::False
         )
     }
 

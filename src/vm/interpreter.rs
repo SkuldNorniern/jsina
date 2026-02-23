@@ -299,6 +299,15 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     *pc = (*pc as isize + offset) as usize;
                 }
             }
+            x if x == Opcode::JumpIfNullish as u8 => {
+                let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
+                *pc += 2;
+                let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
+                let val = stack.pop().ok_or(VmError::StackUnderflow)?;
+                if is_nullish(&val) {
+                    *pc = (*pc as isize + offset) as usize;
+                }
+            }
             x if x == Opcode::Jump as u8 => {
                 let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
                 *pc += 2;
@@ -321,6 +330,10 @@ fn add_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x + *y as f64)),
         _ => Ok(Value::Number(f64::NAN)),
     }
+}
+
+fn is_nullish(v: &Value) -> bool {
+    matches!(v, Value::Undefined | Value::Null)
 }
 
 fn is_truthy(v: &Value) -> bool {
@@ -474,6 +487,7 @@ impl ConstEntry {
             ConstEntry::Int(n) => Value::Int((*n).clamp(i32::MIN as i64, i32::MAX as i64) as i32),
             ConstEntry::Float(n) => Value::Number(*n),
             ConstEntry::String(s) => Value::String(s.clone()),
+            ConstEntry::Null => Value::Null,
         }
     }
 }

@@ -72,6 +72,13 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 pc += 2;
                 format!("  {:04}  JumpIfFalse  {}", line_start, offset)
             }
+            x if x == Opcode::JumpIfNullish as u8 => {
+                let offset = code.get(pc..pc + 2)
+                    .map(|b| i16::from_le_bytes([b[0], b[1]]) as i32)
+                    .unwrap_or(0);
+                pc += 2;
+                format!("  {:04}  JumpIfNullish  {}", line_start, offset)
+            }
             x if x == Opcode::Jump as u8 => {
                 let offset = code.get(pc..pc + 2)
                     .map(|b| i16::from_le_bytes([b[0], b[1]]) as i32)
@@ -94,6 +101,7 @@ fn format_const(c: &ConstEntry) -> String {
         ConstEntry::Int(n) => n.to_string(),
         ConstEntry::Float(n) => n.to_string(),
         ConstEntry::String(s) => format!("{:?}", s),
+        ConstEntry::Null => "null".to_string(),
     }
 }
 

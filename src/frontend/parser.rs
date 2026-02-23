@@ -32,6 +32,7 @@ fn binary_op_precedence(op: BinaryOp) -> u8 {
         BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::StrictEq | BinaryOp::StrictNotEq => 8,
         BinaryOp::LogicalAnd => 4,
         BinaryOp::LogicalOr => 3,
+        BinaryOp::NullishCoalescing => 2,
     }
 }
 
@@ -467,6 +468,7 @@ impl Parser {
                 Some(TokenType::GreaterEqual) => BinaryOp::Gte,
                 Some(TokenType::LogicalAnd) => BinaryOp::LogicalAnd,
                 Some(TokenType::LogicalOr) => BinaryOp::LogicalOr,
+                Some(TokenType::NullishCoalescing) => BinaryOp::NullishCoalescing,
                 Some(TokenType::Assign) => {
                     self.end_recursion();
                     let left_span = left.span();
