@@ -1,12 +1,16 @@
-use crate::backend::{translate_to_lamina_ir, run_via_jit};
+use crate::backend::translate_to_lamina_ir;
 use crate::diagnostics::Diagnostic;
 use crate::frontend::{Lexer, Parser};
+use crate::ir::{hir_to_bytecode, script_to_hir};
+use crate::vm::{interpret, Completion};
 
 #[derive(Debug)]
 pub enum DriverError {
     Backend(crate::backend::BackendError),
     Diagnostic(Vec<Diagnostic>),
     Parse(crate::frontend::ParseError),
+    Lower(crate::ir::LowerError),
+    Vm(crate::vm::interpreter::VmError),
 }
 
 impl std::fmt::Display for DriverError {
@@ -20,6 +24,8 @@ impl std::fmt::Display for DriverError {
                 Ok(())
             }
             DriverError::Parse(e) => write!(f, "{}", e),
+            DriverError::Lower(e) => write!(f, "{}", e),
+            DriverError::Vm(e) => write!(f, "{}", e),
         }
     }
 }
@@ -35,6 +41,18 @@ impl From<crate::backend::BackendError> for DriverError {
 impl From<crate::frontend::ParseError> for DriverError {
     fn from(e: crate::frontend::ParseError) -> Self {
         DriverError::Parse(e)
+    }
+}
+
+impl From<crate::ir::LowerError> for DriverError {
+    fn from(e: crate::ir::LowerError) -> Self {
+        DriverError::Lower(e)
+    }
+}
+
+impl From<crate::vm::interpreter::VmError> for DriverError {
+    fn from(e: crate::vm::interpreter::VmError) -> Self {
+        DriverError::Vm(e)
     }
 }
 
@@ -55,12 +73,20 @@ impl Driver {
         translate_to_lamina_ir(source).map_err(DriverError::Backend)
     }
 
-    pub fn bc(_source: &str) -> Result<(), DriverError> {
-        Err(DriverError::Diagnostic(vec![Diagnostic::error(
-            "JSINA-BC-001",
-            "Bytecode output not yet implemented",
-            None,
-        )]))
+    pub fn bc(source: &str) -> Result<String, DriverError> {
+        let script = Self::ast(source)?;
+        let funcs = script_to_hir(&script)?;
+        let main = funcs
+            .iter()
+            .find(|f| f.name.as_deref() == Some("main"))
+            .or(funcs.first())
+            .ok_or_else(|| DriverError::Diagnostic(vec![Diagnostic::error(
+                "JSINA-BC-001",
+                "no function to compile",
+                None,
+            )]))?;
+        let cf = hir_to_bytecode(main);
+        Ok(crate::ir::disassemble(&cf.chunk))
     }
 
     pub fn ir(source: &str) -> Result<String, DriverError> {
@@ -68,6 +94,29 @@ impl Driver {
     }
 
     pub fn run(source: &str) -> Result<i64, DriverError> {
-        run_via_jit(source).map_err(DriverError::Backend)
+        let script = Self::ast(source)?;
+        let funcs = script_to_hir(&script)?;
+        let main = funcs
+            .iter()
+            .find(|f| f.name.as_deref() == Some("main"))
+            .ok_or_else(|| DriverError::Diagnostic(vec![Diagnostic::error(
+                "JSINA-RUN-001",
+                "no main function found",
+                None,
+            )]))?;
+        let cf = hir_to_bytecode(main);
+        let completion = interpret(&cf.chunk)?;
+        let value = match completion {
+            Completion::Return(v) => v,
+            Completion::Normal(v) => v,
+            Completion::Throw(v) => {
+                return Err(DriverError::Diagnostic(vec![Diagnostic::error(
+                    "JSINA-RUN-002",
+                    format!("uncaught exception: {}", v),
+                    None,
+                )]));
+            }
+        };
+        Ok(value.to_i64())
     }
 }

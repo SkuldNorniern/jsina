@@ -5,3 +5,4 @@ pub mod driver;
 pub mod frontend;
 pub mod ir;
 pub mod runtime;
+pub mod vm;

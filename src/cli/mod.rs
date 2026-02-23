@@ -46,7 +46,7 @@ COMMANDS:
     tokens  Dump tokens from source
     ast     Dump AST
     hir     Dump HIR / Lamina IR
-    bc      Dump bytecode (not implemented)
+    bc      Dump bytecode
     ir      Alias for hir - dump Lamina IR
 
 EXAMPLES:
@@ -76,7 +76,8 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             println!("{}", ir);
         }
         "bc" => {
-            Driver::bc(&source)?;
+            let bc = Driver::bc(&source)?;
+            println!("{}", bc);
         }
         "help" | "-h" | "--help" => {
             print!("{}", HELP);
