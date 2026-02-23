@@ -546,6 +546,42 @@ fn compile_expression(
                 span: e.span,
             });
         }
+        Expression::ObjectLiteral(e) => {
+            ops.push(HirOp::NewObject { span: e.span });
+            for (key, value) in &e.properties {
+                compile_expression(value, ops, locals, func_index)?;
+                ops.push(HirOp::SetProp {
+                    key: key.clone(),
+                    span: e.span,
+                });
+            }
+        }
+        Expression::ArrayLiteral(e) => {
+            ops.push(HirOp::NewArray { span: e.span });
+            for (i, elem) in e.elements.iter().enumerate() {
+                compile_expression(elem, ops, locals, func_index)?;
+                ops.push(HirOp::SetProp {
+                    key: i.to_string(),
+                    span: e.span,
+                });
+            }
+        }
+        Expression::Member(e) => {
+            compile_expression(&e.object, ops, locals, func_index)?;
+            let key = match &e.property {
+                MemberProperty::Identifier(s) => s.clone(),
+                MemberProperty::Expression(_) => {
+                    return Err(LowerError::Unsupported(
+                        "computed property access obj[expr] not yet supported".to_string(),
+                        Some(e.span),
+                    ));
+                }
+            };
+            ops.push(HirOp::GetProp {
+                key,
+                span: e.span,
+            });
+        }
     }
     Ok(())
 }
@@ -684,6 +720,38 @@ mod tests {
             assert_eq!(v.to_i64(), 6);
         } else {
             panic!("expected Return(6), got {:?}", completion);
+        }
+    }
+
+    #[test]
+    fn lower_object_literal() {
+        let mut parser = Parser::new(
+            "function main() { let o = { x: 10, y: 20 }; return o.x + o.y; }",
+        );
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let cf = hir_to_bytecode(&funcs[0]);
+        let completion = interpret(&cf.chunk).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 30);
+        } else {
+            panic!("expected Return(30), got {:?}", completion);
+        }
+    }
+
+    #[test]
+    fn lower_array_literal() {
+        let mut parser = Parser::new(
+            "function main() { let a = [1, 2, 3]; return a.length; }",
+        );
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let cf = hir_to_bytecode(&funcs[0]);
+        let completion = interpret(&cf.chunk).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 3);
+        } else {
+            panic!("expected Return(3), got {:?}", completion);
         }
     }
 

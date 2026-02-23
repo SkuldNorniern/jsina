@@ -1,5 +1,5 @@
 use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
-use crate::runtime::Value;
+use crate::runtime::{Heap, Value};
 
 #[derive(Debug, Clone)]
 pub enum Completion {
@@ -48,6 +48,7 @@ struct Frame {
 }
 
 pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
+    let mut heap = Heap::new();
     let mut stack: Vec<Value> = Vec::new();
     let entry_chunk = program
         .chunks
@@ -182,6 +183,55 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 stack.push(Value::Bool(!is_truthy(&val)));
             }
+            x if x == Opcode::NewObject as u8 => {
+                let id = heap.alloc_object();
+                stack.push(Value::Object(id));
+            }
+            x if x == Opcode::NewArray as u8 => {
+                let id = heap.alloc_array();
+                stack.push(Value::Array(id));
+            }
+            x if x == Opcode::GetProp as u8 => {
+                let key_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 1;
+                let key = constants
+                    .get(key_idx)
+                    .ok_or(VmError::InvalidConstIndex(key_idx))?
+                    .to_value();
+                let obj = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_str = match &key {
+                    Value::String(s) => s.clone(),
+                    Value::Int(n) => n.to_string(),
+                    _ => return Err(VmError::InvalidConstIndex(key_idx)),
+                };
+                let result = match &obj {
+                    Value::Object(id) => heap.get_prop(*id, &key_str),
+                    Value::Array(id) => heap.get_array_prop(*id, &key_str),
+                    _ => Value::Undefined,
+                };
+                stack.push(result);
+            }
+            x if x == Opcode::SetProp as u8 => {
+                let key_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 1;
+                let key = constants
+                    .get(key_idx)
+                    .ok_or(VmError::InvalidConstIndex(key_idx))?
+                    .to_value();
+                let value = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let obj = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_str = match &key {
+                    Value::String(s) => s.clone(),
+                    Value::Int(n) => n.to_string(),
+                    _ => return Err(VmError::InvalidConstIndex(key_idx)),
+                };
+                match &obj {
+                    Value::Object(id) => heap.set_prop(*id, &key_str, value),
+                    Value::Array(id) => heap.set_array_prop(*id, &key_str, value),
+                    _ => {}
+                }
+                stack.push(obj);
+            }
             x if x == Opcode::JumpIfFalse as u8 => {
                 let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
                 *pc += 2;
@@ -221,7 +271,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) => true,
     }
 }
 
@@ -308,6 +358,8 @@ fn strict_eq_values(a: &Value, b: &Value) -> Value {
         (Value::Int(x), Value::Int(y)) => x == y,
         (Value::Number(x), Value::Number(y)) => !x.is_nan() && !y.is_nan() && x == y,
         (Value::String(x), Value::String(y)) => x == y,
+        (Value::Object(x), Value::Object(y)) => x == y,
+        (Value::Array(x), Value::Array(y)) => x == y,
         _ => false,
     };
     Value::Bool(result)
@@ -358,6 +410,56 @@ mod tests {
             assert_eq!(v.to_i64(), 3);
         } else {
             panic!("expected Return(3), got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn interpret_object_prop() {
+        let chunk = BytecodeChunk {
+            code: vec![
+                Opcode::NewObject as u8,
+                Opcode::PushConst as u8, 0,
+                Opcode::SetProp as u8, 1,
+                Opcode::GetProp as u8, 1,
+                Opcode::Return as u8,
+            ],
+            constants: vec![ConstEntry::Int(42), ConstEntry::String("x".to_string())],
+            num_locals: 0,
+        };
+        let result = interpret(&chunk).expect("interpret");
+        if let Completion::Return(v) = result {
+            assert_eq!(v.to_i64(), 42);
+        } else {
+            panic!("expected Return(42), got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn interpret_array_length() {
+        let chunk = BytecodeChunk {
+            code: vec![
+                Opcode::NewArray as u8,
+                Opcode::PushConst as u8, 0,
+                Opcode::SetProp as u8, 1,
+                Opcode::PushConst as u8, 2,
+                Opcode::SetProp as u8, 3,
+                Opcode::GetProp as u8, 4,
+                Opcode::Return as u8,
+            ],
+            constants: vec![
+                ConstEntry::Int(10),
+                ConstEntry::String("0".to_string()),
+                ConstEntry::Int(20),
+                ConstEntry::String("1".to_string()),
+                ConstEntry::String("length".to_string()),
+            ],
+            num_locals: 0,
+        };
+        let result = interpret(&chunk).expect("interpret");
+        if let Completion::Return(v) = result {
+            assert_eq!(v.to_i64(), 2);
+        } else {
+            panic!("expected Return(2) for array length, got {:?}", result);
         }
     }
 }

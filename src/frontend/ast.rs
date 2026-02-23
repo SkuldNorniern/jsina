@@ -134,6 +134,37 @@ pub enum Expression {
     Unary(UnaryExpr),
     Call(CallExpr),
     Assign(AssignExpr),
+    ObjectLiteral(ObjectLiteralExpr),
+    ArrayLiteral(ArrayLiteralExpr),
+    Member(MemberExpr),
+}
+
+#[derive(Debug, Clone)]
+pub struct ObjectLiteralExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub properties: Vec<(String, Expression)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrayLiteralExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub elements: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemberExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub object: Box<Expression>,
+    pub property: MemberProperty,
+}
+
+#[derive(Debug, Clone)]
+pub enum MemberProperty {
+    Identifier(String),
+    Expression(Box<Expression>),
 }
 
 #[derive(Debug, Clone)]
@@ -254,6 +285,9 @@ impl Expression {
             Expression::Unary(e) => e.span,
             Expression::Call(e) => e.span,
             Expression::Assign(e) => e.span,
+            Expression::ObjectLiteral(e) => e.span,
+            Expression::ArrayLiteral(e) => e.span,
+            Expression::Member(e) => e.span,
         }
     }
 }

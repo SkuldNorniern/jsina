@@ -15,6 +15,8 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
             HirOp::Pop { .. } => 1,
             HirOp::LoadLocal { .. } | HirOp::StoreLocal { .. } => 2,
             HirOp::Add { .. } | HirOp::Sub { .. } | HirOp::Mul { .. } | HirOp::Div { .. } | HirOp::Mod { .. } | HirOp::Pow { .. } | HirOp::Lt { .. } | HirOp::StrictEq { .. } | HirOp::Not { .. } => 1,
+            HirOp::NewObject { .. } | HirOp::NewArray { .. } => 1,
+            HirOp::GetProp { .. } | HirOp::SetProp { .. } => 2,
             HirOp::Call { .. } => 3,
         };
     }
@@ -70,6 +72,20 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 HirOp::Lt { .. } => code.push(Opcode::Lt as u8),
                 HirOp::StrictEq { .. } => code.push(Opcode::StrictEq as u8),
                 HirOp::Not { .. } => code.push(Opcode::Not as u8),
+                HirOp::NewObject { .. } => code.push(Opcode::NewObject as u8),
+                HirOp::NewArray { .. } => code.push(Opcode::NewArray as u8),
+                HirOp::GetProp { key, .. } => {
+                    let idx = constants.len();
+                    constants.push(ConstEntry::String(key.clone()));
+                    code.push(Opcode::GetProp as u8);
+                    code.push(idx.min(255) as u8);
+                }
+                HirOp::SetProp { key, .. } => {
+                    let idx = constants.len();
+                    constants.push(ConstEntry::String(key.clone()));
+                    code.push(Opcode::SetProp as u8);
+                    code.push(idx.min(255) as u8);
+                }
                 HirOp::Call { func_index, argc, .. } => {
                     code.push(Opcode::Call as u8);
                     code.push((*func_index).min(255) as u8);

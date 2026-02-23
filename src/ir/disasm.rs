@@ -37,6 +37,20 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             x if x == Opcode::Lt as u8 => format!("  {:04}  Lt", line_start),
             x if x == Opcode::StrictEq as u8 => format!("  {:04}  StrictEq", line_start),
             x if x == Opcode::Not as u8 => format!("  {:04}  Not", line_start),
+            x if x == Opcode::NewObject as u8 => format!("  {:04}  NewObject", line_start),
+            x if x == Opcode::NewArray as u8 => format!("  {:04}  NewArray", line_start),
+            x if x == Opcode::GetProp as u8 => {
+                let idx = code.get(pc).copied().unwrap_or(0) as usize;
+                pc += 1;
+                let key = chunk.constants.get(idx).map(format_const).unwrap_or_else(|| "?".to_string());
+                format!("  {:04}  GetProp  {}  ; {}", line_start, idx, key)
+            }
+            x if x == Opcode::SetProp as u8 => {
+                let idx = code.get(pc).copied().unwrap_or(0) as usize;
+                pc += 1;
+                let key = chunk.constants.get(idx).map(format_const).unwrap_or_else(|| "?".to_string());
+                format!("  {:04}  SetProp  {}  ; {}", line_start, idx, key)
+            }
             x if x == Opcode::Call as u8 => {
                 let func_idx = code.get(pc).copied().unwrap_or(0);
                 let argc = code.get(pc + 1).copied().unwrap_or(0);

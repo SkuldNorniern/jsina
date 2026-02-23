@@ -570,6 +570,30 @@ impl Parser {
                     callee: Box::new(expr),
                     args,
                 });
+            } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Dot)) {
+                let start_span = expr.span();
+                self.advance();
+                let prop_tok = self.expect(TokenType::Identifier)?;
+                let prop = prop_tok.lexeme.clone();
+                let span = start_span.merge(prop_tok.span);
+                expr = Expression::Member(MemberExpr {
+                    id: self.next_id(),
+                    span,
+                    object: Box::new(expr),
+                    property: MemberProperty::Identifier(prop),
+                });
+            } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftBracket)) {
+                let start_span = expr.span();
+                self.advance();
+                let index = self.parse_expression()?;
+                let end_tok = self.expect(TokenType::RightBracket)?;
+                let span = start_span.merge(end_tok.span);
+                expr = Expression::Member(MemberExpr {
+                    id: self.next_id(),
+                    span,
+                    object: Box::new(expr),
+                    property: MemberProperty::Expression(Box::new(index)),
+                });
             } else {
                 break;
             }
@@ -633,6 +657,46 @@ impl Parser {
                 let end_tok = self.expect(TokenType::RightParen)?;
                 let span = token.span.merge(end_tok.span);
                 (expr, span)
+            }
+            TokenType::LeftBrace => {
+                let start_span = token.span;
+                self.advance();
+                let mut properties = Vec::new();
+                while !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightBrace) | Some(TokenType::Eof) | None) {
+                    let key_tok = self.expect(TokenType::Identifier)?;
+                    let key = key_tok.lexeme.clone();
+                    self.expect(TokenType::Colon)?;
+                    let value = self.parse_expression()?;
+                    properties.push((key, value));
+                    if !self.optional(TokenType::Comma) {
+                        break;
+                    }
+                }
+                let end_tok = self.expect(TokenType::RightBrace)?;
+                let span = start_span.merge(end_tok.span);
+                (Expression::ObjectLiteral(ObjectLiteralExpr {
+                    id: self.next_id(),
+                    span,
+                    properties,
+                }), span)
+            }
+            TokenType::LeftBracket => {
+                let start_span = token.span;
+                self.advance();
+                let mut elements = Vec::new();
+                while !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightBracket) | Some(TokenType::Eof) | None) {
+                    elements.push(self.parse_expression()?);
+                    if !self.optional(TokenType::Comma) {
+                        break;
+                    }
+                }
+                let end_tok = self.expect(TokenType::RightBracket)?;
+                let span = start_span.merge(end_tok.span);
+                (Expression::ArrayLiteral(ArrayLiteralExpr {
+                    id: self.next_id(),
+                    span,
+                    elements,
+                }), span)
             }
             _ => {
                 return Err(ParseError {

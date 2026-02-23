@@ -32,6 +32,10 @@ pub enum HirOp {
     Lt { span: Span },
     StrictEq { span: Span },
     Not { span: Span },
+    NewObject { span: Span },
+    NewArray { span: Span },
+    GetProp { key: String, span: Span },
+    SetProp { key: String, span: Span },
     Pop { span: Span },
     Call { func_index: u32, argc: u32, span: Span },
 }
