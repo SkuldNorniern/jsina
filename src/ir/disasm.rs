@@ -30,6 +30,20 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             }
             x if x == Opcode::Add as u8 => format!("  {:04}  Add", line_start),
             x if x == Opcode::Sub as u8 => format!("  {:04}  Sub", line_start),
+            x if x == Opcode::JumpIfFalse as u8 => {
+                let offset = code.get(pc..pc + 2)
+                    .map(|b| i16::from_le_bytes([b[0], b[1]]) as i32)
+                    .unwrap_or(0);
+                pc += 2;
+                format!("  {:04}  JumpIfFalse  {}", line_start, offset)
+            }
+            x if x == Opcode::Jump as u8 => {
+                let offset = code.get(pc..pc + 2)
+                    .map(|b| i16::from_le_bytes([b[0], b[1]]) as i32)
+                    .unwrap_or(0);
+                pc += 2;
+                format!("  {:04}  Jump  {}", line_start, offset)
+            }
             x if x == Opcode::Return as u8 => format!("  {:04}  Return", line_start),
             _ => format!("  {:04}  <unknown 0x{:02x}>", line_start, op),
         };

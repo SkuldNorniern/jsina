@@ -7,11 +7,35 @@ pub struct CompiledFunction {
     pub chunk: BytecodeChunk,
 }
 
-pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
-    let mut code = Vec::new();
-    let mut constants = Vec::new();
+fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
+    let mut size = 0;
+    for op in &block.ops {
+        size += match op {
+            HirOp::LoadConst { .. } => 2,
+            HirOp::Pop { .. } => 1,
+            HirOp::LoadLocal { .. } | HirOp::StoreLocal { .. } => 2,
+            HirOp::Add { .. } | HirOp::Sub { .. } => 1,
+        };
+    }
+    size += match &block.terminator {
+        HirTerminator::Return { .. } => 1,
+        HirTerminator::Jump { .. } => 3,
+        HirTerminator::Branch { .. } => 2 + 3,
+    };
+    size
+}
 
+pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
+    let mut constants = Vec::new();
+    let mut block_offsets: Vec<usize> = vec![0];
     for block in &func.blocks {
+        let size = block_bytecode_size(block, constants.len());
+        block_offsets.push(block_offsets.last().copied().unwrap_or(0) + size);
+    }
+
+    let mut code = Vec::new();
+
+    for (_block_idx, block) in func.blocks.iter().enumerate() {
         for op in &block.ops {
             match op {
                 HirOp::LoadConst { value, .. } => {
@@ -44,7 +68,26 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
             HirTerminator::Return { .. } => {
                 code.push(Opcode::Return as u8);
             }
-            HirTerminator::Jump { .. } | HirTerminator::Branch { .. } => {}
+            HirTerminator::Jump { target } => {
+                let target_offset = block_offsets.get(*target as usize).copied().unwrap_or(0);
+                let rel = target_offset as i32 - code.len() as i32 - 3;
+                code.push(Opcode::Jump as u8);
+                code.extend_from_slice(&(rel as i16).to_le_bytes());
+            }
+            HirTerminator::Branch {
+                cond,
+                else_block,
+                ..
+            } => {
+                let slot = (*cond).min(255) as u8;
+                code.push(Opcode::LoadLocal as u8);
+                code.push(slot);
+                code.push(Opcode::JumpIfFalse as u8);
+                let else_offset = block_offsets.get(*else_block as usize).copied().unwrap_or(0);
+                let pc_after = code.len() + 2;
+                let rel_else = else_offset as i32 - pc_after as i32;
+                code.extend_from_slice(&(rel_else as i16).to_le_bytes());
+            }
         }
     }
 

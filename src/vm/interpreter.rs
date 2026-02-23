@@ -85,6 +85,21 @@ pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
                 let result = sub_values(&lhs, &rhs)?;
                 stack.push(result);
             }
+            x if x == Opcode::JumpIfFalse as u8 => {
+                let offset_bytes = code.get(pc..pc + 2).ok_or(VmError::StackUnderflow)?;
+                pc += 2;
+                let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
+                let val = stack.pop().ok_or(VmError::StackUnderflow)?;
+                if !is_truthy(&val) {
+                    pc = (pc as isize + offset) as usize;
+                }
+            }
+            x if x == Opcode::Jump as u8 => {
+                let offset_bytes = code.get(pc..pc + 2).ok_or(VmError::StackUnderflow)?;
+                pc += 2;
+                let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
+                pc = (pc as isize + offset) as usize;
+            }
             _ => return Err(VmError::InvalidOpcode(op)),
         }
     }
@@ -100,6 +115,16 @@ fn add_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 + y)),
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x + *y as f64)),
         _ => Ok(Value::Number(f64::NAN)),
+    }
+}
+
+fn is_truthy(v: &Value) -> bool {
+    match v {
+        Value::Undefined | Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Int(n) => *n != 0,
+        Value::Number(n) => *n != 0.0 && !n.is_nan(),
+        Value::String(_) => true,
     }
 }
 

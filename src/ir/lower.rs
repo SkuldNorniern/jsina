@@ -31,119 +31,233 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
     Ok(functions)
 }
 
+struct LowerCtx {
+    blocks: Vec<HirBlock>,
+    current_block: usize,
+    locals: HashMap<String, u32>,
+    next_slot: u32,
+    return_span: Span,
+}
+
 fn compile_function(f: &FunctionDeclStmt) -> Result<HirFunction, LowerError> {
     let span = f.span;
-    let mut locals: HashMap<String, u32> = HashMap::new();
-    let mut next_slot: u32 = 0;
+    let mut ctx = LowerCtx {
+        blocks: vec![HirBlock {
+            id: 0,
+            ops: Vec::new(),
+            terminator: HirTerminator::Return { span },
+        }],
+        current_block: 0,
+        locals: HashMap::new(),
+        next_slot: 0,
+        return_span: span,
+    };
 
     for param in &f.params {
-        locals.insert(param.clone(), next_slot);
-        next_slot += 1;
+        ctx.locals.insert(param.clone(), ctx.next_slot);
+        ctx.next_slot += 1;
     }
 
-    let mut ops = Vec::new();
-    let mut return_span = span;
+    let _ = compile_statement(&f.body, &mut ctx)?;
 
-    compile_statement(&f.body, &mut ops, &mut return_span, &mut locals, &mut next_slot)?;
-
-    let num_locals = next_slot;
-
-    let blocks = vec![HirBlock {
-        id: 0,
-        ops,
-        terminator: HirTerminator::Return { span: return_span },
-    }];
+    ctx.blocks[ctx.current_block].terminator = HirTerminator::Return {
+        span: ctx.return_span,
+    };
 
     Ok(HirFunction {
         name: Some(f.name.clone()),
         params: f.params.clone(),
-        num_locals,
+        num_locals: ctx.next_slot,
         entry_block: 0,
-        blocks,
+        blocks: ctx.blocks,
     })
 }
 
-fn compile_statement(
-    stmt: &Statement,
-    ops: &mut Vec<HirOp>,
-    return_span: &mut Span,
-    locals: &mut HashMap<String, u32>,
-    next_slot: &mut u32,
-) -> Result<(), LowerError> {
+fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, LowerError> {
+    let ops = &mut ctx.blocks[ctx.current_block].ops;
     match stmt {
         Statement::Block(b) => {
+            let mut hit_return = false;
             for s in &b.body {
-                compile_statement(s, ops, return_span, locals, next_slot)?;
+                if compile_statement(s, ctx)? {
+                    hit_return = true;
+                    break;
+                }
             }
+            return Ok(hit_return);
         }
         Statement::Return(r) => {
-            *return_span = r.span;
+            ctx.return_span = r.span;
             if let Some(ref expr) = r.argument {
-                compile_expression(expr, ops, locals)?;
+                compile_expression(expr, ops, &ctx.locals)?;
             }
+            return Ok(true);
         }
         Statement::Expression(e) => {
-            compile_expression(&e.expression, ops, locals)?;
+            compile_expression(&e.expression, ops, &ctx.locals)?;
             ops.push(HirOp::Pop { span: e.span });
+            return Ok(false);
+        }
+        Statement::If(i) => {
+            let cond_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            compile_expression(&i.condition, ops, &ctx.locals)?;
+            ops.push(HirOp::StoreLocal {
+                id: cond_slot,
+                span: i.span,
+            });
+
+            let then_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: then_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let else_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: else_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let merge_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: merge_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: cond_slot,
+                then_block: then_id,
+                else_block: else_id,
+            };
+
+            ctx.current_block = then_id as usize;
+            let then_returns = compile_statement(&i.then_branch, ctx)?;
+            ctx.blocks[ctx.current_block].terminator = if then_returns {
+                HirTerminator::Return { span: ctx.return_span }
+            } else {
+                HirTerminator::Jump { target: merge_id }
+            };
+
+            ctx.current_block = else_id as usize;
+            let else_returns = if let Some(ref else_b) = i.else_branch {
+                compile_statement(else_b, ctx)?
+            } else {
+                false
+            };
+            ctx.blocks[ctx.current_block].terminator = if else_returns {
+                HirTerminator::Return { span: ctx.return_span }
+            } else {
+                HirTerminator::Jump { target: merge_id }
+            };
+
+            ctx.current_block = merge_id as usize;
+        }
+        Statement::While(w) => {
+            let cond_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+
+            let loop_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: loop_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let body_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: body_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let exit_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: exit_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+
+            ctx.current_block = loop_id as usize;
+            let loop_ops = &mut ctx.blocks[ctx.current_block].ops;
+            compile_expression(&w.condition, loop_ops, &ctx.locals)?;
+            loop_ops.push(HirOp::StoreLocal {
+                id: cond_slot,
+                span: w.span,
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: cond_slot,
+                then_block: body_id,
+                else_block: exit_id,
+            };
+
+            ctx.current_block = body_id as usize;
+            compile_statement(&w.body, ctx)?;
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+
+            ctx.current_block = exit_id as usize;
         }
         Statement::VarDecl(d) => {
             for decl in &d.declarations {
-                let slot = *locals.entry(decl.name.clone()).or_insert_with(|| {
-                    let s = *next_slot;
-                    *next_slot += 1;
+                let slot = *ctx.locals.entry(decl.name.clone()).or_insert_with(|| {
+                    let s = ctx.next_slot;
+                    ctx.next_slot += 1;
                     s
                 });
                 if let Some(ref init) = decl.init {
-                    compile_expression(init, ops, locals)?;
+                    compile_expression(init, ops, &ctx.locals)?;
                     ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: decl.span,
                     });
                 }
             }
+            return Ok(false);
         }
         Statement::LetDecl(d) => {
             for decl in &d.declarations {
-                let slot = *locals.entry(decl.name.clone()).or_insert_with(|| {
-                    let s = *next_slot;
-                    *next_slot += 1;
+                let slot = *ctx.locals.entry(decl.name.clone()).or_insert_with(|| {
+                    let s = ctx.next_slot;
+                    ctx.next_slot += 1;
                     s
                 });
                 if let Some(ref init) = decl.init {
-                    compile_expression(init, ops, locals)?;
+                    compile_expression(init, ops, &ctx.locals)?;
                     ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: decl.span,
                     });
                 }
             }
+            return Ok(false);
         }
         Statement::ConstDecl(d) => {
             for decl in &d.declarations {
-                let slot = *locals.entry(decl.name.clone()).or_insert_with(|| {
-                    let s = *next_slot;
-                    *next_slot += 1;
+                let slot = *ctx.locals.entry(decl.name.clone()).or_insert_with(|| {
+                    let s = ctx.next_slot;
+                    ctx.next_slot += 1;
                     s
                 });
                 if let Some(ref init) = decl.init {
-                    compile_expression(init, ops, locals)?;
+                    compile_expression(init, ops, &ctx.locals)?;
                     ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: decl.span,
                     });
                 }
             }
+            return Ok(false);
         }
-        Statement::FunctionDecl(_) => {}
-        Statement::If(_) | Statement::While(_) | Statement::For(_)
-        | Statement::Break(_) | Statement::Continue(_) => {
+        Statement::FunctionDecl(_) => return Ok(false),
+        Statement::For(_) | Statement::Break(_) | Statement::Continue(_) => {
             return Err(LowerError::Unsupported(
                 format!("{:?} not yet supported", stmt),
                 Some(stmt.span()),
             ));
         }
     }
-    Ok(())
+    Ok(false)
 }
 
 fn compile_expression(
@@ -156,7 +270,9 @@ fn compile_expression(
             let value = match &e.value {
                 LiteralValue::Int(n) => HirConst::Int(*n),
                 LiteralValue::Number(n) => HirConst::Float(*n),
-                LiteralValue::Null | LiteralValue::True | LiteralValue::False | LiteralValue::String(_) => {
+                LiteralValue::True => HirConst::Int(1),
+                LiteralValue::False => HirConst::Int(0),
+                LiteralValue::Null | LiteralValue::String(_) => {
                     return Err(LowerError::Unsupported(
                         format!("literal {:?} not yet supported", e.value),
                         Some(e.span),
@@ -266,6 +382,56 @@ mod tests {
             assert_eq!(v.to_i64(), 3, "got {:?}", v);
         } else {
             panic!("expected Return, got {:?}", completion);
+        }
+    }
+
+    #[test]
+    fn lower_if_then() {
+        let mut parser = Parser::new("function main() { if (1) return 1; return 0; }");
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let cf = hir_to_bytecode(&funcs[0]);
+        let completion = interpret(&cf.chunk).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 1);
+        } else {
+            panic!("expected Return(1)");
+        }
+    }
+
+    #[test]
+    fn lower_if_else() {
+        let mut parser = Parser::new("function main() { if (0) return 1; else return 2; }");
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let cf = hir_to_bytecode(&funcs[0]);
+        let completion = interpret(&cf.chunk).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 2);
+        } else {
+            panic!("expected Return(2)");
+        }
+    }
+
+    #[test]
+    fn lower_while() {
+        let mut parser = Parser::new("function main() { let n = 0; while (n < 3) { n = n + 1; } return n; }");
+        let script = parser.parse().expect("parse");
+        let r = script_to_hir(&script);
+        assert!(r.is_err(), "n < 3 and n = n + 1 not yet supported");
+    }
+
+    #[test]
+    fn lower_while_simple() {
+        let mut parser = Parser::new("function main() { let n = 0; while (0) {} return n; }");
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let cf = hir_to_bytecode(&funcs[0]);
+        let completion = interpret(&cf.chunk).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 0);
+        } else {
+            panic!("expected Return(0)");
         }
     }
 }

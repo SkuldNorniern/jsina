@@ -21,6 +21,8 @@ pub enum Opcode {
     StoreLocal = 0x04,
     Add = 0x10,
     Sub = 0x11,
+    JumpIfFalse = 0x30,
+    Jump = 0x31,
     Return = 0x20,
 }
 
