@@ -18,7 +18,18 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 format!("  {:04}  PushConst  {}  ; {}", line_start, idx, const_val)
             }
             x if x == Opcode::Pop as u8 => format!("  {:04}  Pop", line_start),
+            x if x == Opcode::LoadLocal as u8 => {
+                let slot = code.get(pc).copied().unwrap_or(0);
+                pc += 1;
+                format!("  {:04}  LoadLocal  {}", line_start, slot)
+            }
+            x if x == Opcode::StoreLocal as u8 => {
+                let slot = code.get(pc).copied().unwrap_or(0);
+                pc += 1;
+                format!("  {:04}  StoreLocal  {}", line_start, slot)
+            }
             x if x == Opcode::Add as u8 => format!("  {:04}  Add", line_start),
+            x if x == Opcode::Sub as u8 => format!("  {:04}  Sub", line_start),
             x if x == Opcode::Return as u8 => format!("  {:04}  Return", line_start),
             _ => format!("  {:04}  <unknown 0x{:02x}>", line_start, op),
         };
@@ -46,6 +57,7 @@ mod tests {
         let chunk = BytecodeChunk {
             code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
+            num_locals: 0,
         };
         let s = disassemble(&chunk);
         assert!(s.contains("PushConst"));

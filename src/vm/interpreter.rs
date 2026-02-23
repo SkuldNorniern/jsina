@@ -29,6 +29,7 @@ impl std::error::Error for VmError {}
 
 pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
     let mut stack: Vec<Value> = Vec::new();
+    let mut locals: Vec<Value> = (0..chunk.num_locals).map(|_| Value::Undefined).collect();
     let mut pc: usize = 0;
     let code = &chunk.code;
     let constants = &chunk.constants;
@@ -54,6 +55,20 @@ pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
             x if x == Opcode::Pop as u8 => {
                 stack.pop().ok_or(VmError::StackUnderflow)?;
             }
+            x if x == Opcode::LoadLocal as u8 => {
+                let slot = *code.get(pc).ok_or(VmError::StackUnderflow)? as usize;
+                pc += 1;
+                let val = locals.get(slot).cloned().unwrap_or(Value::Undefined);
+                stack.push(val);
+            }
+            x if x == Opcode::StoreLocal as u8 => {
+                let slot = *code.get(pc).ok_or(VmError::StackUnderflow)? as usize;
+                pc += 1;
+                let val = stack.pop().ok_or(VmError::StackUnderflow)?;
+                if slot < locals.len() {
+                    locals[slot] = val;
+                }
+            }
             x if x == Opcode::Return as u8 => {
                 let val = stack.pop().unwrap_or(Value::Undefined);
                 return Ok(Completion::Return(val));
@@ -62,6 +77,12 @@ pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = add_values(&lhs, &rhs)?;
+                stack.push(result);
+            }
+            x if x == Opcode::Sub as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = sub_values(&lhs, &rhs)?;
                 stack.push(result);
             }
             _ => return Err(VmError::InvalidOpcode(op)),
@@ -78,6 +99,16 @@ fn add_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x + y)),
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 + y)),
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x + *y as f64)),
+        _ => Ok(Value::Number(f64::NAN)),
+    }
+}
+
+fn sub_values(a: &Value, b: &Value) -> Result<Value, VmError> {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x.saturating_sub(*y))),
+        (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x - y)),
+        (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 - y)),
+        (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x - *y as f64)),
         _ => Ok(Value::Number(f64::NAN)),
     }
 }
@@ -101,11 +132,32 @@ mod tests {
         let chunk = BytecodeChunk {
             code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
+            num_locals: 0,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(Value::Int(42)) = result {
         } else {
             panic!("expected Return(42), got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn interpret_add() {
+        let chunk = BytecodeChunk {
+            code: vec![
+                Opcode::PushConst as u8, 0,
+                Opcode::PushConst as u8, 1,
+                Opcode::Add as u8,
+                Opcode::Return as u8,
+            ],
+            constants: vec![ConstEntry::Int(1), ConstEntry::Int(2)],
+            num_locals: 0,
+        };
+        let result = interpret(&chunk).expect("interpret");
+        if let Completion::Return(v) = result {
+            assert_eq!(v.to_i64(), 3);
+        } else {
+            panic!("expected Return(3), got {:?}", result);
         }
     }
 }

@@ -4,6 +4,7 @@ use crate::diagnostics::Span;
 pub struct HirFunction {
     pub name: Option<String>,
     pub params: Vec<String>,
+    pub num_locals: u32,
     pub entry_block: HirBlockId,
     pub blocks: Vec<HirBlock>,
 }
@@ -22,6 +23,8 @@ pub enum HirOp {
     LoadConst { value: HirConst, span: Span },
     LoadLocal { id: u32, span: Span },
     StoreLocal { id: u32, span: Span },
+    Add { span: Span },
+    Sub { span: Span },
     Pop { span: Span },
 }
 
@@ -49,6 +52,7 @@ mod tests {
         let func = HirFunction {
             name: Some("main".to_string()),
             params: vec![],
+            num_locals: 0,
             entry_block: 0,
             blocks: vec![HirBlock {
                 id: 0,

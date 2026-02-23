@@ -26,7 +26,18 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 HirOp::Pop { .. } => {
                     code.push(Opcode::Pop as u8);
                 }
-                HirOp::LoadLocal { .. } | HirOp::StoreLocal { .. } => {}
+                HirOp::LoadLocal { id, .. } => {
+                    let slot = (*id).min(255) as u8;
+                    code.push(Opcode::LoadLocal as u8);
+                    code.push(slot);
+                }
+                HirOp::StoreLocal { id, .. } => {
+                    let slot = (*id).min(255) as u8;
+                    code.push(Opcode::StoreLocal as u8);
+                    code.push(slot);
+                }
+                HirOp::Add { .. } => code.push(Opcode::Add as u8),
+                HirOp::Sub { .. } => code.push(Opcode::Sub as u8),
             }
         }
         match &block.terminator {
@@ -39,7 +50,11 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
 
     CompiledFunction {
         name: func.name.clone(),
-        chunk: BytecodeChunk { code, constants },
+        chunk: BytecodeChunk {
+            code,
+            constants,
+            num_locals: func.num_locals,
+        },
     }
 }
 
@@ -52,9 +67,10 @@ mod tests {
     #[test]
     fn compile_push_return() {
         let span = crate::diagnostics::Span::point(Position::start());
-        let func = HirFunction {
+        let func =         HirFunction {
             name: Some("main".to_string()),
             params: vec![],
+            num_locals: 0,
             entry_block: 0,
             blocks: vec![HirBlock {
                 id: 0,
