@@ -172,6 +172,16 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 let result = lt_values(&lhs, &rhs)?;
                 stack.push(result);
             }
+            x if x == Opcode::StrictEq as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = strict_eq_values(&lhs, &rhs);
+                stack.push(result);
+            }
+            x if x == Opcode::Not as u8 => {
+                let val = stack.pop().ok_or(VmError::StackUnderflow)?;
+                stack.push(Value::Bool(!is_truthy(&val)));
+            }
             x if x == Opcode::JumpIfFalse as u8 => {
                 let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
                 *pc += 2;
@@ -288,6 +298,19 @@ fn lt_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         _ => false,
     };
     Ok(Value::Bool(result))
+}
+
+fn strict_eq_values(a: &Value, b: &Value) -> Value {
+    let result = match (a, b) {
+        (Value::Undefined, Value::Undefined) => true,
+        (Value::Null, Value::Null) => true,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Number(x), Value::Number(y)) => !x.is_nan() && !y.is_nan() && x == y,
+        (Value::String(x), Value::String(y)) => x == y,
+        _ => false,
+    };
+    Value::Bool(result)
 }
 
 impl ConstEntry {

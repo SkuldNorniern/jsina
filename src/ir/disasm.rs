@@ -35,6 +35,8 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             x if x == Opcode::Mod as u8 => format!("  {:04}  Mod", line_start),
             x if x == Opcode::Pow as u8 => format!("  {:04}  Pow", line_start),
             x if x == Opcode::Lt as u8 => format!("  {:04}  Lt", line_start),
+            x if x == Opcode::StrictEq as u8 => format!("  {:04}  StrictEq", line_start),
+            x if x == Opcode::Not as u8 => format!("  {:04}  Not", line_start),
             x if x == Opcode::Call as u8 => {
                 let func_idx = code.get(pc).copied().unwrap_or(0);
                 let argc = code.get(pc + 1).copied().unwrap_or(0);

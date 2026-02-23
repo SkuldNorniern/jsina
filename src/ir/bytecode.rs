@@ -26,6 +26,8 @@ pub enum Opcode {
     Mod = 0x15,
     Pow = 0x16,
     Lt = 0x14,
+    StrictEq = 0x17,
+    Not = 0x18,
     Call = 0x40,
     JumpIfFalse = 0x30,
     Jump = 0x31,

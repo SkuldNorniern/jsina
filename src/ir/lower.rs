@@ -471,6 +471,7 @@ fn compile_expression(
                 BinaryOp::Mod => ops.push(HirOp::Mod { span: e.span }),
                 BinaryOp::Pow => ops.push(HirOp::Pow { span: e.span }),
                 BinaryOp::Lt => ops.push(HirOp::Lt { span: e.span }),
+                BinaryOp::StrictEq => ops.push(HirOp::StrictEq { span: e.span }),
                 _ => {
                     return Err(LowerError::Unsupported(
                         format!("binary op {:?} not yet supported", e.op),
@@ -491,10 +492,8 @@ fn compile_expression(
                     ops.push(HirOp::Sub { span: e.span });
                 }
                 UnaryOp::LogicalNot => {
-                    return Err(LowerError::Unsupported(
-                        "unary ! not yet supported".to_string(),
-                        Some(e.span),
-                    ));
+                    compile_expression(&e.argument, ops, locals, func_index)?;
+                    ops.push(HirOp::Not { span: e.span });
                 }
             }
         }
@@ -685,6 +684,22 @@ mod tests {
             assert_eq!(v.to_i64(), 6);
         } else {
             panic!("expected Return(6), got {:?}", completion);
+        }
+    }
+
+    #[test]
+    fn lower_strict_eq_and_not() {
+        let mut parser = Parser::new(
+            "function main() { let a = 1; let b = 2; if (a === b) return 0; if (!(a < b)) return 0; return 1; }",
+        );
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let cf = hir_to_bytecode(&funcs[0]);
+        let completion = interpret(&cf.chunk).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 1, "1 !== 2 and 1 < 2, so should return 1");
+        } else {
+            panic!("expected Return(1), got {:?}", completion);
         }
     }
 
