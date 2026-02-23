@@ -12,11 +12,12 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
     for op in &block.ops {
         size += match op {
             HirOp::LoadConst { .. } => 2,
-            HirOp::Pop { .. } => 1,
+            HirOp::Pop { .. } | HirOp::Dup { .. } | HirOp::Swap { .. } => 1,
             HirOp::LoadLocal { .. } | HirOp::StoreLocal { .. } => 2,
             HirOp::Add { .. } | HirOp::Sub { .. } | HirOp::Mul { .. } | HirOp::Div { .. } | HirOp::Mod { .. } | HirOp::Pow { .. } | HirOp::Lt { .. } | HirOp::StrictEq { .. } | HirOp::Not { .. } => 1,
             HirOp::NewObject { .. } | HirOp::NewArray { .. } => 1,
             HirOp::GetProp { .. } | HirOp::SetProp { .. } => 2,
+            HirOp::GetPropDyn { .. } | HirOp::SetPropDyn { .. } => 1,
             HirOp::Call { .. } => 3,
         };
     }
@@ -53,6 +54,12 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 HirOp::Pop { .. } => {
                     code.push(Opcode::Pop as u8);
                 }
+                HirOp::Dup { .. } => {
+                    code.push(Opcode::Dup as u8);
+                }
+                HirOp::Swap { .. } => {
+                    code.push(Opcode::Swap as u8);
+                }
                 HirOp::LoadLocal { id, .. } => {
                     let slot = (*id).min(255) as u8;
                     code.push(Opcode::LoadLocal as u8);
@@ -86,6 +93,8 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                     code.push(Opcode::SetProp as u8);
                     code.push(idx.min(255) as u8);
                 }
+                HirOp::GetPropDyn { .. } => code.push(Opcode::GetPropDyn as u8),
+                HirOp::SetPropDyn { .. } => code.push(Opcode::SetPropDyn as u8),
                 HirOp::Call { func_index, argc, .. } => {
                     code.push(Opcode::Call as u8);
                     code.push((*func_index).min(255) as u8);

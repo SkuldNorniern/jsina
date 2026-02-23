@@ -17,6 +17,8 @@ pub enum ConstEntry {
 pub enum Opcode {
     PushConst = 0x01,
     Pop = 0x02,
+    Dup = 0x06,
+    Swap = 0x07,
     LoadLocal = 0x03,
     StoreLocal = 0x04,
     Add = 0x10,
@@ -32,6 +34,8 @@ pub enum Opcode {
     NewArray = 0x51,
     GetProp = 0x52,
     SetProp = 0x53,
+    GetPropDyn = 0x54,
+    SetPropDyn = 0x55,
     Call = 0x40,
     JumpIfFalse = 0x30,
     Jump = 0x31,

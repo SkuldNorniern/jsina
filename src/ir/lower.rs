@@ -498,29 +498,49 @@ fn compile_expression(
             }
         }
         Expression::Assign(e) => {
-            let slot = match e.left.as_ref() {
-                Expression::Identifier(id) => *locals.get(&id.name).ok_or_else(|| {
-                    LowerError::Unsupported(
-                        format!("assignment to undefined variable '{}'", id.name),
-                        Some(id.span),
-                    )
-                })?,
+            match e.left.as_ref() {
+                Expression::Identifier(id) => {
+                    let slot = *locals.get(&id.name).ok_or_else(|| {
+                        LowerError::Unsupported(
+                            format!("assignment to undefined variable '{}'", id.name),
+                            Some(id.span),
+                        )
+                    })?;
+                    compile_expression(&e.right, ops, locals, func_index)?;
+                    ops.push(HirOp::StoreLocal {
+                        id: slot,
+                        span: e.span,
+                    });
+                    ops.push(HirOp::LoadLocal {
+                        id: slot,
+                        span: e.span,
+                    });
+                }
+                Expression::Member(m) => {
+                    compile_expression(&m.object, ops, locals, func_index)?;
+                    match &m.property {
+                        MemberProperty::Identifier(key) => {
+                            compile_expression(&e.right, ops, locals, func_index)?;
+                            ops.push(HirOp::Swap { span: e.span });
+                            ops.push(HirOp::SetProp {
+                                key: key.clone(),
+                                span: e.span,
+                            });
+                        }
+                        MemberProperty::Expression(key_expr) => {
+                            compile_expression(key_expr, ops, locals, func_index)?;
+                            compile_expression(&e.right, ops, locals, func_index)?;
+                            ops.push(HirOp::SetPropDyn { span: e.span });
+                        }
+                    }
+                }
                 _ => {
                     return Err(LowerError::Unsupported(
-                        "assignment to non-identifier not yet supported".to_string(),
+                        "assignment to unsupported target".to_string(),
                         Some(e.span),
                     ));
                 }
-            };
-            compile_expression(&e.right, ops, locals, func_index)?;
-            ops.push(HirOp::StoreLocal {
-                id: slot,
-                span: e.span,
-            });
-            ops.push(HirOp::LoadLocal {
-                id: slot,
-                span: e.span,
-            });
+            }
         }
         Expression::Call(e) => {
             let idx = match e.callee.as_ref() {
@@ -549,38 +569,43 @@ fn compile_expression(
         Expression::ObjectLiteral(e) => {
             ops.push(HirOp::NewObject { span: e.span });
             for (key, value) in &e.properties {
+                ops.push(HirOp::Dup { span: e.span });
                 compile_expression(value, ops, locals, func_index)?;
+                ops.push(HirOp::Swap { span: e.span });
                 ops.push(HirOp::SetProp {
                     key: key.clone(),
                     span: e.span,
                 });
+                ops.push(HirOp::Pop { span: e.span });
             }
         }
         Expression::ArrayLiteral(e) => {
             ops.push(HirOp::NewArray { span: e.span });
             for (i, elem) in e.elements.iter().enumerate() {
+                ops.push(HirOp::Dup { span: e.span });
                 compile_expression(elem, ops, locals, func_index)?;
+                ops.push(HirOp::Swap { span: e.span });
                 ops.push(HirOp::SetProp {
                     key: i.to_string(),
                     span: e.span,
                 });
+                ops.push(HirOp::Pop { span: e.span });
             }
         }
         Expression::Member(e) => {
             compile_expression(&e.object, ops, locals, func_index)?;
-            let key = match &e.property {
-                MemberProperty::Identifier(s) => s.clone(),
-                MemberProperty::Expression(_) => {
-                    return Err(LowerError::Unsupported(
-                        "computed property access obj[expr] not yet supported".to_string(),
-                        Some(e.span),
-                    ));
+            match &e.property {
+                MemberProperty::Identifier(key) => {
+                    ops.push(HirOp::GetProp {
+                        key: key.clone(),
+                        span: e.span,
+                    });
                 }
-            };
-            ops.push(HirOp::GetProp {
-                key,
-                span: e.span,
-            });
+                MemberProperty::Expression(key_expr) => {
+                    compile_expression(key_expr, ops, locals, func_index)?;
+                    ops.push(HirOp::GetPropDyn { span: e.span });
+                }
+            }
         }
     }
     Ok(())
@@ -785,5 +810,32 @@ mod tests {
         } else {
             panic!("expected Return(5), got {:?}", completion);
         }
+    }
+
+    #[test]
+    fn lower_prop_assignment() {
+        let result = crate::driver::Driver::run(
+            "function main() { let o = { x: 0 }; o.x = 42; return o.x; }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "property assignment should mutate and read back");
+    }
+
+    #[test]
+    fn lower_computed_prop() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [10, 20, 30]; return a[1]; }",
+        )
+        .expect("run");
+        assert_eq!(result, 20, "a[1] should be 20");
+    }
+
+    #[test]
+    fn lower_computed_prop_assignment() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [1, 2, 3]; a[1] = 99; return a[1]; }",
+        )
+        .expect("run");
+        assert_eq!(result, 99, "a[1] = 99 should mutate and read back");
     }
 }

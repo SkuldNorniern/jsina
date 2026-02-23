@@ -36,7 +36,11 @@ pub enum HirOp {
     NewArray { span: Span },
     GetProp { key: String, span: Span },
     SetProp { key: String, span: Span },
+    GetPropDyn { span: Span },
+    SetPropDyn { span: Span },
     Pop { span: Span },
+    Dup { span: Span },
+    Swap { span: Span },
     Call { func_index: u32, argc: u32, span: Span },
 }
 

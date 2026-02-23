@@ -88,6 +88,16 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
             x if x == Opcode::Pop as u8 => {
                 stack.pop().ok_or(VmError::StackUnderflow)?;
             }
+            x if x == Opcode::Dup as u8 => {
+                let top = stack.last().cloned().ok_or(VmError::StackUnderflow)?;
+                stack.push(top);
+            }
+            x if x == Opcode::Swap as u8 => {
+                let b = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let a = stack.pop().ok_or(VmError::StackUnderflow)?;
+                stack.push(b);
+                stack.push(a);
+            }
             x if x == Opcode::LoadLocal as u8 => {
                 let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 1;
@@ -218,19 +228,42 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     .get(key_idx)
                     .ok_or(VmError::InvalidConstIndex(key_idx))?
                     .to_value();
-                let value = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let obj = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let value = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let key_str = match &key {
                     Value::String(s) => s.clone(),
                     Value::Int(n) => n.to_string(),
                     _ => return Err(VmError::InvalidConstIndex(key_idx)),
                 };
                 match &obj {
-                    Value::Object(id) => heap.set_prop(*id, &key_str, value),
-                    Value::Array(id) => heap.set_array_prop(*id, &key_str, value),
+                    Value::Object(id) => heap.set_prop(*id, &key_str, value.clone()),
+                    Value::Array(id) => heap.set_array_prop(*id, &key_str, value.clone()),
                     _ => {}
                 }
-                stack.push(obj);
+                stack.push(value);
+            }
+            x if x == Opcode::GetPropDyn as u8 => {
+                let key = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let obj = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_str = value_to_prop_key(&key);
+                let result = match &obj {
+                    Value::Object(id) => heap.get_prop(*id, &key_str),
+                    Value::Array(id) => heap.get_array_prop(*id, &key_str),
+                    _ => Value::Undefined,
+                };
+                stack.push(result);
+            }
+            x if x == Opcode::SetPropDyn as u8 => {
+                let value = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let obj = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_str = value_to_prop_key(&key);
+                match &obj {
+                    Value::Object(id) => heap.set_prop(*id, &key_str, value.clone()),
+                    Value::Array(id) => heap.set_array_prop(*id, &key_str, value.clone()),
+                    _ => {}
+                }
+                stack.push(value);
             }
             x if x == Opcode::JumpIfFalse as u8 => {
                 let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
@@ -272,6 +305,18 @@ fn is_truthy(v: &Value) -> bool {
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
         Value::String(_) | Value::Object(_) | Value::Array(_) => true,
+    }
+}
+
+fn value_to_prop_key(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Int(n) => n.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => "null".to_string(),
+        Value::Undefined => "undefined".to_string(),
+        Value::Object(_) | Value::Array(_) => "[object Object]".to_string(),
     }
 }
 
@@ -418,8 +463,11 @@ mod tests {
         let chunk = BytecodeChunk {
             code: vec![
                 Opcode::NewObject as u8,
+                Opcode::Dup as u8,
                 Opcode::PushConst as u8, 0,
+                Opcode::Swap as u8,
                 Opcode::SetProp as u8, 1,
+                Opcode::Pop as u8,
                 Opcode::GetProp as u8, 1,
                 Opcode::Return as u8,
             ],
@@ -435,14 +483,49 @@ mod tests {
     }
 
     #[test]
+    fn interpret_prop_assignment_via_store_load() {
+        let chunk = BytecodeChunk {
+            code: vec![
+                Opcode::NewObject as u8,
+                Opcode::StoreLocal as u8, 0,
+                Opcode::LoadLocal as u8, 0,
+                Opcode::PushConst as u8, 0,
+                Opcode::Swap as u8,
+                Opcode::SetProp as u8, 1,
+                Opcode::LoadLocal as u8, 0,
+                Opcode::GetProp as u8, 2,
+                Opcode::Return as u8,
+            ],
+            constants: vec![
+                ConstEntry::Int(42),
+                ConstEntry::String("x".to_string()),
+                ConstEntry::String("x".to_string()),
+            ],
+            num_locals: 1,
+        };
+        let result = interpret(&chunk).expect("interpret");
+        if let Completion::Return(v) = result {
+            assert_eq!(v.to_i64(), 42, "StoreLocal/LoadLocal + SetProp should mutate");
+        } else {
+            panic!("expected Return(42), got {:?}", result);
+        }
+    }
+
+    #[test]
     fn interpret_array_length() {
         let chunk = BytecodeChunk {
             code: vec![
                 Opcode::NewArray as u8,
+                Opcode::Dup as u8,
                 Opcode::PushConst as u8, 0,
+                Opcode::Swap as u8,
                 Opcode::SetProp as u8, 1,
+                Opcode::Pop as u8,
+                Opcode::Dup as u8,
                 Opcode::PushConst as u8, 2,
+                Opcode::Swap as u8,
                 Opcode::SetProp as u8, 3,
+                Opcode::Pop as u8,
                 Opcode::GetProp as u8, 4,
                 Opcode::Return as u8,
             ],

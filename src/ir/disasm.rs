@@ -18,6 +18,8 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 format!("  {:04}  PushConst  {}  ; {}", line_start, idx, const_val)
             }
             x if x == Opcode::Pop as u8 => format!("  {:04}  Pop", line_start),
+            x if x == Opcode::Dup as u8 => format!("  {:04}  Dup", line_start),
+            x if x == Opcode::Swap as u8 => format!("  {:04}  Swap", line_start),
             x if x == Opcode::LoadLocal as u8 => {
                 let slot = code.get(pc).copied().unwrap_or(0);
                 pc += 1;
@@ -51,6 +53,8 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 let key = chunk.constants.get(idx).map(format_const).unwrap_or_else(|| "?".to_string());
                 format!("  {:04}  SetProp  {}  ; {}", line_start, idx, key)
             }
+            x if x == Opcode::GetPropDyn as u8 => format!("  {:04}  GetPropDyn", line_start),
+            x if x == Opcode::SetPropDyn as u8 => format!("  {:04}  SetPropDyn", line_start),
             x if x == Opcode::Call as u8 => {
                 let func_idx = code.get(pc).copied().unwrap_or(0);
                 let argc = code.get(pc + 1).copied().unwrap_or(0);
