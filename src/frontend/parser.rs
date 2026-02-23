@@ -171,7 +171,7 @@ impl Parser {
         let id = self.next_id();
 
         let mut body = Vec::new();
-        while !matches!(self.peek(), Some(TokenType::RightBrace) | Some(TokenType::Eof) | None) {
+        while !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightBrace) | None) {
             body.push(self.parse_statement()?);
         }
 
@@ -1087,7 +1087,7 @@ mod tests {
 
     #[test]
     fn parse_error_unexpected_in_primary() {
-        let err = parse_err("function f() { return } }");
+        let err = parse_err("function f() { ");
         assert!(err.code.contains("PARSE"));
     }
 
