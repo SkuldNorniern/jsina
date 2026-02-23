@@ -72,6 +72,7 @@ pub enum HirConst {
 #[derive(Debug, Clone)]
 pub enum HirTerminator {
     Return { span: Span },
+    Throw { span: Span },
     Jump { target: HirBlockId },
     Branch { cond: u32, then_block: HirBlockId, else_block: HirBlockId },
     BranchNullish { cond: u32, then_block: HirBlockId, else_block: HirBlockId },

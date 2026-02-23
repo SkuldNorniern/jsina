@@ -23,7 +23,7 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
         };
     }
     size += match &block.terminator {
-        HirTerminator::Return { .. } => 1,
+        HirTerminator::Return { .. } | HirTerminator::Throw { .. } => 1,
         HirTerminator::Jump { .. } => 3,
         HirTerminator::Branch { .. } | HirTerminator::BranchNullish { .. } => 2 + 3 + 3,
     };
@@ -118,6 +118,9 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
         match &block.terminator {
             HirTerminator::Return { .. } => {
                 code.push(Opcode::Return as u8);
+            }
+            HirTerminator::Throw { .. } => {
+                code.push(Opcode::Throw as u8);
             }
             HirTerminator::Jump { target } => {
                 let target_offset = block_offsets.get(*target as usize).copied().unwrap_or(0);

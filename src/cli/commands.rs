@@ -83,6 +83,9 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
             let lbl = s.label.as_deref().unwrap_or("");
             println!("{}[{}] Continue {}", pad, idx, lbl);
         }
+        Statement::Throw(s) => {
+            println!("{}[{}] Throw {}", pad, idx, format_expr(&s.argument));
+        }
     }
 }
 

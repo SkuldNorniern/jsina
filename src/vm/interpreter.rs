@@ -121,6 +121,10 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 }
                 stack.push(val);
             }
+            x if x == Opcode::Throw as u8 => {
+                let val = stack.pop().ok_or(VmError::StackUnderflow)?;
+                return Ok(Completion::Throw(val));
+            }
             x if x == Opcode::Call as u8 => {
                 let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;

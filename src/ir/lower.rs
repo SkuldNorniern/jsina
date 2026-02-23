@@ -44,6 +44,7 @@ struct LowerCtx {
     locals: HashMap<String, u32>,
     next_slot: u32,
     return_span: Span,
+    throw_span: Option<Span>,
     func_index: HashMap<String, u32>,
     loop_stack: Vec<(HirBlockId, HirBlockId)>,
 }
@@ -54,6 +55,14 @@ fn loop_stack_push(ctx: &mut LowerCtx, continue_target: HirBlockId, exit_target:
 
 fn loop_stack_pop(ctx: &mut LowerCtx) {
     ctx.loop_stack.pop();
+}
+
+fn terminator_for_exit(ctx: &LowerCtx) -> HirTerminator {
+    if let Some(span) = ctx.throw_span {
+        HirTerminator::Throw { span }
+    } else {
+        HirTerminator::Return { span: ctx.return_span }
+    }
 }
 
 fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> Result<HirFunction, LowerError> {
@@ -68,6 +77,7 @@ fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> 
         locals: HashMap::new(),
         next_slot: 0,
         return_span: span,
+        throw_span: None,
         func_index: func_index.clone(),
         loop_stack: Vec::new(),
     };
@@ -79,9 +89,7 @@ fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> 
 
     let _ = compile_statement(&f.body, &mut ctx)?;
 
-    ctx.blocks[ctx.current_block].terminator = HirTerminator::Return {
-        span: ctx.return_span,
-    };
+    ctx.blocks[ctx.current_block].terminator = terminator_for_exit(&ctx);
 
     Ok(HirFunction {
         name: Some(f.name.clone()),
@@ -105,10 +113,16 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             return Ok(hit_return);
         }
         Statement::Return(r) => {
+            ctx.throw_span = None;
             ctx.return_span = r.span;
             if let Some(ref expr) = r.argument {
                 compile_expression(expr, ctx)?;
             }
+            return Ok(true);
+        }
+        Statement::Throw(t) => {
+            ctx.throw_span = Some(t.span);
+            compile_expression(&t.argument, ctx)?;
             return Ok(true);
         }
         Statement::Expression(e) => {
@@ -153,7 +167,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             ctx.current_block = then_id as usize;
             let then_returns = compile_statement(&i.then_branch, ctx)?;
             ctx.blocks[ctx.current_block].terminator = if then_returns {
-                HirTerminator::Return { span: ctx.return_span }
+                terminator_for_exit(ctx)
             } else {
                 HirTerminator::Jump { target: merge_id }
             };
@@ -165,7 +179,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                 false
             };
             ctx.blocks[ctx.current_block].terminator = if else_returns {
-                HirTerminator::Return { span: ctx.return_span }
+                terminator_for_exit(ctx)
             } else {
                 HirTerminator::Jump { target: merge_id }
             };
@@ -201,9 +215,13 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             const WHILE_EXIT_PLACEHOLDER: HirBlockId = u32::MAX - 3;
             loop_stack_push(ctx, loop_id, WHILE_EXIT_PLACEHOLDER);
             ctx.current_block = body_id as usize;
-            compile_statement(&w.body, ctx)?;
+            let body_exits = compile_statement(&w.body, ctx)?;
             loop_stack_pop(ctx);
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+            if !body_exits {
+                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+            } else {
+                ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+            }
 
             ctx.blocks.push(HirBlock {
                 id: ctx.blocks.len() as HirBlockId,
@@ -333,9 +351,13 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
 
             loop_stack_push(ctx, FOR_UPDATE_PLACEHOLDER, FOR_EXIT_PLACEHOLDER);
             ctx.current_block = body_id as usize;
-            compile_statement(&f.body, ctx)?;
+            let body_exits = compile_statement(&f.body, ctx)?;
             loop_stack_pop(ctx);
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: FOR_UPDATE_PLACEHOLDER };
+            if !body_exits {
+                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: FOR_UPDATE_PLACEHOLDER };
+            } else {
+                ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+            }
 
             ctx.blocks.push(HirBlock {
                 id: ctx.blocks.len() as HirBlockId,
@@ -1151,6 +1173,16 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn lower_throw() {
+        let err = crate::driver::Driver::run(
+            "function main() { throw 42; }",
+        )
+        .unwrap_err();
+        let msg = format!("{:?}", err);
+        assert!(msg.contains("42") || msg.contains("uncaught"), "throw 42 should produce error: {}", msg);
     }
 
     #[test]

@@ -230,6 +230,7 @@ fn check_statement(
             check_statement(&f.body, scope, &iter_ctx, errors);
         }
         Statement::Expression(_) => {}
+        Statement::Throw(_) => {}
     }
 }
 

@@ -24,6 +24,14 @@ pub enum Statement {
     LetDecl(LetDeclStmt),
     ConstDecl(ConstDeclStmt),
     FunctionDecl(FunctionDeclStmt),
+    Throw(ThrowStmt),
+}
+
+#[derive(Debug, Clone)]
+pub struct ThrowStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub argument: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
@@ -284,6 +292,7 @@ impl Statement {
             Statement::LetDecl(s) => s.span,
             Statement::ConstDecl(s) => s.span,
             Statement::FunctionDecl(s) => s.span,
+            Statement::Throw(s) => s.span,
         }
     }
 }

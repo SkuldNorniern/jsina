@@ -154,6 +154,7 @@ impl Parser {
         match &token.token_type {
             TokenType::Function => self.parse_function_decl(),
             TokenType::Return => self.parse_return(),
+            TokenType::Throw => self.parse_throw(),
             TokenType::Break => self.parse_break(),
             TokenType::Continue => self.parse_continue(),
             TokenType::If => self.parse_if(),
@@ -235,6 +236,19 @@ impl Parser {
         let span = start_span.merge(end_span);
 
         Ok(Statement::Return(ReturnStmt {
+            id,
+            span,
+            argument,
+        }))
+    }
+
+    fn parse_throw(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.expect(TokenType::Throw)?.span;
+        let id = self.next_id();
+        let argument = Box::new(self.parse_expression()?);
+        self.optional(TokenType::Semicolon);
+        let span = start_span.merge(argument.span());
+        Ok(Statement::Throw(ThrowStmt {
             id,
             span,
             argument,
@@ -1570,6 +1584,21 @@ mod tests {
     fn parse_call_one_arg_num() { let _ = parse_ok("function f() { return f(1); }"); }
     #[test]
     fn parse_return_empty() { let _ = parse_ok("function f() { return; }"); }
+    #[test]
+    fn parse_throw() {
+        let script = parse_ok("function f() { throw 42; }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::Throw(t) = &b.body[0] {
+                    if let Expression::Literal(e) = t.argument.as_ref() {
+                        assert!(matches!(e.value, LiteralValue::Int(42)));
+                        return;
+                    }
+                }
+            }
+        }
+        panic!("expected throw 42 in block");
+    }
     #[test]
     fn parse_script_var() { let _ = parse_ok("var x = 1;"); }
     #[test]

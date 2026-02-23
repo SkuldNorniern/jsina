@@ -102,6 +102,7 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 format!("  {:04}  Jump  {}", line_start, offset)
             }
             x if x == Opcode::Return as u8 => format!("  {:04}  Return", line_start),
+            x if x == Opcode::Throw as u8 => format!("  {:04}  Throw", line_start),
             _ => format!("  {:04}  <unknown 0x{:02x}>", line_start, op),
         };
         out.push_str(&line);
