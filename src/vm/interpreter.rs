@@ -183,10 +183,35 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 let result = lt_values(&lhs, &rhs)?;
                 stack.push(result);
             }
+            x if x == Opcode::Lte as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = lte_values(&lhs, &rhs)?;
+                stack.push(result);
+            }
+            x if x == Opcode::Gt as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = gt_values(&lhs, &rhs)?;
+                stack.push(result);
+            }
+            x if x == Opcode::Gte as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = gte_values(&lhs, &rhs)?;
+                stack.push(result);
+            }
             x if x == Opcode::StrictEq as u8 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = strict_eq_values(&lhs, &rhs);
+                stack.push(result);
+            }
+            x if x == Opcode::StrictNotEq as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let eq = strict_eq_values(&lhs, &rhs);
+                let result = Value::Bool(!matches!(eq, Value::Bool(true)));
                 stack.push(result);
             }
             x if x == Opcode::Not as u8 => {
@@ -390,6 +415,39 @@ fn lt_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => x < y,
         (Value::Int(x), Value::Number(y)) => (*x as f64) < *y,
         (Value::Number(x), Value::Int(y)) => *x < (*y as f64),
+        _ => false,
+    };
+    Ok(Value::Bool(result))
+}
+
+fn lte_values(a: &Value, b: &Value) -> Result<Value, VmError> {
+    let result = match (a, b) {
+        (Value::Int(x), Value::Int(y)) => x <= y,
+        (Value::Number(x), Value::Number(y)) => x <= y,
+        (Value::Int(x), Value::Number(y)) => (*x as f64) <= *y,
+        (Value::Number(x), Value::Int(y)) => *x <= (*y as f64),
+        _ => false,
+    };
+    Ok(Value::Bool(result))
+}
+
+fn gt_values(a: &Value, b: &Value) -> Result<Value, VmError> {
+    let result = match (a, b) {
+        (Value::Int(x), Value::Int(y)) => x > y,
+        (Value::Number(x), Value::Number(y)) => x > y,
+        (Value::Int(x), Value::Number(y)) => (*x as f64) > *y,
+        (Value::Number(x), Value::Int(y)) => *x > (*y as f64),
+        _ => false,
+    };
+    Ok(Value::Bool(result))
+}
+
+fn gte_values(a: &Value, b: &Value) -> Result<Value, VmError> {
+    let result = match (a, b) {
+        (Value::Int(x), Value::Int(y)) => x >= y,
+        (Value::Number(x), Value::Number(y)) => x >= y,
+        (Value::Int(x), Value::Number(y)) => (*x as f64) >= *y,
+        (Value::Number(x), Value::Int(y)) => *x >= (*y as f64),
         _ => false,
     };
     Ok(Value::Bool(result))

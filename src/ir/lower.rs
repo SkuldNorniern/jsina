@@ -471,8 +471,12 @@ fn compile_expression(
                 BinaryOp::Mod => ops.push(HirOp::Mod { span: e.span }),
                 BinaryOp::Pow => ops.push(HirOp::Pow { span: e.span }),
                 BinaryOp::Lt => ops.push(HirOp::Lt { span: e.span }),
+                BinaryOp::Lte => ops.push(HirOp::Lte { span: e.span }),
+                BinaryOp::Gt => ops.push(HirOp::Gt { span: e.span }),
+                BinaryOp::Gte => ops.push(HirOp::Gte { span: e.span }),
                 BinaryOp::StrictEq => ops.push(HirOp::StrictEq { span: e.span }),
-                _ => {
+                BinaryOp::StrictNotEq => ops.push(HirOp::StrictNotEq { span: e.span }),
+                BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
                     return Err(LowerError::Unsupported(
                         format!("binary op {:?} not yet supported", e.op),
                         Some(e.span),
@@ -837,5 +841,14 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 99, "a[1] = 99 should mutate and read back");
+    }
+
+    #[test]
+    fn lower_comparison_ops() {
+        let result = crate::driver::Driver::run(
+            "function main() { if (1 !== 2) return 1; if (5 > 4) return 2; if (3 >= 3) return 3; if (1 <= 2) return 4; return 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "!==, >, >=, <= should work");
     }
 }
