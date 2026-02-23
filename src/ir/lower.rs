@@ -250,7 +250,76 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             return Ok(false);
         }
         Statement::FunctionDecl(_) => return Ok(false),
-        Statement::For(_) | Statement::Break(_) | Statement::Continue(_) => {
+        Statement::For(f) => {
+            let cond_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+
+            if let Some(ref init) = f.init {
+                compile_statement(init, ctx)?;
+            }
+
+            let loop_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: loop_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let body_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: body_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let update_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: update_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let exit_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: exit_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+
+            ctx.current_block = loop_id as usize;
+            let loop_ops = &mut ctx.blocks[ctx.current_block].ops;
+            if let Some(ref cond) = f.condition {
+                compile_expression(cond, loop_ops, &ctx.locals)?;
+            } else {
+                loop_ops.push(HirOp::LoadConst {
+                    value: HirConst::Int(1),
+                    span: f.span,
+                });
+            }
+            loop_ops.push(HirOp::StoreLocal {
+                id: cond_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: cond_slot,
+                then_block: body_id,
+                else_block: exit_id,
+            };
+
+            ctx.current_block = body_id as usize;
+            compile_statement(&f.body, ctx)?;
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: update_id };
+
+            ctx.current_block = update_id as usize;
+            let update_ops = &mut ctx.blocks[ctx.current_block].ops;
+            if let Some(ref upd) = f.update {
+                compile_expression(upd, update_ops, &ctx.locals)?;
+                update_ops.push(HirOp::Pop { span: f.span });
+            }
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+
+            ctx.current_block = exit_id as usize;
+        }
+        Statement::Break(_) | Statement::Continue(_) => {
             return Err(LowerError::Unsupported(
                 format!("{:?} not yet supported", stmt),
                 Some(stmt.span()),
@@ -466,6 +535,20 @@ mod tests {
             assert_eq!(v.to_i64(), 0);
         } else {
             panic!("expected Return(0)");
+        }
+    }
+
+    #[test]
+    fn lower_for() {
+        let mut parser = Parser::new("function main() { let s = 0; for (let i = 0; i < 4; i = i + 1) { s = s + i; } return s; }");
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let cf = hir_to_bytecode(&funcs[0]);
+        let completion = interpret(&cf.chunk).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 6);
+        } else {
+            panic!("expected Return(6), got {:?}", completion);
         }
     }
 }

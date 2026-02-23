@@ -321,10 +321,10 @@ impl Parser {
 
         self.expect(TokenType::LeftParen)?;
 
-        let init = if matches!(self.peek(), Some(TokenType::Semicolon)) {
+        let init = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Semicolon)) {
             self.advance();
             None
-        } else if matches!(self.peek(), Some(TokenType::Var) | Some(TokenType::Let) | Some(TokenType::Const)) {
+        } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Var) | Some(TokenType::Let) | Some(TokenType::Const)) {
             let stmt = self.parse_statement()?;
             self.optional(TokenType::Semicolon);
             Some(Box::new(stmt))
