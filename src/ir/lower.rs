@@ -736,24 +736,48 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
         }
         Expression::Call(e) => {
             match e.callee.as_ref() {
-                Expression::Member(m) if matches!(&m.property, MemberProperty::Identifier(s) if s == "push") => {
-                    compile_expression(&m.object, ctx)?;
-                    for arg in &e.args {
-                        compile_expression(arg, ctx)?;
+                Expression::Member(m) => {
+                    let (obj_name, prop) = match (&m.object.as_ref(), &m.property) {
+                        (Expression::Identifier(obj), MemberProperty::Identifier(p)) => (Some(&obj.name), p.as_str()),
+                        _ => (None, ""),
+                    };
+                    if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "floor" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MathFloor,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "abs" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MathAbs,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "push" {
+                        compile_expression(&m.object, ctx)?;
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayPush,
+                            argc: (1 + e.args.len()) as u32,
+                            span: e.span,
+                        });
+                    } else if prop == "pop" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayPop,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else {
+                        return Err(LowerError::Unsupported(
+                            format!("call to {}.{} not yet supported", obj_name.as_ref().map(|s| s.as_str()).unwrap_or("?"), prop),
+                            Some(e.span),
+                        ));
                     }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: crate::ir::hir::BuiltinId::ArrayPush,
-                        argc: (1 + e.args.len()) as u32,
-                        span: e.span,
-                    });
-                }
-                Expression::Member(m) if matches!(&m.property, MemberProperty::Identifier(s) if s == "pop") => {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: crate::ir::hir::BuiltinId::ArrayPop,
-                        argc: 1,
-                        span: e.span,
-                    });
                 }
                 Expression::Identifier(id) if id.name == "print" => {
                     for arg in &e.args {
@@ -1105,6 +1129,24 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn lower_math_floor() {
+        let result = crate::driver::Driver::run(
+            "function main() { return Math.floor(3.7); }",
+        )
+        .expect("run");
+        assert_eq!(result, 3, "Math.floor(3.7) should return 3");
+    }
+
+    #[test]
+    fn lower_math_abs() {
+        let result = crate::driver::Driver::run(
+            "function main() { return Math.abs(-42); }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "Math.abs(-42) should return 42");
     }
 
     #[test]

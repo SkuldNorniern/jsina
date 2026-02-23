@@ -187,6 +187,29 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         let val = heap.array_pop(arr_id);
                         stack.push(val);
                     }
+                    3 => {
+                        let x = args.first().ok_or(VmError::StackUnderflow)?;
+                        let n = match x {
+                            Value::Int(i) => *i as f64,
+                            Value::Number(n) => *n,
+                            _ => f64::NAN,
+                        };
+                        let result = n.floor();
+                        if result.fract() == 0.0 && result >= i32::MIN as f64 && result <= i32::MAX as f64 {
+                            stack.push(Value::Int(result as i32));
+                        } else {
+                            stack.push(Value::Number(result));
+                        }
+                    }
+                    4 => {
+                        let x = args.first().ok_or(VmError::StackUnderflow)?;
+                        let result = match x {
+                            Value::Int(i) => Value::Int(if *i < 0 { -(*i) } else { *i }),
+                            Value::Number(n) => Value::Number(n.abs()),
+                            _ => Value::Number(f64::NAN),
+                        };
+                        stack.push(result);
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }

@@ -73,6 +73,8 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                     0 => "print",
                     1 => "arrayPush",
                     2 => "arrayPop",
+                    3 => "mathFloor",
+                    4 => "mathAbs",
                     _ => "?",
                 };
                 format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)

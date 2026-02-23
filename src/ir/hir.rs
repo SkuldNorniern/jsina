@@ -54,6 +54,8 @@ pub enum BuiltinId {
     Print = 0,
     ArrayPush = 1,
     ArrayPop = 2,
+    MathFloor = 3,
+    MathAbs = 4,
 }
 
 #[derive(Debug, Clone)]
