@@ -163,6 +163,7 @@ impl Parser {
             TokenType::Var => self.parse_var_decl(),
             TokenType::Let => self.parse_let_decl(),
             TokenType::Const => self.parse_const_decl(),
+            TokenType::Try => self.parse_try(),
             TokenType::LeftBrace => self.parse_block(),
             _ => self.parse_expression_statement(),
         }
@@ -252,6 +253,47 @@ impl Parser {
             id,
             span,
             argument,
+        }))
+    }
+
+    fn parse_try(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.expect(TokenType::Try)?.span;
+        let id = self.next_id();
+        let body = Box::new(self.parse_block()?);
+        let (catch_param, catch_body) = if self.optional(TokenType::Catch) {
+            self.expect(TokenType::LeftParen)?;
+            let param = self.expect(TokenType::Identifier)?.lexeme;
+            self.expect(TokenType::RightParen)?;
+            let catch = Box::new(self.parse_block()?);
+            (Some(param), Some(catch))
+        } else {
+            (None, None)
+        };
+        let finally_body = if self.optional(TokenType::Finally) {
+            Some(Box::new(self.parse_block()?))
+        } else {
+            None
+        };
+        if catch_param.is_none() && finally_body.is_none() {
+            return Err(ParseError {
+                code: "JSINA-PARSE-007".to_string(),
+                message: "try must have catch or finally".to_string(),
+                span: Some(start_span),
+            });
+        }
+        let span = finally_body
+            .as_ref()
+            .map(|f| f.span())
+            .or_else(|| catch_body.as_ref().map(|c| c.span()))
+            .map(|s| start_span.merge(s))
+            .unwrap_or_else(|| start_span.merge(body.span()));
+        Ok(Statement::Try(TryStmt {
+            id,
+            span,
+            body,
+            catch_param,
+            catch_body,
+            finally_body,
         }))
     }
 
@@ -1584,6 +1626,21 @@ mod tests {
     fn parse_call_one_arg_num() { let _ = parse_ok("function f() { return f(1); }"); }
     #[test]
     fn parse_return_empty() { let _ = parse_ok("function f() { return; }"); }
+    #[test]
+    fn parse_try_catch() {
+        let script = parse_ok("function f() { try { throw 1; } catch (e) { return e; } }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::Try(t) = &b.body[0] {
+                    assert_eq!(t.catch_param.as_deref(), Some("e"));
+                    assert!(t.catch_body.is_some());
+                    return;
+                }
+            }
+        }
+        panic!("expected try/catch in block");
+    }
+
     #[test]
     fn parse_throw() {
         let script = parse_ok("function f() { throw 42; }");

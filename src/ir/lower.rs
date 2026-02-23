@@ -47,6 +47,7 @@ struct LowerCtx {
     throw_span: Option<Span>,
     func_index: HashMap<String, u32>,
     loop_stack: Vec<(HirBlockId, HirBlockId)>,
+    exception_regions: Vec<ExceptionRegion>,
 }
 
 fn loop_stack_push(ctx: &mut LowerCtx, continue_target: HirBlockId, exit_target: HirBlockId) {
@@ -80,6 +81,7 @@ fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> 
         throw_span: None,
         func_index: func_index.clone(),
         loop_stack: Vec::new(),
+        exception_regions: Vec::new(),
     };
 
     for param in &f.params {
@@ -97,6 +99,7 @@ fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> 
         num_locals: ctx.next_slot,
         entry_block: 0,
         blocks: ctx.blocks,
+        exception_regions: ctx.exception_regions,
     })
 }
 
@@ -124,6 +127,63 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             ctx.throw_span = Some(t.span);
             compile_expression(&t.argument, ctx)?;
             return Ok(true);
+        }
+        Statement::Try(t) => {
+            let (catch_param, catch_body) = match (&t.catch_param, &t.catch_body) {
+                (Some(p), Some(b)) => (p.clone(), b),
+                _ => return Err(LowerError::Unsupported(
+                    "try without catch not yet supported".to_string(),
+                    Some(t.span),
+                )),
+            };
+            let prev_block = ctx.current_block;
+            let after_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: after_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let try_entry_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: try_entry_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            ctx.blocks[prev_block].terminator = HirTerminator::Jump { target: try_entry_id };
+
+            ctx.current_block = try_entry_id as usize;
+            let try_exits = compile_statement(&t.body, ctx)?;
+            if !try_exits {
+                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: after_id };
+            } else {
+                ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+            }
+
+            let catch_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: catch_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let catch_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            ctx.locals.insert(catch_param, catch_slot);
+            ctx.exception_regions.push(ExceptionRegion {
+                try_entry_block: try_entry_id,
+                catch_block: catch_id,
+                catch_slot,
+            });
+
+            ctx.current_block = catch_id as usize;
+            let catch_exits = compile_statement(catch_body, ctx)?;
+            if !catch_exits {
+                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: after_id };
+            } else {
+                ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+            }
+
+            ctx.current_block = after_id as usize;
+            return Ok(try_exits || catch_exits);
         }
         Statement::Expression(e) => {
             compile_expression(&e.expression, ctx)?;
@@ -1173,6 +1233,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn lower_try_catch() {
+        let result = crate::driver::Driver::run(
+            "function main() { try { throw 42; } catch (e) { return e; } return 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "try/catch should catch and return thrown value");
     }
 
     #[test]

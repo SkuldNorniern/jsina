@@ -1,12 +1,20 @@
 use crate::diagnostics::Span;
 
 #[derive(Debug, Clone)]
+pub struct ExceptionRegion {
+    pub try_entry_block: HirBlockId,
+    pub catch_block: HirBlockId,
+    pub catch_slot: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct HirFunction {
     pub name: Option<String>,
     pub params: Vec<String>,
     pub num_locals: u32,
     pub entry_block: HirBlockId,
     pub blocks: Vec<HirBlock>,
+    pub exception_regions: Vec<ExceptionRegion>,
 }
 
 pub type HirBlockId = u32;
@@ -99,6 +107,7 @@ mod tests {
                 }],
                 terminator: HirTerminator::Return { span },
             }],
+            exception_regions: vec![],
         };
         assert_eq!(func.blocks.len(), 1);
     }

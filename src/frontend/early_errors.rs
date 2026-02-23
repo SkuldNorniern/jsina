@@ -231,6 +231,15 @@ fn check_statement(
         }
         Statement::Expression(_) => {}
         Statement::Throw(_) => {}
+        Statement::Try(t) => {
+            check_statement(&t.body, scope, ctx, errors);
+            if let Some(ref c) = t.catch_body {
+                check_statement(c, scope, ctx, errors);
+            }
+            if let Some(ref f) = t.finally_body {
+                check_statement(f, scope, ctx, errors);
+            }
+        }
     }
 }
 

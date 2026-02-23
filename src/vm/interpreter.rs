@@ -123,7 +123,18 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
             }
             x if x == Opcode::Throw as u8 => {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
-                return Ok(Completion::Throw(val));
+                let throw_pc = *pc - 1;
+                let handler = chunk.handlers.iter().find(|h| {
+                    (h.try_start as usize) <= throw_pc && throw_pc < (h.try_end as usize)
+                });
+                if let Some(h) = handler {
+                    if (h.catch_slot as usize) < locals.len() {
+                        locals[h.catch_slot as usize] = val.clone();
+                    }
+                    *pc = h.handler_pc as usize;
+                } else {
+                    return Ok(Completion::Throw(val));
+                }
             }
             x if x == Opcode::Call as u8 => {
                 let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
@@ -633,6 +644,7 @@ mod tests {
             code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
             num_locals: 0,
+            handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(Value::Int(42)) = result {
@@ -652,6 +664,7 @@ mod tests {
             ],
             constants: vec![ConstEntry::Int(1), ConstEntry::Int(2)],
             num_locals: 0,
+            handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -676,6 +689,7 @@ mod tests {
             ],
             constants: vec![ConstEntry::Int(42), ConstEntry::String("x".to_string())],
             num_locals: 0,
+            handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -705,6 +719,7 @@ mod tests {
                 ConstEntry::String("x".to_string()),
             ],
             num_locals: 1,
+            handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -740,6 +755,7 @@ mod tests {
                 ConstEntry::String("length".to_string()),
             ],
             num_locals: 0,
+            handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {

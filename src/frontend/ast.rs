@@ -25,6 +25,17 @@ pub enum Statement {
     ConstDecl(ConstDeclStmt),
     FunctionDecl(FunctionDeclStmt),
     Throw(ThrowStmt),
+    Try(TryStmt),
+}
+
+#[derive(Debug, Clone)]
+pub struct TryStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub body: Box<Statement>,
+    pub catch_param: Option<String>,
+    pub catch_body: Option<Box<Statement>>,
+    pub finally_body: Option<Box<Statement>>,
 }
 
 #[derive(Debug, Clone)]
@@ -293,6 +304,7 @@ impl Statement {
             Statement::ConstDecl(s) => s.span,
             Statement::FunctionDecl(s) => s.span,
             Statement::Throw(s) => s.span,
+            Statement::Try(s) => s.span,
         }
     }
 }

@@ -86,6 +86,18 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
         Statement::Throw(s) => {
             println!("{}[{}] Throw {}", pad, idx, format_expr(&s.argument));
         }
+        Statement::Try(s) => {
+            println!("{}[{}] Try", pad, idx);
+            print_stmt(0, &s.body, indent + 1);
+            if let (Some(p), Some(c)) = (&s.catch_param, &s.catch_body) {
+                println!("{}  catch ({}):", pad, p);
+                print_stmt(0, c, indent + 2);
+            }
+            if let Some(f) = &s.finally_body {
+                println!("{}  finally:", pad);
+                print_stmt(0, f, indent + 2);
+            }
+        }
     }
 }
 

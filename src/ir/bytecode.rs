@@ -1,8 +1,17 @@
 #[derive(Debug, Clone)]
+pub struct ExceptionHandler {
+    pub try_start: u32,
+    pub try_end: u32,
+    pub handler_pc: u32,
+    pub catch_slot: u8,
+}
+
+#[derive(Debug, Clone)]
 pub struct BytecodeChunk {
     pub code: Vec<u8>,
     pub constants: Vec<ConstEntry>,
     pub num_locals: u32,
+    pub handlers: Vec<ExceptionHandler>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +70,7 @@ mod tests {
             code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
             num_locals: 0,
+            handlers: vec![],
         };
         assert_eq!(chunk.constants.len(), 1);
     }

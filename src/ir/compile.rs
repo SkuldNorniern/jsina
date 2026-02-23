@@ -1,4 +1,4 @@
-use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
+use crate::ir::bytecode::{BytecodeChunk, ConstEntry, ExceptionHandler, Opcode};
 use crate::ir::hir::*;
 
 #[derive(Debug)]
@@ -169,12 +169,25 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
         }
     }
 
+    let handlers: Vec<ExceptionHandler> = func.exception_regions.iter().map(|r| {
+        let try_start = block_offsets.get(r.try_entry_block as usize).copied().unwrap_or(0) as u32;
+        let try_end = block_offsets.get(r.catch_block as usize).copied().unwrap_or(code.len()) as u32;
+        let handler_pc = try_end;
+        ExceptionHandler {
+            try_start,
+            try_end,
+            handler_pc,
+            catch_slot: (r.catch_slot).min(255) as u8,
+        }
+    }).collect();
+
     CompiledFunction {
         name: func.name.clone(),
         chunk: BytecodeChunk {
             code,
             constants,
             num_locals: func.num_locals,
+            handlers,
         },
     }
 }
@@ -188,7 +201,7 @@ mod tests {
     #[test]
     fn compile_push_return() {
         let span = crate::diagnostics::Span::point(Position::start());
-        let func =         HirFunction {
+        let func = HirFunction {
             name: Some("main".to_string()),
             params: vec![],
             num_locals: 0,
@@ -201,6 +214,7 @@ mod tests {
                 }],
                 terminator: HirTerminator::Return { span },
             }],
+            exception_regions: vec![],
         };
         let cf = hir_to_bytecode(&func);
         assert_eq!(cf.chunk.constants.len(), 1);
