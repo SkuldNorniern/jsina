@@ -75,3 +75,18 @@ impl Heap {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heap_set_get_prop() {
+        let mut heap = Heap::new();
+        let id = heap.alloc_object();
+        heap.set_prop(id, "x", Value::Int(0));
+        assert_eq!(heap.get_prop(id, "x").to_i64(), 0);
+        heap.set_prop(id, "x", Value::Int(42));
+        assert_eq!(heap.get_prop(id, "x").to_i64(), 42);
+    }
+}
