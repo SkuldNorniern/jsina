@@ -22,11 +22,18 @@ impl std::fmt::Display for LowerError {
 impl std::error::Error for LowerError {}
 
 pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
-    let mut functions = Vec::new();
+    let mut func_index: HashMap<String, u32> = HashMap::new();
+    let mut func_decls: Vec<&FunctionDeclStmt> = Vec::new();
     for stmt in &script.body {
         if let Statement::FunctionDecl(f) = stmt {
-            functions.push(compile_function(f)?);
+            let idx = func_index.len() as u32;
+            func_index.insert(f.name.clone(), idx);
+            func_decls.push(f);
         }
+    }
+    let mut functions = Vec::new();
+    for f in func_decls {
+        functions.push(compile_function(f, &func_index)?);
     }
     Ok(functions)
 }
@@ -37,9 +44,10 @@ struct LowerCtx {
     locals: HashMap<String, u32>,
     next_slot: u32,
     return_span: Span,
+    func_index: HashMap<String, u32>,
 }
 
-fn compile_function(f: &FunctionDeclStmt) -> Result<HirFunction, LowerError> {
+fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> Result<HirFunction, LowerError> {
     let span = f.span;
     let mut ctx = LowerCtx {
         blocks: vec![HirBlock {
@@ -51,6 +59,7 @@ fn compile_function(f: &FunctionDeclStmt) -> Result<HirFunction, LowerError> {
         locals: HashMap::new(),
         next_slot: 0,
         return_span: span,
+        func_index: func_index.clone(),
     };
 
     for param in &f.params {
@@ -89,19 +98,19 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
         Statement::Return(r) => {
             ctx.return_span = r.span;
             if let Some(ref expr) = r.argument {
-                compile_expression(expr, ops, &ctx.locals)?;
+                compile_expression(expr, ops, &ctx.locals, &ctx.func_index)?;
             }
             return Ok(true);
         }
         Statement::Expression(e) => {
-            compile_expression(&e.expression, ops, &ctx.locals)?;
+            compile_expression(&e.expression, ops, &ctx.locals, &ctx.func_index)?;
             ops.push(HirOp::Pop { span: e.span });
             return Ok(false);
         }
         Statement::If(i) => {
             let cond_slot = ctx.next_slot;
             ctx.next_slot += 1;
-            compile_expression(&i.condition, ops, &ctx.locals)?;
+            compile_expression(&i.condition, ops, &ctx.locals, &ctx.func_index)?;
             ops.push(HirOp::StoreLocal {
                 id: cond_slot,
                 span: i.span,
@@ -181,7 +190,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
 
             ctx.current_block = loop_id as usize;
             let loop_ops = &mut ctx.blocks[ctx.current_block].ops;
-            compile_expression(&w.condition, loop_ops, &ctx.locals)?;
+            compile_expression(&w.condition, loop_ops, &ctx.locals, &ctx.func_index)?;
             loop_ops.push(HirOp::StoreLocal {
                 id: cond_slot,
                 span: w.span,
@@ -206,7 +215,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                     s
                 });
                 if let Some(ref init) = decl.init {
-                    compile_expression(init, ops, &ctx.locals)?;
+                    compile_expression(init, ops, &ctx.locals, &ctx.func_index)?;
                     ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: decl.span,
@@ -223,7 +232,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                     s
                 });
                 if let Some(ref init) = decl.init {
-                    compile_expression(init, ops, &ctx.locals)?;
+                    compile_expression(init, ops, &ctx.locals, &ctx.func_index)?;
                     ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: decl.span,
@@ -240,7 +249,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                     s
                 });
                 if let Some(ref init) = decl.init {
-                    compile_expression(init, ops, &ctx.locals)?;
+                    compile_expression(init, ops, &ctx.locals, &ctx.func_index)?;
                     ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: decl.span,
@@ -288,7 +297,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             ctx.current_block = loop_id as usize;
             let loop_ops = &mut ctx.blocks[ctx.current_block].ops;
             if let Some(ref cond) = f.condition {
-                compile_expression(cond, loop_ops, &ctx.locals)?;
+                compile_expression(cond, loop_ops, &ctx.locals, &ctx.func_index)?;
             } else {
                 loop_ops.push(HirOp::LoadConst {
                     value: HirConst::Int(1),
@@ -312,7 +321,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             ctx.current_block = update_id as usize;
             let update_ops = &mut ctx.blocks[ctx.current_block].ops;
             if let Some(ref upd) = f.update {
-                compile_expression(upd, update_ops, &ctx.locals)?;
+                compile_expression(upd, update_ops, &ctx.locals, &ctx.func_index)?;
                 update_ops.push(HirOp::Pop { span: f.span });
             }
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
@@ -333,6 +342,7 @@ fn compile_expression(
     expr: &Expression,
     ops: &mut Vec<HirOp>,
     locals: &HashMap<String, u32>,
+    func_index: &HashMap<String, u32>,
 ) -> Result<(), LowerError> {
     match expr {
         Expression::Literal(e) => {
@@ -363,8 +373,8 @@ fn compile_expression(
             });
         }
         Expression::Binary(e) => {
-            compile_expression(&e.left, ops, locals)?;
-            compile_expression(&e.right, ops, locals)?;
+            compile_expression(&e.left, ops, locals, func_index)?;
+            compile_expression(&e.right, ops, locals, func_index)?;
             match e.op {
                 BinaryOp::Add => ops.push(HirOp::Add { span: e.span }),
                 BinaryOp::Sub => ops.push(HirOp::Sub { span: e.span }),
@@ -381,13 +391,13 @@ fn compile_expression(
         }
         Expression::Unary(e) => {
             match e.op {
-                UnaryOp::Plus => compile_expression(&e.argument, ops, locals)?,
+                UnaryOp::Plus => compile_expression(&e.argument, ops, locals, func_index)?,
                 UnaryOp::Minus => {
                     ops.push(HirOp::LoadConst {
                         value: HirConst::Int(0),
                         span: e.span,
                     });
-                    compile_expression(&e.argument, ops, locals)?;
+                    compile_expression(&e.argument, ops, locals, func_index)?;
                     ops.push(HirOp::Sub { span: e.span });
                 }
                 UnaryOp::LogicalNot => {
@@ -413,7 +423,7 @@ fn compile_expression(
                     ));
                 }
             };
-            compile_expression(&e.right, ops, locals)?;
+            compile_expression(&e.right, ops, locals, func_index)?;
             ops.push(HirOp::StoreLocal {
                 id: slot,
                 span: e.span,
@@ -423,11 +433,29 @@ fn compile_expression(
                 span: e.span,
             });
         }
-        Expression::Call(_) => {
-            return Err(LowerError::Unsupported(
-                "call expression not yet supported".to_string(),
-                Some(expr.span()),
-            ));
+        Expression::Call(e) => {
+            let idx = match e.callee.as_ref() {
+                Expression::Identifier(id) => *func_index.get(&id.name).ok_or_else(|| {
+                    LowerError::Unsupported(
+                        format!("call to undefined function '{}'", id.name),
+                        Some(id.span),
+                    )
+                })?,
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "call to non-identifier not yet supported".to_string(),
+                        Some(e.span),
+                    ));
+                }
+            };
+            for arg in &e.args {
+                compile_expression(arg, ops, locals, func_index)?;
+            }
+            ops.push(HirOp::Call {
+                func_index: idx,
+                argc: e.args.len() as u32,
+                span: e.span,
+            });
         }
     }
     Ok(())
@@ -535,6 +563,24 @@ mod tests {
             assert_eq!(v.to_i64(), 0);
         } else {
             panic!("expected Return(0)");
+        }
+    }
+
+    #[test]
+    fn lower_call() {
+        let mut parser = Parser::new("function add(a,b) { return a+b; } function main() { return add(1,2); }");
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let chunks: Vec<_> = funcs.iter().map(|f| hir_to_bytecode(f).chunk).collect();
+        let program = crate::vm::Program {
+            chunks: chunks.clone(),
+            entry: funcs.iter().position(|f| f.name.as_deref() == Some("main")).expect("main"),
+        };
+        let completion = crate::vm::interpret_program(&program).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 3);
+        } else {
+            panic!("expected Return(3), got {:?}", completion);
         }
     }
 

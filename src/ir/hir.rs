@@ -29,6 +29,7 @@ pub enum HirOp {
     Div { span: Span },
     Lt { span: Span },
     Pop { span: Span },
+    Call { func_index: u32, argc: u32, span: Span },
 }
 
 #[derive(Debug, Clone)]

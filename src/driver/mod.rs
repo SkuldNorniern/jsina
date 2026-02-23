@@ -2,7 +2,7 @@ use crate::backend::translate_to_lamina_ir;
 use crate::diagnostics::Diagnostic;
 use crate::frontend::{check_early_errors, Lexer, Parser};
 use crate::ir::{hir_to_bytecode, script_to_hir};
-use crate::vm::{interpret, Completion};
+use crate::vm::{interpret_program, Completion, Program};
 
 #[derive(Debug)]
 pub enum DriverError {
@@ -102,16 +102,20 @@ impl Driver {
     pub fn run(source: &str) -> Result<i64, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
-        let main = funcs
+        let entry = funcs
             .iter()
-            .find(|f| f.name.as_deref() == Some("main"))
+            .position(|f| f.name.as_deref() == Some("main"))
             .ok_or_else(|| DriverError::Diagnostic(vec![Diagnostic::error(
                 "JSINA-RUN-001",
                 "no main function found",
                 None,
             )]))?;
-        let cf = hir_to_bytecode(main);
-        let completion = interpret(&cf.chunk)?;
+        let chunks: Vec<_> = funcs.iter().map(|f| hir_to_bytecode(f).chunk).collect();
+        let program = Program {
+            chunks,
+            entry,
+        };
+        let completion = interpret_program(&program)?;
         let value = match completion {
             Completion::Return(v) => v,
             Completion::Normal(v) => v,

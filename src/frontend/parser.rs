@@ -552,11 +552,11 @@ impl Parser {
         let mut expr = self.parse_primary()?;
 
         loop {
-            if matches!(self.peek(), Some(TokenType::LeftParen)) {
+            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftParen)) {
                 let start_span = expr.span();
                 self.advance();
                 let mut args = Vec::new();
-                while !matches!(self.peek(), Some(TokenType::RightParen) | Some(TokenType::Eof) | None) {
+                while !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightParen) | Some(TokenType::Eof) | None) {
                     args.push(self.parse_expression()?);
                     if !self.optional(TokenType::Comma) {
                         break;

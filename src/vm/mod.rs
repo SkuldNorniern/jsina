@@ -1,3 +1,3 @@
 pub mod interpreter;
 
-pub use interpreter::{interpret, Completion};
+pub use interpreter::{interpret, interpret_program, Completion, Program};

@@ -24,6 +24,7 @@ pub enum Opcode {
     Mul = 0x12,
     Div = 0x13,
     Lt = 0x14,
+    Call = 0x40,
     JumpIfFalse = 0x30,
     Jump = 0x31,
     Return = 0x20,

@@ -27,25 +27,57 @@ impl std::fmt::Display for VmError {
 
 impl std::error::Error for VmError {}
 
+#[derive(Debug, Clone)]
+pub struct Program {
+    pub chunks: Vec<BytecodeChunk>,
+    pub entry: usize,
+}
+
 pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
+    let program = Program {
+        chunks: vec![chunk.clone()],
+        entry: 0,
+    };
+    interpret_program(&program)
+}
+
+struct Frame {
+    chunk_index: usize,
+    pc: usize,
+    locals: Vec<Value>,
+}
+
+pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
     let mut stack: Vec<Value> = Vec::new();
-    let mut locals: Vec<Value> = (0..chunk.num_locals).map(|_| Value::Undefined).collect();
-    let mut pc: usize = 0;
-    let code = &chunk.code;
-    let constants = &chunk.constants;
+    let entry_chunk = program
+        .chunks
+        .get(program.entry)
+        .ok_or(VmError::InvalidConstIndex(program.entry))?;
+    let mut frames: Vec<Frame> = vec![Frame {
+        chunk_index: program.entry,
+        pc: 0,
+        locals: (0..entry_chunk.num_locals).map(|_| Value::Undefined).collect(),
+    }];
 
     loop {
-        if pc >= code.len() {
+        let frame = frames.last_mut().ok_or(VmError::StackUnderflow)?;
+        let chunk = &program.chunks[frame.chunk_index];
+        let code = &chunk.code;
+        let constants = &chunk.constants;
+        let locals = &mut frame.locals;
+        let pc = &mut frame.pc;
+
+        if *pc >= code.len() {
             break;
         }
 
-        let op = code[pc];
-        pc += 1;
+        let op = code[*pc];
+        *pc += 1;
 
         match op {
             x if x == Opcode::PushConst as u8 => {
-                let idx = *code.get(pc).ok_or(VmError::StackUnderflow)? as usize;
-                pc += 1;
+                let idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 1;
                 let val = constants
                     .get(idx)
                     .ok_or(VmError::InvalidConstIndex(idx))?
@@ -56,14 +88,14 @@ pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
                 stack.pop().ok_or(VmError::StackUnderflow)?;
             }
             x if x == Opcode::LoadLocal as u8 => {
-                let slot = *code.get(pc).ok_or(VmError::StackUnderflow)? as usize;
-                pc += 1;
+                let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 1;
                 let val = locals.get(slot).cloned().unwrap_or(Value::Undefined);
                 stack.push(val);
             }
             x if x == Opcode::StoreLocal as u8 => {
-                let slot = *code.get(pc).ok_or(VmError::StackUnderflow)? as usize;
-                pc += 1;
+                let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 1;
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 if slot < locals.len() {
                     locals[slot] = val;
@@ -71,7 +103,32 @@ pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
             }
             x if x == Opcode::Return as u8 => {
                 let val = stack.pop().unwrap_or(Value::Undefined);
-                return Ok(Completion::Return(val));
+                frames.pop();
+                if frames.is_empty() {
+                    return Ok(Completion::Return(val));
+                }
+                stack.push(val);
+            }
+            x if x == Opcode::Call as u8 => {
+                let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 2;
+                let callee = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
+                let mut args: Vec<Value> = (0..argc)
+                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+                    .collect::<Result<Vec<_>, _>>()?;
+                args.reverse();
+                let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
+                for (i, v) in args.into_iter().enumerate() {
+                    if i < callee_locals.len() {
+                        callee_locals[i] = v;
+                    }
+                }
+                frames.push(Frame {
+                    chunk_index: func_idx,
+                    pc: 0,
+                    locals: callee_locals,
+                });
             }
             x if x == Opcode::Add as u8 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
@@ -104,19 +161,19 @@ pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
                 stack.push(result);
             }
             x if x == Opcode::JumpIfFalse as u8 => {
-                let offset_bytes = code.get(pc..pc + 2).ok_or(VmError::StackUnderflow)?;
-                pc += 2;
+                let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
+                *pc += 2;
                 let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 if !is_truthy(&val) {
-                    pc = (pc as isize + offset) as usize;
+                    *pc = (*pc as isize + offset) as usize;
                 }
             }
             x if x == Opcode::Jump as u8 => {
-                let offset_bytes = code.get(pc..pc + 2).ok_or(VmError::StackUnderflow)?;
-                pc += 2;
+                let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
+                *pc += 2;
                 let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
-                pc = (pc as isize + offset) as usize;
+                *pc = (*pc as isize + offset) as usize;
             }
             _ => return Err(VmError::InvalidOpcode(op)),
         }
