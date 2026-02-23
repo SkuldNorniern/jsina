@@ -45,6 +45,15 @@ struct LowerCtx {
     next_slot: u32,
     return_span: Span,
     func_index: HashMap<String, u32>,
+    loop_stack: Vec<(HirBlockId, HirBlockId)>,
+}
+
+fn loop_stack_push(ctx: &mut LowerCtx, continue_target: HirBlockId, exit_target: HirBlockId) {
+    ctx.loop_stack.push((continue_target, exit_target));
+}
+
+fn loop_stack_pop(ctx: &mut LowerCtx) {
+    ctx.loop_stack.pop();
 }
 
 fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> Result<HirFunction, LowerError> {
@@ -60,6 +69,7 @@ fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> 
         next_slot: 0,
         return_span: span,
         func_index: func_index.clone(),
+        loop_stack: Vec::new(),
     };
 
     for param in &f.params {
@@ -179,12 +189,6 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                 ops: Vec::new(),
                 terminator: HirTerminator::Jump { target: 0 },
             });
-            let exit_id = ctx.blocks.len() as HirBlockId;
-            ctx.blocks.push(HirBlock {
-                id: exit_id,
-                ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: 0 },
-            });
 
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
 
@@ -195,15 +199,40 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                 id: cond_slot,
                 span: w.span,
             });
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+
+            const WHILE_EXIT_PLACEHOLDER: HirBlockId = u32::MAX - 3;
+            loop_stack_push(ctx, loop_id, WHILE_EXIT_PLACEHOLDER);
+            ctx.current_block = body_id as usize;
+            compile_statement(&w.body, ctx)?;
+            loop_stack_pop(ctx);
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+
+            ctx.blocks.push(HirBlock {
+                id: ctx.blocks.len() as HirBlockId,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let exit_id = ctx.blocks.len() as HirBlockId - 1;
+            for block in &mut ctx.blocks {
+                match &mut block.terminator {
+                    HirTerminator::Jump { target } => {
+                        if *target == WHILE_EXIT_PLACEHOLDER {
+                            *target = exit_id;
+                        }
+                    }
+                    HirTerminator::Branch { else_block, .. } => {
+                        if *else_block == WHILE_EXIT_PLACEHOLDER {
+                            *else_block = exit_id;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            ctx.blocks[loop_id as usize].terminator = HirTerminator::Branch {
                 cond: cond_slot,
                 then_block: body_id,
                 else_block: exit_id,
             };
-
-            ctx.current_block = body_id as usize;
-            compile_statement(&w.body, ctx)?;
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
 
             ctx.current_block = exit_id as usize;
         }
@@ -279,18 +308,9 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                 ops: Vec::new(),
                 terminator: HirTerminator::Jump { target: 0 },
             });
-            let update_id = ctx.blocks.len() as HirBlockId;
-            ctx.blocks.push(HirBlock {
-                id: update_id,
-                ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: 0 },
-            });
-            let exit_id = ctx.blocks.len() as HirBlockId;
-            ctx.blocks.push(HirBlock {
-                id: exit_id,
-                ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: 0 },
-            });
+
+            const FOR_UPDATE_PLACEHOLDER: HirBlockId = u32::MAX - 1;
+            const FOR_EXIT_PLACEHOLDER: HirBlockId = u32::MAX - 2;
 
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
 
@@ -311,28 +331,96 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
                 cond: cond_slot,
                 then_block: body_id,
-                else_block: exit_id,
+                else_block: FOR_EXIT_PLACEHOLDER,
             };
 
+            loop_stack_push(ctx, FOR_UPDATE_PLACEHOLDER, FOR_EXIT_PLACEHOLDER);
             ctx.current_block = body_id as usize;
             compile_statement(&f.body, ctx)?;
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: update_id };
+            loop_stack_pop(ctx);
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: FOR_UPDATE_PLACEHOLDER };
 
-            ctx.current_block = update_id as usize;
-            let update_ops = &mut ctx.blocks[ctx.current_block].ops;
+            ctx.blocks.push(HirBlock {
+                id: ctx.blocks.len() as HirBlockId,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let update_id = ctx.blocks.len() as HirBlockId - 1;
+            let update_ops = &mut ctx.blocks[update_id as usize].ops;
             if let Some(ref upd) = f.update {
                 compile_expression(upd, update_ops, &ctx.locals, &ctx.func_index)?;
                 update_ops.push(HirOp::Pop { span: f.span });
             }
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+            ctx.blocks[update_id as usize].terminator = HirTerminator::Jump { target: loop_id };
+
+            ctx.blocks.push(HirBlock {
+                id: ctx.blocks.len() as HirBlockId,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let exit_id = ctx.blocks.len() as HirBlockId - 1;
+
+            for block in &mut ctx.blocks {
+                match &mut block.terminator {
+                    HirTerminator::Jump { target } => {
+                        if *target == FOR_UPDATE_PLACEHOLDER {
+                            *target = update_id;
+                        } else if *target == FOR_EXIT_PLACEHOLDER {
+                            *target = exit_id;
+                        }
+                    }
+                    HirTerminator::Branch { else_block, .. } => {
+                        if *else_block == FOR_EXIT_PLACEHOLDER {
+                            *else_block = exit_id;
+                        }
+                    }
+                    _ => {}
+                }
+            }
 
             ctx.current_block = exit_id as usize;
         }
-        Statement::Break(_) | Statement::Continue(_) => {
-            return Err(LowerError::Unsupported(
-                format!("{:?} not yet supported", stmt),
-                Some(stmt.span()),
-            ));
+        Statement::Break(b) => {
+            let (_, exit) = ctx.loop_stack.last().ok_or_else(|| {
+                LowerError::Unsupported("break outside loop".to_string(), Some(b.span))
+            })?;
+            let break_block_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: break_block_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: *exit },
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+                target: break_block_id,
+            };
+            let unreachable_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: unreachable_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: *exit },
+            });
+            ctx.current_block = unreachable_id as usize;
+        }
+        Statement::Continue(c) => {
+            let (cont, exit) = ctx.loop_stack.last().ok_or_else(|| {
+                LowerError::Unsupported("continue outside loop".to_string(), Some(c.span))
+            })?;
+            let cont_block_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: cont_block_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: *cont },
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+                target: cont_block_id,
+            };
+            let unreachable_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: unreachable_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: *exit },
+            });
+            ctx.current_block = unreachable_id as usize;
         }
     }
     Ok(false)
@@ -380,6 +468,8 @@ fn compile_expression(
                 BinaryOp::Sub => ops.push(HirOp::Sub { span: e.span }),
                 BinaryOp::Mul => ops.push(HirOp::Mul { span: e.span }),
                 BinaryOp::Div => ops.push(HirOp::Div { span: e.span }),
+                BinaryOp::Mod => ops.push(HirOp::Mod { span: e.span }),
+                BinaryOp::Pow => ops.push(HirOp::Pow { span: e.span }),
                 BinaryOp::Lt => ops.push(HirOp::Lt { span: e.span }),
                 _ => {
                     return Err(LowerError::Unsupported(
@@ -595,6 +685,22 @@ mod tests {
             assert_eq!(v.to_i64(), 6);
         } else {
             panic!("expected Return(6), got {:?}", completion);
+        }
+    }
+
+    #[test]
+    fn lower_while_break_continue() {
+        let mut parser = Parser::new(
+            "function main() { let n = 0; while (n < 10) { n = n + 1; if (n < 5) continue; break; } return n; }",
+        );
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let cf = hir_to_bytecode(&funcs[0]);
+        let completion = interpret(&cf.chunk).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 5, "expected 5 when breaking after n reaches 5");
+        } else {
+            panic!("expected Return(5), got {:?}", completion);
         }
     }
 }

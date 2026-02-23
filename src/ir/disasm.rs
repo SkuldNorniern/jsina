@@ -32,6 +32,8 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             x if x == Opcode::Sub as u8 => format!("  {:04}  Sub", line_start),
             x if x == Opcode::Mul as u8 => format!("  {:04}  Mul", line_start),
             x if x == Opcode::Div as u8 => format!("  {:04}  Div", line_start),
+            x if x == Opcode::Mod as u8 => format!("  {:04}  Mod", line_start),
+            x if x == Opcode::Pow as u8 => format!("  {:04}  Pow", line_start),
             x if x == Opcode::Lt as u8 => format!("  {:04}  Lt", line_start),
             x if x == Opcode::Call as u8 => {
                 let func_idx = code.get(pc).copied().unwrap_or(0);

@@ -27,6 +27,8 @@ pub enum HirOp {
     Sub { span: Span },
     Mul { span: Span },
     Div { span: Span },
+    Mod { span: Span },
+    Pow { span: Span },
     Lt { span: Span },
     Pop { span: Span },
     Call { func_index: u32, argc: u32, span: Span },

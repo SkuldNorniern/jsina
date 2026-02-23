@@ -154,6 +154,18 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 let result = div_values(&lhs, &rhs)?;
                 stack.push(result);
             }
+            x if x == Opcode::Mod as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = mod_values(&lhs, &rhs)?;
+                stack.push(result);
+            }
+            x if x == Opcode::Pow as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = pow_values(&lhs, &rhs)?;
+                stack.push(result);
+            }
             x if x == Opcode::Lt as u8 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
@@ -235,6 +247,34 @@ fn div_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x / y)),
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 / y)),
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x / *y as f64)),
+        _ => Ok(Value::Number(f64::NAN)),
+    }
+}
+
+fn mod_values(a: &Value, b: &Value) -> Result<Value, VmError> {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => {
+            if *y == 0 {
+                Ok(Value::Number(f64::NAN))
+            } else {
+                Ok(Value::Int(x.wrapping_rem(*y)))
+            }
+        }
+        (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x % y)),
+        (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 % y)),
+        (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x % *y as f64)),
+        _ => Ok(Value::Number(f64::NAN)),
+    }
+}
+
+fn pow_values(a: &Value, b: &Value) -> Result<Value, VmError> {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) if *y >= 0 && *y <= 31 => {
+            Ok(Value::Int(x.saturating_pow(*y as u32)))
+        }
+        (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x.powf(*y))),
+        (Value::Int(x), Value::Number(y)) => Ok(Value::Number((*x as f64).powf(*y))),
+        (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x.powi(*y))),
         _ => Ok(Value::Number(f64::NAN)),
     }
 }

@@ -128,6 +128,7 @@ impl Trie {
             (">>=", TokenType::RightShiftAssign),
             (">>>=", TokenType::UnsignedRightShiftAssign),
             ("**=", TokenType::ExponentAssign),
+            ("**", TokenType::Exponent),
             ("&&", TokenType::LogicalAnd),
             ("||", TokenType::LogicalOr),
             ("??", TokenType::NullishCoalescing),
@@ -227,6 +228,13 @@ mod tests {
             assert_eq!(length, 1);
         } else {
             panic!("Should find plus");
+        }
+
+        if let Some((token_type, length)) = trie.find_longest_match("** 3", 0) {
+            assert_eq!(token_type, TokenType::Exponent);
+            assert_eq!(length, 2);
+        } else {
+            panic!("Should find exponent");
         }
     }
 
