@@ -299,6 +299,9 @@ fn compile_expression(
             match e.op {
                 BinaryOp::Add => ops.push(HirOp::Add { span: e.span }),
                 BinaryOp::Sub => ops.push(HirOp::Sub { span: e.span }),
+                BinaryOp::Mul => ops.push(HirOp::Mul { span: e.span }),
+                BinaryOp::Div => ops.push(HirOp::Div { span: e.span }),
+                BinaryOp::Lt => ops.push(HirOp::Lt { span: e.span }),
                 _ => {
                     return Err(LowerError::Unsupported(
                         format!("binary op {:?} not yet supported", e.op),
@@ -326,9 +329,34 @@ fn compile_expression(
                 }
             }
         }
-        Expression::Call(_) | Expression::Assign(_) => {
+        Expression::Assign(e) => {
+            let slot = match e.left.as_ref() {
+                Expression::Identifier(id) => *locals.get(&id.name).ok_or_else(|| {
+                    LowerError::Unsupported(
+                        format!("assignment to undefined variable '{}'", id.name),
+                        Some(id.span),
+                    )
+                })?,
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "assignment to non-identifier not yet supported".to_string(),
+                        Some(e.span),
+                    ));
+                }
+            };
+            compile_expression(&e.right, ops, locals)?;
+            ops.push(HirOp::StoreLocal {
+                id: slot,
+                span: e.span,
+            });
+            ops.push(HirOp::LoadLocal {
+                id: slot,
+                span: e.span,
+            });
+        }
+        Expression::Call(_) => {
             return Err(LowerError::Unsupported(
-                format!("expression {:?} not yet supported", expr),
+                "call expression not yet supported".to_string(),
                 Some(expr.span()),
             ));
         }
@@ -417,8 +445,14 @@ mod tests {
     fn lower_while() {
         let mut parser = Parser::new("function main() { let n = 0; while (n < 3) { n = n + 1; } return n; }");
         let script = parser.parse().expect("parse");
-        let r = script_to_hir(&script);
-        assert!(r.is_err(), "n < 3 and n = n + 1 not yet supported");
+        let funcs = script_to_hir(&script).expect("lower");
+        let cf = hir_to_bytecode(&funcs[0]);
+        let completion = interpret(&cf.chunk).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 3);
+        } else {
+            panic!("expected Return(3)");
+        }
     }
 
     #[test]

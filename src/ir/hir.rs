@@ -25,6 +25,9 @@ pub enum HirOp {
     StoreLocal { id: u32, span: Span },
     Add { span: Span },
     Sub { span: Span },
+    Mul { span: Span },
+    Div { span: Span },
+    Lt { span: Span },
     Pop { span: Span },
 }
 

@@ -85,6 +85,24 @@ pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
                 let result = sub_values(&lhs, &rhs)?;
                 stack.push(result);
             }
+            x if x == Opcode::Mul as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = mul_values(&lhs, &rhs)?;
+                stack.push(result);
+            }
+            x if x == Opcode::Div as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = div_values(&lhs, &rhs)?;
+                stack.push(result);
+            }
+            x if x == Opcode::Lt as u8 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = lt_values(&lhs, &rhs)?;
+                stack.push(result);
+            }
             x if x == Opcode::JumpIfFalse as u8 => {
                 let offset_bytes = code.get(pc..pc + 2).ok_or(VmError::StackUnderflow)?;
                 pc += 2;
@@ -136,6 +154,43 @@ fn sub_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x - *y as f64)),
         _ => Ok(Value::Number(f64::NAN)),
     }
+}
+
+fn mul_values(a: &Value, b: &Value) -> Result<Value, VmError> {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x.saturating_mul(*y))),
+        (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x * y)),
+        (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 * y)),
+        (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x * *y as f64)),
+        _ => Ok(Value::Number(f64::NAN)),
+    }
+}
+
+fn div_values(a: &Value, b: &Value) -> Result<Value, VmError> {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => {
+            if *y == 0 {
+                Ok(Value::Number(f64::INFINITY))
+            } else {
+                Ok(Value::Number(*x as f64 / *y as f64))
+            }
+        }
+        (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x / y)),
+        (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 / y)),
+        (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x / *y as f64)),
+        _ => Ok(Value::Number(f64::NAN)),
+    }
+}
+
+fn lt_values(a: &Value, b: &Value) -> Result<Value, VmError> {
+    let result = match (a, b) {
+        (Value::Int(x), Value::Int(y)) => x < y,
+        (Value::Number(x), Value::Number(y)) => x < y,
+        (Value::Int(x), Value::Number(y)) => (*x as f64) < *y,
+        (Value::Number(x), Value::Int(y)) => *x < (*y as f64),
+        _ => false,
+    };
+    Ok(Value::Bool(result))
 }
 
 impl ConstEntry {

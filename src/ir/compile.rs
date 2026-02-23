@@ -14,7 +14,7 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
             HirOp::LoadConst { .. } => 2,
             HirOp::Pop { .. } => 1,
             HirOp::LoadLocal { .. } | HirOp::StoreLocal { .. } => 2,
-            HirOp::Add { .. } | HirOp::Sub { .. } => 1,
+            HirOp::Add { .. } | HirOp::Sub { .. } | HirOp::Mul { .. } | HirOp::Div { .. } | HirOp::Lt { .. } => 1,
         };
     }
     size += match &block.terminator {
@@ -62,6 +62,9 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 }
                 HirOp::Add { .. } => code.push(Opcode::Add as u8),
                 HirOp::Sub { .. } => code.push(Opcode::Sub as u8),
+                HirOp::Mul { .. } => code.push(Opcode::Mul as u8),
+                HirOp::Div { .. } => code.push(Opcode::Div as u8),
+                HirOp::Lt { .. } => code.push(Opcode::Lt as u8),
             }
         }
         match &block.terminator {
