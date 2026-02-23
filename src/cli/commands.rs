@@ -1,5 +1,8 @@
+use crate::cli::CliError;
 use crate::driver::Driver;
-use crate::frontend::{Script, Statement, Expression, TokenType};
+use crate::frontend::{Expression, Script, Statement, TokenType};
+use crate::test262::{load_allowlist, run_test, TestStatus};
+use std::path::Path;
 
 pub fn tokens(source: &str) {
     let tokens = Driver::tokens(source);
@@ -132,4 +135,61 @@ fn format_expr(expr: &Expression) -> String {
             }
         },
     }
+}
+
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub fn test262(test262_dir: Option<&str>) -> Result<(), CliError> {
+    let cwd = std::env::current_dir().map_err(|e| CliError::Usage(e.to_string()))?;
+    let allowlist_path = cwd.join("test262").join("allowlist.txt");
+    let entries = load_allowlist(&allowlist_path);
+
+    let test262_root: Option<std::path::PathBuf> = test262_dir
+        .map(Path::new)
+        .filter(|p| p.exists())
+        .map(|p| p.to_path_buf())
+        .or_else(|| {
+            std::env::var_os("TEST262_ROOT")
+                .map(std::path::PathBuf::from)
+                .filter(|p| p.exists())
+        });
+
+    let mut pass = 0;
+    let mut fail = 0;
+    let mut skip = 0;
+
+    for entry in &entries {
+        let test_path = Path::new(&entry.test_path);
+        let result = run_test(test_path, test262_root.as_deref());
+        match result.status {
+            TestStatus::Pass => {
+                pass += 1;
+                println!("PASS  {}", result.path);
+            }
+            TestStatus::Fail => {
+                fail += 1;
+                println!("FAIL  {}  {}", result.path, result.message.as_deref().unwrap_or(""));
+            }
+            TestStatus::SkipFeature | TestStatus::SkipParse => {
+                skip += 1;
+                println!("SKIP  {}", result.path);
+            }
+            TestStatus::HarnessError => {
+                fail += 1;
+                println!("ERROR {}  {}", result.path, result.message.as_deref().unwrap_or(""));
+            }
+        }
+    }
+
+    println!(
+        "\ntest262: {} passed, {} failed, {} skipped (allowlist: {})",
+        pass,
+        fail,
+        skip,
+        entries.len()
+    );
+
+    if fail > 0 {
+        return Err(CliError::Usage(format!("{} test(s) failed", fail)));
+    }
+    Ok(())
 }

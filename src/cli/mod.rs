@@ -42,12 +42,13 @@ USAGE:
     jsina <command> [options] [file]
 
 COMMANDS:
-    run     Execute a JavaScript file (default)
-    tokens  Dump tokens from source
-    ast     Dump AST
-    hir     Dump HIR / Lamina IR
-    bc      Dump bytecode
-    ir      Alias for hir - dump Lamina IR
+    run      Execute a JavaScript file (default)
+    tokens   Dump tokens from source
+    ast      Dump AST
+    hir      Dump HIR / Lamina IR
+    bc       Dump bytecode
+    ir       Alias for hir - dump Lamina IR
+    test262  Run test262 allowlist (debug build only; use --test262-dir for repo path)
 
 EXAMPLES:
     jsina run script.js
@@ -79,6 +80,18 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             let bc = Driver::bc(&source)?;
             println!("{}", bc);
         }
+        "test262" => {
+            #[cfg(debug_assertions)]
+            {
+                commands::test262(path)?;
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                return Err(CliError::Usage(
+                    "test262 is only available in debug builds (cargo build); use for CI/dev only".to_string(),
+                ));
+            }
+        }
         "help" | "-h" | "--help" => {
             print!("{}", HELP);
         }
@@ -94,10 +107,19 @@ fn parse_args(args: &[String]) -> Result<(Option<String>, Option<&str>), CliErro
     let mut command = None;
     let mut path = None;
 
-    for arg in args.iter().skip(1) {
+    let mut i = 1;
+    while i < args.len() {
+        let arg = &args[i];
         if arg == "-h" || arg == "--help" {
             command = Some("help".to_string());
-        } else if ["run", "tokens", "ast", "hir", "bc", "ir"].contains(&arg.as_str()) {
+        } else if arg == "--test262-dir" {
+            i += 1;
+            if i < args.len() {
+                path = Some(args[i].as_str());
+            }
+            i += 1;
+            continue;
+        } else if ["run", "tokens", "ast", "hir", "bc", "ir", "test262"].contains(&arg.as_str()) {
             if command.is_none() {
                 command = Some(arg.clone());
             } else if path.is_none() {
@@ -106,6 +128,7 @@ fn parse_args(args: &[String]) -> Result<(Option<String>, Option<&str>), CliErro
         } else if !arg.starts_with('-') && path.is_none() {
             path = Some(arg.as_str());
         }
+        i += 1;
     }
 
     Ok((command, path))
@@ -118,7 +141,7 @@ fn load_source(path: Option<&str>) -> Result<String, CliError> {
             Ok(content)
         }
         None => {
-            Ok("function main() { return 50; }".to_string())
+            Ok("function main() { let x = 10; let y = 40; return x + y; }".to_string())
         }
     }
 }
