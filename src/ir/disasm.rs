@@ -131,6 +131,8 @@ fn format_const(c: &ConstEntry) -> String {
         ConstEntry::Float(n) => n.to_string(),
         ConstEntry::String(s) => format!("{:?}", s),
         ConstEntry::Null => "null".to_string(),
+        ConstEntry::Undefined => "undefined".to_string(),
+        ConstEntry::Function(i) => format!("fn#{}", i),
     }
 }
 

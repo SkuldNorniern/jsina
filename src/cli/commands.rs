@@ -135,6 +135,9 @@ fn format_expr(expr: &Expression) -> String {
                 format!("{}[{}]", format_expr(&e.object), format_expr(inner))
             }
         },
+        Expression::FunctionExpr(e) => {
+            format!("function {}()", e.name.as_deref().unwrap_or(""))
+        }
     }
 }
 

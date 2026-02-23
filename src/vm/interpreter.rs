@@ -324,6 +324,38 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }
+            x if x == Opcode::CallMethod as u8 => {
+                let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 1;
+                let mut args: Vec<Value> = (0..argc)
+                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+                    .collect::<Result<Vec<_>, _>>()?;
+                args.reverse();
+                let callee = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let receiver = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let func_idx = match &callee {
+                    Value::Function(i) => *i,
+                    _ => {
+                        return Ok(Completion::Throw(Value::String(
+                            "callee is not a function".to_string(),
+                        )));
+                    }
+                };
+                let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
+                let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
+                for (i, v) in args.into_iter().enumerate() {
+                    if i < callee_locals.len() {
+                        callee_locals[i] = v;
+                    }
+                }
+                frames.push(Frame {
+                    chunk_index: func_idx,
+                    pc: 0,
+                    locals: callee_locals,
+                    this_value: receiver,
+                    rethrow_after_finally: false,
+                });
+            }
             x if x == Opcode::Add as u8 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
@@ -410,6 +442,7 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     Value::Int(_) | Value::Number(_) => "number",
                     Value::String(_) => "string",
                     Value::Object(_) | Value::Array(_) => "object",
+                    Value::Function(_) => "function",
                 };
                 stack.push(Value::String(s.to_string()));
             }
@@ -540,7 +573,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Function(_) => true,
     }
 }
 
@@ -552,7 +585,7 @@ fn value_to_number(v: &Value) -> f64 {
         Value::Null => 0.0,
         Value::Undefined => f64::NAN,
         Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
-        Value::Object(_) | Value::Array(_) => f64::NAN,
+        Value::Object(_) | Value::Array(_) | Value::Function(_) => f64::NAN,
     }
 }
 
@@ -565,6 +598,7 @@ fn value_to_prop_key(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
         Value::Object(_) | Value::Array(_) => "[object Object]".to_string(),
+        Value::Function(_) => "function".to_string(),
     }
 }
 
@@ -686,6 +720,7 @@ fn strict_eq_values(a: &Value, b: &Value) -> Value {
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Object(x), Value::Object(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => x == y,
+        (Value::Function(x), Value::Function(y)) => x == y,
         _ => false,
     };
     Value::Bool(result)
@@ -698,6 +733,8 @@ impl ConstEntry {
             ConstEntry::Float(n) => Value::Number(*n),
             ConstEntry::String(s) => Value::String(s.clone()),
             ConstEntry::Null => Value::Null,
+            ConstEntry::Undefined => Value::Undefined,
+            ConstEntry::Function(i) => Value::Function(*i),
         }
     }
 }

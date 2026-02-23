@@ -8,6 +8,7 @@ pub enum Value {
     String(String),
     Object(usize),
     Array(usize),
+    Function(usize),
 }
 
 impl Value {
@@ -54,6 +55,7 @@ impl std::fmt::Display for Value {
             Value::String(s) => write!(f, "{}", s),
             Value::Object(_) => write!(f, "[object Object]"),
             Value::Array(_) => write!(f, "[object Array]"),
+            Value::Function(_) => write!(f, "[object Function]"),
         }
     }
 }

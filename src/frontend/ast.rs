@@ -158,6 +158,16 @@ pub enum Expression {
     ObjectLiteral(ObjectLiteralExpr),
     ArrayLiteral(ArrayLiteralExpr),
     Member(MemberExpr),
+    FunctionExpr(FunctionExprData),
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionExprData {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Option<String>,
+    pub params: Vec<String>,
+    pub body: Box<Statement>,
 }
 
 #[derive(Debug, Clone)]
@@ -330,6 +340,7 @@ impl Expression {
             Expression::ObjectLiteral(e) => e.span,
             Expression::ArrayLiteral(e) => e.span,
             Expression::Member(e) => e.span,
+            Expression::FunctionExpr(e) => e.span,
         }
     }
 }

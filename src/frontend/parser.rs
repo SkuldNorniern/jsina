@@ -219,6 +219,28 @@ impl Parser {
         Ok(params)
     }
 
+    fn parse_function_expr(&mut self) -> Result<crate::frontend::ast::FunctionExprData, ParseError> {
+        let start_span = self.expect(TokenType::Function)?.span;
+        let id = self.next_id();
+        let name = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
+            Some(self.expect(TokenType::Identifier)?.lexeme)
+        } else {
+            None
+        };
+        self.expect(TokenType::LeftParen)?;
+        let params = self.parse_params()?;
+        self.expect(TokenType::RightParen)?;
+        let body = Box::new(self.parse_block()?);
+        let span = start_span.merge(body.span());
+        Ok(crate::frontend::ast::FunctionExprData {
+            id,
+            span,
+            name,
+            params,
+            body,
+        })
+    }
+
     fn parse_return(&mut self) -> Result<Statement, ParseError> {
         let start_span = self.expect(TokenType::Return)?.span;
         let id = self.next_id();
@@ -780,6 +802,10 @@ impl Parser {
                     elements,
                 }), span)
             }
+            TokenType::Function => {
+                let fe = self.parse_function_expr()?;
+                (Expression::FunctionExpr(fe.clone()), fe.span)
+            }
             _ => {
                 return Err(ParseError {
                     code: "JSINA-PARSE-006".to_string(),
@@ -1152,6 +1178,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn parse_function_expr() {
+        let script = parse_ok("function main() { return (function () { return 42; })(); }");
+        assert_eq!(script.body.len(), 1);
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::Return(r) = &b.body[0] {
+                    let arg = r.argument.as_ref().expect("return has arg");
+                    if let Expression::Call(c) = arg.as_ref() {
+                        if let Expression::FunctionExpr(fe) = c.callee.as_ref() {
+                            assert!(fe.name.is_none(), "anonymous function expr");
+                            assert_eq!(fe.params.len(), 0);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        panic!("expected IIFE with function expr");
     }
 
     #[test]

@@ -58,6 +58,7 @@ pub enum HirOp {
     Swap { span: Span },
     Call { func_index: u32, argc: u32, span: Span },
     CallBuiltin { builtin: BuiltinId, argc: u32, span: Span },
+    CallMethod { argc: u32, span: Span },
     Rethrow { slot: u32, span: Span },
 }
 
@@ -82,7 +83,9 @@ pub enum HirConst {
     Int(i64),
     Float(f64),
     Null,
+    Undefined,
     String(String),
+    Function(u32),
 }
 
 #[derive(Debug, Clone)]

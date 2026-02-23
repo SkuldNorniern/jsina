@@ -21,6 +21,7 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
             HirOp::GetProp { .. } | HirOp::SetProp { .. } => 2,
             HirOp::GetPropDyn { .. } | HirOp::SetPropDyn { .. } => 1,
             HirOp::Call { .. } | HirOp::CallBuiltin { .. } => 3,
+            HirOp::CallMethod { .. } => 2,
             HirOp::Rethrow { .. } => 2,
         };
     }
@@ -51,7 +52,9 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                         HirConst::Int(n) => ConstEntry::Int(*n),
                         HirConst::Float(n) => ConstEntry::Float(*n),
                         HirConst::Null => ConstEntry::Null,
+                        HirConst::Undefined => ConstEntry::Undefined,
                         HirConst::String(s) => ConstEntry::String(s.clone()),
+                        HirConst::Function(i) => ConstEntry::Function(*i as usize),
                     });
                     code.push(Opcode::PushConst as u8);
                     code.push(idx);
@@ -116,6 +119,10 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 HirOp::CallBuiltin { builtin, argc, .. } => {
                     code.push(Opcode::CallBuiltin as u8);
                     code.push(*builtin as u8);
+                    code.push((*argc).min(255) as u8);
+                }
+                HirOp::CallMethod { argc, .. } => {
+                    code.push(Opcode::CallMethod as u8);
                     code.push((*argc).min(255) as u8);
                 }
                 HirOp::Rethrow { slot, .. } => {

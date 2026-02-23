@@ -21,6 +21,124 @@ impl std::fmt::Display for LowerError {
 
 impl std::error::Error for LowerError {}
 
+fn collect_function_exprs(script: &Script) -> Vec<(NodeId, FunctionExprData)> {
+    let mut out = Vec::new();
+    for stmt in &script.body {
+        collect_function_exprs_stmt(stmt, &mut out);
+    }
+    out
+}
+
+fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, FunctionExprData)>) {
+    match stmt {
+        Statement::Block(b) => {
+            for s in &b.body {
+                collect_function_exprs_stmt(s, out);
+            }
+        }
+        Statement::FunctionDecl(f) => {
+            collect_function_exprs_stmt(&f.body, out);
+        }
+        Statement::If(i) => {
+            collect_function_exprs_stmt(&i.then_branch, out);
+            if let Some(e) = &i.else_branch {
+                collect_function_exprs_stmt(e, out);
+            }
+        }
+        Statement::While(w) => collect_function_exprs_stmt(&w.body, out),
+        Statement::For(f) => {
+            if let Some(i) = &f.init {
+                collect_function_exprs_stmt(i, out);
+            }
+            collect_function_exprs_stmt(&f.body, out);
+        }
+        Statement::Try(t) => {
+            collect_function_exprs_stmt(&t.body, out);
+            if let Some(c) = &t.catch_body {
+                collect_function_exprs_stmt(c, out);
+            }
+            if let Some(f) = &t.finally_body {
+                collect_function_exprs_stmt(f, out);
+            }
+        }
+        Statement::Return(r) => {
+            if let Some(arg) = &r.argument {
+                collect_function_exprs_expr(arg, out);
+            }
+        }
+        Statement::Throw(t) => collect_function_exprs_expr(&t.argument, out),
+        Statement::Expression(e) => collect_function_exprs_expr(&e.expression, out),
+        Statement::VarDecl(v) => {
+            for d in &v.declarations {
+                if let Some(init) = &d.init {
+                    collect_function_exprs_expr(init, out);
+                }
+            }
+        }
+        Statement::LetDecl(v) => {
+            for d in &v.declarations {
+                if let Some(init) = &d.init {
+                    collect_function_exprs_expr(init, out);
+                }
+            }
+        }
+        Statement::ConstDecl(v) => {
+            for d in &v.declarations {
+                if let Some(init) = &d.init {
+                    collect_function_exprs_expr(init, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_function_exprs_expr(expr: &Expression, out: &mut Vec<(NodeId, FunctionExprData)>) {
+    match expr {
+        Expression::FunctionExpr(fe) => {
+            out.push((fe.id, fe.clone()));
+            collect_function_exprs_stmt(&fe.body, out);
+        }
+        Expression::Call(e) => {
+            collect_function_exprs_expr(&e.callee, out);
+            for a in &e.args {
+                collect_function_exprs_expr(a, out);
+            }
+        }
+        Expression::Member(m) => {
+            collect_function_exprs_expr(&m.object, out);
+            if let MemberProperty::Expression(k) = &m.property {
+                collect_function_exprs_expr(k, out);
+            }
+        }
+        Expression::Assign(e) => {
+            collect_function_exprs_expr(&e.left, out);
+            collect_function_exprs_expr(&e.right, out);
+        }
+        Expression::Binary(b) => {
+            collect_function_exprs_expr(&b.left, out);
+            collect_function_exprs_expr(&b.right, out);
+        }
+        Expression::Unary(u) => collect_function_exprs_expr(&u.argument, out),
+        Expression::Conditional(c) => {
+            collect_function_exprs_expr(&c.condition, out);
+            collect_function_exprs_expr(&c.then_expr, out);
+            collect_function_exprs_expr(&c.else_expr, out);
+        }
+        Expression::ObjectLiteral(o) => {
+            for (_, v) in &o.properties {
+                collect_function_exprs_expr(v, out);
+            }
+        }
+        Expression::ArrayLiteral(a) => {
+            for e in &a.elements {
+                collect_function_exprs_expr(e, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
     let mut func_index: HashMap<String, u32> = HashMap::new();
     let mut func_decls: Vec<&FunctionDeclStmt> = Vec::new();
@@ -31,34 +149,44 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
             func_decls.push(f);
         }
     }
+    let func_exprs = collect_function_exprs(script);
+    let mut func_expr_map: HashMap<NodeId, u32> = HashMap::new();
+    let num_declared = func_decls.len() as u32;
+    for (i, (nid, _)) in func_exprs.iter().enumerate() {
+        func_expr_map.insert(*nid, num_declared + i as u32);
+    }
     let mut functions = Vec::new();
     for f in func_decls {
-        functions.push(compile_function(f, &func_index)?);
+        functions.push(compile_function(f, &func_index, &func_expr_map)?);
+    }
+    for (_, fe) in &func_exprs {
+        functions.push(compile_function_expr_to_hir(fe, &func_index, &func_expr_map)?);
     }
     Ok(functions)
 }
 
-struct LowerCtx {
+struct LowerCtx<'a> {
     blocks: Vec<HirBlock>,
     current_block: usize,
     locals: HashMap<String, u32>,
     next_slot: u32,
     return_span: Span,
     throw_span: Option<Span>,
-    func_index: HashMap<String, u32>,
+    func_index: &'a HashMap<String, u32>,
+    func_expr_map: &'a HashMap<NodeId, u32>,
     loop_stack: Vec<(HirBlockId, HirBlockId)>,
     exception_regions: Vec<ExceptionRegion>,
 }
 
-fn loop_stack_push(ctx: &mut LowerCtx, continue_target: HirBlockId, exit_target: HirBlockId) {
+fn loop_stack_push(ctx: &mut LowerCtx<'_>, continue_target: HirBlockId, exit_target: HirBlockId) {
     ctx.loop_stack.push((continue_target, exit_target));
 }
 
-fn loop_stack_pop(ctx: &mut LowerCtx) {
+fn loop_stack_pop(ctx: &mut LowerCtx<'_>) {
     ctx.loop_stack.pop();
 }
 
-fn terminator_for_exit(ctx: &LowerCtx) -> HirTerminator {
+fn terminator_for_exit(ctx: &LowerCtx<'_>) -> HirTerminator {
     if let Some(span) = ctx.throw_span {
         HirTerminator::Throw { span }
     } else {
@@ -66,7 +194,11 @@ fn terminator_for_exit(ctx: &LowerCtx) -> HirTerminator {
     }
 }
 
-fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> Result<HirFunction, LowerError> {
+fn compile_function(
+    f: &FunctionDeclStmt,
+    func_index: &HashMap<String, u32>,
+    func_expr_map: &HashMap<NodeId, u32>,
+) -> Result<HirFunction, LowerError> {
     let span = f.span;
     let mut ctx = LowerCtx {
         blocks: vec![HirBlock {
@@ -79,7 +211,8 @@ fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> 
         next_slot: 0,
         return_span: span,
         throw_span: None,
-        func_index: func_index.clone(),
+        func_index,
+        func_expr_map,
         loop_stack: Vec::new(),
         exception_regions: Vec::new(),
     };
@@ -103,7 +236,7 @@ fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> 
     })
 }
 
-fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, LowerError> {
+fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, LowerError> {
     match stmt {
         Statement::Block(b) => {
             let mut hit_return = false;
@@ -612,7 +745,56 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
     Ok(false)
 }
 
-fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), LowerError> {
+fn compile_function_expr(fe: &FunctionExprData, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
+    let idx = *ctx.func_expr_map.get(&fe.id).ok_or_else(|| {
+        LowerError::Unsupported("function expression not in map".to_string(), Some(fe.span))
+    })?;
+    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+        value: HirConst::Function(idx),
+        span: fe.span,
+    });
+    Ok(())
+}
+
+fn compile_function_expr_to_hir(
+    fe: &FunctionExprData,
+    func_index: &HashMap<String, u32>,
+    func_expr_map: &HashMap<NodeId, u32>,
+) -> Result<HirFunction, LowerError> {
+    let span = fe.span;
+    let mut ctx = LowerCtx {
+        blocks: vec![HirBlock {
+            id: 0,
+            ops: Vec::new(),
+            terminator: HirTerminator::Return { span },
+        }],
+        current_block: 0,
+        locals: HashMap::new(),
+        next_slot: 0,
+        return_span: span,
+        throw_span: None,
+        func_index,
+        func_expr_map,
+        loop_stack: Vec::new(),
+        exception_regions: Vec::new(),
+    };
+    for param in &fe.params {
+        ctx.locals.insert(param.clone(), ctx.next_slot);
+        ctx.next_slot += 1;
+    }
+    let _ = compile_statement(&fe.body, &mut ctx)?;
+    ctx.blocks[ctx.current_block].terminator = terminator_for_exit(&ctx);
+    Ok(HirFunction {
+        name: fe.name.clone(),
+        params: fe.params.clone(),
+        num_locals: ctx.next_slot,
+        entry_block: 0,
+        blocks: ctx.blocks,
+        exception_regions: ctx.exception_regions,
+    })
+}
+
+fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
     let locals = &ctx.locals;
     let func_index = &ctx.func_index;
     match expr {
@@ -1022,11 +1204,34 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                             span: e.span,
                         });
                     } else {
-                        return Err(LowerError::Unsupported(
-                            format!("call to {}.{} not yet supported", obj_name.as_ref().map(|s| s.as_str()).unwrap_or("?"), prop),
-                            Some(e.span),
-                        ));
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: e.span });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                            key: prop.to_string(),
+                            span: e.span,
+                        });
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
                     }
+                }
+                Expression::FunctionExpr(fe) => {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Undefined,
+                        span: e.span,
+                    });
+                    compile_function_expr(fe, ctx)?;
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
                 }
                 Expression::Identifier(id) if id.name == "print" => {
                     for arg in &e.args {
@@ -1102,6 +1307,9 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                     ctx.blocks[ctx.current_block].ops.push(HirOp::GetPropDyn { span: e.span });
                 }
             }
+        }
+        Expression::FunctionExpr(fe) => {
+            compile_function_expr(fe, ctx)?;
         }
     }
     Ok(())
@@ -1588,5 +1796,23 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 2, "Object.keys should return array of own keys");
+    }
+
+    #[test]
+    fn lower_iife() {
+        let result = crate::driver::Driver::run(
+            "function main() { return (function () { return 42; })(); }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "IIFE should return 42");
+    }
+
+    #[test]
+    fn lower_method_call_this() {
+        let result = crate::driver::Driver::run(
+            "function main() { let o = { x: 10, get: function() { return this.x; } }; return o.get(); }",
+        )
+        .expect("run");
+        assert_eq!(result, 10, "obj.method() should bind this to obj");
     }
 }
