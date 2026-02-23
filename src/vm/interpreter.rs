@@ -46,6 +46,7 @@ struct Frame {
     chunk_index: usize,
     pc: usize,
     locals: Vec<Value>,
+    rethrow_after_finally: bool,
 }
 
 pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
@@ -59,6 +60,7 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
         chunk_index: program.entry,
         pc: 0,
         locals: (0..entry_chunk.num_locals).map(|_| Value::Undefined).collect(),
+        rethrow_after_finally: false,
     }];
 
     loop {
@@ -131,8 +133,18 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     if (h.catch_slot as usize) < locals.len() {
                         locals[h.catch_slot as usize] = val.clone();
                     }
+                    frame.rethrow_after_finally = h.is_finally;
                     *pc = h.handler_pc as usize;
                 } else {
+                    return Ok(Completion::Throw(val));
+                }
+            }
+            x if x == Opcode::Rethrow as u8 => {
+                let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 1;
+                if frame.rethrow_after_finally {
+                    frame.rethrow_after_finally = false;
+                    let val = locals.get(slot).cloned().unwrap_or(Value::Undefined);
                     return Ok(Completion::Throw(val));
                 }
             }
@@ -155,6 +167,7 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     chunk_index: func_idx,
                     pc: 0,
                     locals: callee_locals,
+                    rethrow_after_finally: false,
                 });
             }
             x if x == Opcode::CallBuiltin as u8 => {

@@ -3,8 +3,9 @@ use crate::diagnostics::Span;
 #[derive(Debug, Clone)]
 pub struct ExceptionRegion {
     pub try_entry_block: HirBlockId,
-    pub catch_block: HirBlockId,
+    pub handler_block: HirBlockId,
     pub catch_slot: u32,
+    pub is_finally: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,7 @@ pub enum HirOp {
     Swap { span: Span },
     Call { func_index: u32, argc: u32, span: Span },
     CallBuiltin { builtin: BuiltinId, argc: u32, span: Span },
+    Rethrow { slot: u32, span: Span },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

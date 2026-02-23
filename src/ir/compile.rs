@@ -20,6 +20,7 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
             HirOp::GetProp { .. } | HirOp::SetProp { .. } => 2,
             HirOp::GetPropDyn { .. } | HirOp::SetPropDyn { .. } => 1,
             HirOp::Call { .. } | HirOp::CallBuiltin { .. } => 3,
+            HirOp::Rethrow { .. } => 2,
         };
     }
     size += match &block.terminator {
@@ -113,6 +114,10 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                     code.push(*builtin as u8);
                     code.push((*argc).min(255) as u8);
                 }
+                HirOp::Rethrow { slot, .. } => {
+                    code.push(Opcode::Rethrow as u8);
+                    code.push((*slot).min(255) as u8);
+                }
             }
         }
         match &block.terminator {
@@ -171,13 +176,14 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
 
     let handlers: Vec<ExceptionHandler> = func.exception_regions.iter().map(|r| {
         let try_start = block_offsets.get(r.try_entry_block as usize).copied().unwrap_or(0) as u32;
-        let try_end = block_offsets.get(r.catch_block as usize).copied().unwrap_or(code.len()) as u32;
+        let try_end = block_offsets.get(r.handler_block as usize).copied().unwrap_or(code.len()) as u32;
         let handler_pc = try_end;
         ExceptionHandler {
             try_start,
             try_end,
             handler_pc,
             catch_slot: (r.catch_slot).min(255) as u8,
+            is_finally: r.is_finally,
         }
     }).collect();
 

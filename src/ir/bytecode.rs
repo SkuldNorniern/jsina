@@ -4,6 +4,7 @@ pub struct ExceptionHandler {
     pub try_end: u32,
     pub handler_pc: u32,
     pub catch_slot: u8,
+    pub is_finally: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +55,7 @@ pub enum Opcode {
     Call = 0x40,
     CallBuiltin = 0x41,
     Throw = 0x21,
+    Rethrow = 0x22,
     JumpIfFalse = 0x30,
     JumpIfNullish = 0x32,
     Jump = 0x31,

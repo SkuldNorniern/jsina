@@ -129,13 +129,14 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             return Ok(true);
         }
         Statement::Try(t) => {
-            let (catch_param, catch_body) = match (&t.catch_param, &t.catch_body) {
-                (Some(p), Some(b)) => (p.clone(), b),
-                _ => return Err(LowerError::Unsupported(
-                    "try without catch not yet supported".to_string(),
+            let has_catch = t.catch_param.is_some() && t.catch_body.is_some();
+            let has_finally = t.finally_body.is_some();
+            if !has_catch && !has_finally {
+                return Err(LowerError::Unsupported(
+                    "try must have catch or finally".to_string(),
                     Some(t.span),
-                )),
-            };
+                ));
+            }
             let prev_block = ctx.current_block;
             let after_id = ctx.blocks.len() as HirBlockId;
             ctx.blocks.push(HirBlock {
@@ -151,39 +152,145 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             });
             ctx.blocks[prev_block].terminator = HirTerminator::Jump { target: try_entry_id };
 
-            ctx.current_block = try_entry_id as usize;
-            let try_exits = compile_statement(&t.body, ctx)?;
-            if !try_exits {
-                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: after_id };
-            } else {
-                ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
-            }
-
-            let catch_id = ctx.blocks.len() as HirBlockId;
-            ctx.blocks.push(HirBlock {
-                id: catch_id,
-                ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: 0 },
-            });
-            let catch_slot = ctx.next_slot;
+            let exception_slot = ctx.next_slot;
             ctx.next_slot += 1;
-            ctx.locals.insert(catch_param, catch_slot);
-            ctx.exception_regions.push(ExceptionRegion {
-                try_entry_block: try_entry_id,
-                catch_block: catch_id,
-                catch_slot,
-            });
 
-            ctx.current_block = catch_id as usize;
-            let catch_exits = compile_statement(catch_body, ctx)?;
-            if !catch_exits {
-                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: after_id };
+            let exits = if has_catch && has_finally {
+                let catch_param = t.catch_param.as_ref().expect("catch param");
+                let catch_body = t.catch_body.as_ref().expect("catch body");
+                let finally_body = t.finally_body.as_ref().expect("finally body");
+                ctx.locals.insert(catch_param.clone(), exception_slot);
+
+                let catch_id = ctx.blocks.len() as HirBlockId;
+                ctx.blocks.push(HirBlock {
+                    id: catch_id,
+                    ops: Vec::new(),
+                    terminator: HirTerminator::Jump { target: 0 },
+                });
+                ctx.exception_regions.push(ExceptionRegion {
+                    try_entry_block: try_entry_id,
+                    handler_block: catch_id,
+                    catch_slot: exception_slot,
+                    is_finally: false,
+                });
+
+                let finally_id = ctx.blocks.len() as HirBlockId;
+                ctx.blocks.push(HirBlock {
+                    id: finally_id,
+                    ops: Vec::new(),
+                    terminator: HirTerminator::Jump { target: 0 },
+                });
+                ctx.exception_regions.push(ExceptionRegion {
+                    try_entry_block: catch_id,
+                    handler_block: finally_id,
+                    catch_slot: exception_slot,
+                    is_finally: true,
+                });
+
+                ctx.current_block = try_entry_id as usize;
+                let try_exits = compile_statement(&t.body, ctx)?;
+                if !try_exits {
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: finally_id };
+                } else {
+                    ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+                }
+
+                ctx.current_block = catch_id as usize;
+                let catch_exits = compile_statement(catch_body, ctx)?;
+                if !catch_exits {
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: finally_id };
+                } else {
+                    ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+                }
+
+                ctx.current_block = finally_id as usize;
+                let finally_exits = compile_statement(finally_body, ctx)?;
+                if !finally_exits {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Rethrow {
+                        slot: exception_slot,
+                        span: t.span,
+                    });
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: after_id };
+                } else {
+                    ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+                }
+
+                try_exits || catch_exits || finally_exits
+            } else if has_catch {
+                let catch_param = t.catch_param.as_ref().expect("catch param");
+                let catch_body = t.catch_body.as_ref().expect("catch body");
+                ctx.locals.insert(catch_param.clone(), exception_slot);
+
+                let catch_id = ctx.blocks.len() as HirBlockId;
+                ctx.blocks.push(HirBlock {
+                    id: catch_id,
+                    ops: Vec::new(),
+                    terminator: HirTerminator::Jump { target: 0 },
+                });
+                ctx.exception_regions.push(ExceptionRegion {
+                    try_entry_block: try_entry_id,
+                    handler_block: catch_id,
+                    catch_slot: exception_slot,
+                    is_finally: false,
+                });
+
+                ctx.current_block = try_entry_id as usize;
+                let try_exits = compile_statement(&t.body, ctx)?;
+                if !try_exits {
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: after_id };
+                } else {
+                    ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+                }
+
+                ctx.current_block = catch_id as usize;
+                let catch_exits = compile_statement(catch_body, ctx)?;
+                if !catch_exits {
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: after_id };
+                } else {
+                    ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+                }
+
+                try_exits || catch_exits
             } else {
-                ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
-            }
+                let finally_body = t.finally_body.as_ref().expect("finally body");
+                let finally_id = ctx.blocks.len() as HirBlockId;
+                ctx.blocks.push(HirBlock {
+                    id: finally_id,
+                    ops: Vec::new(),
+                    terminator: HirTerminator::Jump { target: 0 },
+                });
+                ctx.exception_regions.push(ExceptionRegion {
+                    try_entry_block: try_entry_id,
+                    handler_block: finally_id,
+                    catch_slot: exception_slot,
+                    is_finally: true,
+                });
+
+                ctx.current_block = try_entry_id as usize;
+                let try_exits = compile_statement(&t.body, ctx)?;
+                if !try_exits {
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: after_id };
+                } else {
+                    ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+                }
+
+                ctx.current_block = finally_id as usize;
+                let finally_exits = compile_statement(finally_body, ctx)?;
+                if !finally_exits {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Rethrow {
+                        slot: exception_slot,
+                        span: t.span,
+                    });
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: after_id };
+                } else {
+                    ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+                }
+
+                try_exits || finally_exits
+            };
 
             ctx.current_block = after_id as usize;
-            return Ok(try_exits || catch_exits);
+            return Ok(exits);
         }
         Statement::Expression(e) => {
             compile_expression(&e.expression, ctx)?;
@@ -1233,6 +1340,25 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn lower_try_finally() {
+        let err = crate::driver::Driver::run(
+            "function main() { let x = 0; try { throw 42; } finally { x = 1; } return x; }",
+        )
+        .unwrap_err();
+        let msg = format!("{:?}", err);
+        assert!(msg.contains("42") || msg.contains("uncaught"), "throw should propagate after finally: {}", msg);
+    }
+
+    #[test]
+    fn lower_try_catch_finally() {
+        let result = crate::driver::Driver::run(
+            "function main() { try { throw 42; } catch (e) { return e; } finally { } return 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "try/catch/finally: catch returns e");
     }
 
     #[test]

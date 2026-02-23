@@ -103,6 +103,11 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             }
             x if x == Opcode::Return as u8 => format!("  {:04}  Return", line_start),
             x if x == Opcode::Throw as u8 => format!("  {:04}  Throw", line_start),
+            x if x == Opcode::Rethrow as u8 => {
+                let slot = code.get(pc).copied().unwrap_or(0);
+                pc += 1;
+                format!("  {:04}  Rethrow {}", line_start, slot)
+            }
             _ => format!("  {:04}  <unknown 0x{:02x}>", line_start, op),
         };
         out.push_str(&line);
