@@ -153,6 +153,8 @@ impl Parser {
         match &token.token_type {
             TokenType::Function => self.parse_function_decl(),
             TokenType::Return => self.parse_return(),
+            TokenType::Break => self.parse_break(),
+            TokenType::Continue => self.parse_continue(),
             TokenType::If => self.parse_if(),
             TokenType::While => self.parse_while(),
             TokenType::For => self.parse_for(),
@@ -204,7 +206,7 @@ impl Parser {
 
     fn parse_params(&mut self) -> Result<Vec<String>, ParseError> {
         let mut params = Vec::new();
-        while matches!(self.peek(), Some(TokenType::Identifier)) {
+        while matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
             let token = self.expect(TokenType::Identifier)?;
             params.push(token.lexeme);
             if !self.optional(TokenType::Comma) {
@@ -236,6 +238,34 @@ impl Parser {
             span,
             argument,
         }))
+    }
+
+    fn parse_break(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.expect(TokenType::Break)?.span;
+        let id = self.next_id();
+        let label = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
+            let tok = self.expect(TokenType::Identifier)?;
+            Some(tok.lexeme)
+        } else {
+            None
+        };
+        self.optional(TokenType::Semicolon);
+        let span = start_span;
+        Ok(Statement::Break(BreakStmt { id, span, label }))
+    }
+
+    fn parse_continue(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.expect(TokenType::Continue)?.span;
+        let id = self.next_id();
+        let label = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
+            let tok = self.expect(TokenType::Identifier)?;
+            Some(tok.lexeme)
+        } else {
+            None
+        };
+        self.optional(TokenType::Semicolon);
+        let span = start_span;
+        Ok(Statement::Continue(ContinueStmt { id, span, label }))
     }
 
     fn parse_if(&mut self) -> Result<Statement, ParseError> {
@@ -309,7 +339,10 @@ impl Parser {
             })))
         };
 
-        let condition = if matches!(self.peek(), Some(TokenType::Semicolon)) {
+        let condition = if matches!(
+            self.current().map(|t| &t.token_type),
+            Some(TokenType::Semicolon)
+        ) {
             None
         } else {
             Some(Box::new(self.parse_expression()?))
@@ -317,7 +350,10 @@ impl Parser {
 
         self.expect(TokenType::Semicolon)?;
 
-        let update = if matches!(self.peek(), Some(TokenType::RightParen)) {
+        let update = if matches!(
+            self.current().map(|t| &t.token_type),
+            Some(TokenType::RightParen)
+        ) {
             None
         } else {
             Some(Box::new(self.parse_expression()?))
@@ -915,6 +951,48 @@ mod tests {
     fn parse_while_top_level() {
         let script = parse_ok("while (false) {}");
         assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_break_in_while() {
+        let script = parse_ok("while (true) { break; }");
+        if let Statement::While(w) = &script.body[0] {
+            if let Statement::Block(b) = &*w.body {
+                if let Statement::Break(br) = &b.body[0] {
+                    assert!(br.label.is_none());
+                } else {
+                    panic!("expected Break");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_continue_in_for() {
+        let script = parse_ok("for (;;) { continue; }");
+        if let Statement::For(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::Continue(c) = &b.body[0] {
+                    assert!(c.label.is_none());
+                } else {
+                    panic!("expected Continue");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_break_with_label() {
+        let script = parse_ok("while (true) { break loop; }");
+        if let Statement::While(w) = &script.body[0] {
+            if let Statement::Block(b) = &*w.body {
+                if let Statement::Break(br) = &b.body[0] {
+                    assert_eq!(br.label.as_deref(), Some("loop"));
+                } else {
+                    panic!("expected Break with label");
+                }
+            }
+        }
     }
 
     #[test]

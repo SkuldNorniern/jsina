@@ -17,6 +17,8 @@ pub enum Statement {
     While(WhileStmt),
     For(ForStmt),
     Return(ReturnStmt),
+    Break(BreakStmt),
+    Continue(ContinueStmt),
     Expression(ExpressionStmt),
     VarDecl(VarDeclStmt),
     LetDecl(LetDeclStmt),
@@ -63,6 +65,20 @@ pub struct ReturnStmt {
     pub id: NodeId,
     pub span: Span,
     pub argument: Option<Box<Expression>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BreakStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContinueStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -218,6 +234,8 @@ impl Statement {
             Statement::While(s) => s.span,
             Statement::For(s) => s.span,
             Statement::Return(s) => s.span,
+            Statement::Break(s) => s.span,
+            Statement::Continue(s) => s.span,
             Statement::Expression(s) => s.span,
             Statement::VarDecl(s) => s.span,
             Statement::LetDecl(s) => s.span,

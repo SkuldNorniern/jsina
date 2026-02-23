@@ -75,6 +75,14 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
         Statement::Expression(s) => {
             println!("{}[{}] Expr {}", pad, idx, format_expr(&s.expression));
         }
+        Statement::Break(s) => {
+            let lbl = s.label.as_deref().unwrap_or("");
+            println!("{}[{}] Break {}", pad, idx, lbl);
+        }
+        Statement::Continue(s) => {
+            let lbl = s.label.as_deref().unwrap_or("");
+            println!("{}[{}] Continue {}", pad, idx, lbl);
+        }
     }
 }
 

@@ -71,7 +71,8 @@ fn compile_statement(stmt: &Statement, ops: &mut Vec<HirOp>, return_span: &mut S
         }
         Statement::FunctionDecl(_) => {}
         Statement::If(_) | Statement::While(_) | Statement::For(_)
-        | Statement::VarDecl(_) | Statement::LetDecl(_) | Statement::ConstDecl(_) => {
+        | Statement::VarDecl(_) | Statement::LetDecl(_) | Statement::ConstDecl(_)
+        | Statement::Break(_) | Statement::Continue(_) => {
             return Err(LowerError::Unsupported(
                 format!("{:?} not yet supported", stmt),
                 Some(stmt.span()),
