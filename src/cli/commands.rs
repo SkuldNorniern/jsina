@@ -138,6 +138,12 @@ fn format_expr(expr: &Expression) -> String {
         Expression::FunctionExpr(e) => {
             format!("function {}()", e.name.as_deref().unwrap_or(""))
         }
+        Expression::PostfixIncrement(e) => format!("{}++", format_expr(&e.argument)),
+        Expression::PostfixDecrement(e) => format!("{}--", format_expr(&e.argument)),
+        Expression::New(e) => {
+            let args: Vec<String> = e.args.iter().map(format_expr).collect();
+            format!("new {}({})", format_expr(&e.callee), args.join(", "))
+        }
     }
 }
 

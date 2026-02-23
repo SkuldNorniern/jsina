@@ -159,6 +159,24 @@ pub enum Expression {
     ArrayLiteral(ArrayLiteralExpr),
     Member(MemberExpr),
     FunctionExpr(FunctionExprData),
+    PostfixIncrement(PostfixExpr),
+    PostfixDecrement(PostfixExpr),
+    New(NewExpr),
+}
+
+#[derive(Debug, Clone)]
+pub struct NewExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub callee: Box<Expression>,
+    pub args: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PostfixExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub argument: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +359,8 @@ impl Expression {
             Expression::ArrayLiteral(e) => e.span,
             Expression::Member(e) => e.span,
             Expression::FunctionExpr(e) => e.span,
+            Expression::PostfixIncrement(e) | Expression::PostfixDecrement(e) => e.span,
+            Expression::New(e) => e.span,
         }
     }
 }

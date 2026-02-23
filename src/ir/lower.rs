@@ -120,6 +120,15 @@ fn collect_function_exprs_expr(expr: &Expression, out: &mut Vec<(NodeId, Functio
             collect_function_exprs_expr(&b.right, out);
         }
         Expression::Unary(u) => collect_function_exprs_expr(&u.argument, out),
+        Expression::PostfixIncrement(p) | Expression::PostfixDecrement(p) => {
+            collect_function_exprs_expr(&p.argument, out);
+        }
+        Expression::New(n) => {
+            collect_function_exprs_expr(&n.callee, out);
+            for a in &n.args {
+                collect_function_exprs_expr(a, out);
+            }
+        }
         Expression::Conditional(c) => {
             collect_function_exprs_expr(&c.condition, out);
             collect_function_exprs_expr(&c.then_expr, out);
@@ -816,13 +825,27 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
             ctx.blocks[ctx.current_block].ops.push(HirOp::LoadThis { span: e.span });
         }
         Expression::Identifier(e) => {
-            let slot = locals.get(&e.name).ok_or_else(|| {
-                LowerError::Unsupported(format!("undefined variable '{}'", e.name), Some(e.span))
-            })?;
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                id: *slot,
-                span: e.span,
-            });
+            if e.name == "undefined" {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                    value: HirConst::Undefined,
+                    span: e.span,
+                });
+            } else if let Some(&slot) = locals.get(&e.name) {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                    id: slot,
+                    span: e.span,
+                });
+            } else if let Some(&idx) = ctx.func_index.get(&e.name) {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                    value: HirConst::Function(idx),
+                    span: e.span,
+                });
+            } else {
+                return Err(LowerError::Unsupported(
+                    format!("undefined variable '{}'", e.name),
+                    Some(e.span),
+                ));
+            }
         }
         Expression::Binary(e) => {
             match e.op {
@@ -1067,6 +1090,43 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 }
             }
         }
+        Expression::PostfixIncrement(p) | Expression::PostfixDecrement(p) => {
+            let inc = matches!(expr, Expression::PostfixIncrement(_));
+            match p.argument.as_ref() {
+                Expression::Identifier(id) => {
+                    let slot = *locals.get(&id.name).ok_or_else(|| {
+                        LowerError::Unsupported(
+                            format!("postfix {} on undefined variable '{}'", if inc { "++" } else { "--" }, id.name),
+                            Some(p.span),
+                        )
+                    })?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: slot,
+                        span: p.span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: p.span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Int(1),
+                        span: p.span,
+                    });
+                    if inc {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::Add { span: p.span });
+                    } else {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::Sub { span: p.span });
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: slot,
+                        span: p.span,
+                    });
+                }
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "postfix ++/-- only supported on identifiers".to_string(),
+                        Some(p.span),
+                    ));
+                }
+            }
+        }
         Expression::Assign(e) => {
             match e.left.as_ref() {
                 Expression::Identifier(id) => {
@@ -1233,6 +1293,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
+                Expression::Identifier(id) if id.name == "String" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::String,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
                 Expression::Identifier(id) if id.name == "print" => {
                     for arg in &e.args {
                         compile_expression(arg, ctx)?;
@@ -1263,6 +1333,32 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     return Err(LowerError::Unsupported(
                         "call to non-identifier not yet supported".to_string(),
                         Some(e.span),
+                    ));
+                }
+            }
+        }
+        Expression::New(n) => {
+            match n.callee.as_ref() {
+                Expression::Identifier(id) => {
+                    let idx = *ctx.func_index.get(&id.name).ok_or_else(|| {
+                        LowerError::Unsupported(
+                            format!("new on undefined constructor '{}'", id.name),
+                            Some(n.span),
+                        )
+                    })?;
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::New {
+                        func_index: idx,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "new only supported with identifier constructor".to_string(),
+                        Some(n.span),
                     ));
                 }
             }

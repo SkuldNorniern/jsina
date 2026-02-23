@@ -48,6 +48,7 @@ struct Frame {
     locals: Vec<Value>,
     this_value: Value,
     rethrow_after_finally: bool,
+    new_object: Option<usize>,
 }
 
 pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
@@ -63,6 +64,7 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
         locals: (0..entry_chunk.num_locals).map(|_| Value::Undefined).collect(),
         this_value: Value::Undefined,
         rethrow_after_finally: false,
+        new_object: None,
     }];
 
     loop {
@@ -122,11 +124,24 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
             }
             x if x == Opcode::Return as u8 => {
                 let val = stack.pop().unwrap_or(Value::Undefined);
-                frames.pop();
+                let popped = frames.pop();
+                let result = if let Some(ref f) = popped {
+                    if let Some(obj_id) = f.new_object {
+                        if matches!(val, Value::Object(_)) {
+                            val
+                        } else {
+                            Value::Object(obj_id)
+                        }
+                    } else {
+                        val
+                    }
+                } else {
+                    val
+                };
                 if frames.is_empty() {
-                    return Ok(Completion::Return(val));
+                    return Ok(Completion::Return(result));
                 }
-                stack.push(val);
+                stack.push(result);
             }
             x if x == Opcode::Throw as u8 => {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
@@ -174,6 +189,7 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     locals: callee_locals,
                     this_value: Value::Undefined,
                     rethrow_after_finally: false,
+                    new_object: None,
                 });
             }
             x if x == Opcode::CallBuiltin as u8 => {
@@ -321,6 +337,10 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         }
                         stack.push(Value::Array(arr_id));
                     }
+                    12 => {
+                        let arg = args.first().ok_or(VmError::StackUnderflow)?;
+                        stack.push(Value::String(arg.to_string()));
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }
@@ -354,6 +374,32 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     locals: callee_locals,
                     this_value: receiver,
                     rethrow_after_finally: false,
+                    new_object: None,
+                });
+            }
+            x if x == Opcode::New as u8 => {
+                let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 2;
+                let mut args: Vec<Value> = (0..argc)
+                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+                    .collect::<Result<Vec<_>, _>>()?;
+                args.reverse();
+                let obj_id = heap.alloc_object();
+                let callee = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
+                let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
+                for (i, v) in args.into_iter().enumerate() {
+                    if i < callee_locals.len() {
+                        callee_locals[i] = v;
+                    }
+                }
+                frames.push(Frame {
+                    chunk_index: func_idx,
+                    pc: 0,
+                    locals: callee_locals,
+                    this_value: Value::Object(obj_id),
+                    rethrow_after_finally: false,
+                    new_object: Some(obj_id),
                 });
             }
             x if x == Opcode::Add as u8 => {

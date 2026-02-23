@@ -575,6 +575,26 @@ impl Parser {
                         right: Box::new(right),
                     }));
                 }
+                Some(TokenType::PlusAssign) => {
+                    self.end_recursion();
+                    let left_span = left.span();
+                    self.advance();
+                    let right = self.parse_expression_prec(0)?;
+                    let span = left_span.merge(right.span());
+                    let add_right = Expression::Binary(BinaryExpr {
+                        id: self.next_id(),
+                        span,
+                        op: BinaryOp::Add,
+                        left: Box::new(left.clone()),
+                        right: Box::new(right),
+                    });
+                    return Ok(Expression::Assign(AssignExpr {
+                        id: self.next_id(),
+                        span,
+                        left: Box::new(left),
+                        right: Box::new(add_right),
+                    }));
+                }
                 _ => break,
             };
 
@@ -597,6 +617,21 @@ impl Parser {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
+            });
+        }
+
+        if min_prec <= 1 && matches!(self.current().map(|t| &t.token_type), Some(TokenType::Question)) {
+            self.advance();
+            let then_expr = self.parse_expression_prec(1)?;
+            self.expect(TokenType::Colon)?;
+            let else_expr = self.parse_expression_prec(0)?;
+            let span = left.span().merge(else_expr.span());
+            left = Expression::Conditional(ConditionalExpr {
+                id: self.next_id(),
+                span,
+                condition: Box::new(left),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
             });
         }
 
@@ -625,6 +660,59 @@ impl Parser {
                 TokenType::Typeof => {
                     self.advance();
                     (UnaryOp::Typeof, t.span)
+                }
+                TokenType::New => {
+                    self.advance();
+                    let mut callee = self.parse_primary()?;
+                    loop {
+                        if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Dot)) {
+                            let start_span = callee.span();
+                            self.advance();
+                            let prop_tok = self.expect(TokenType::Identifier)?;
+                            let span = start_span.merge(prop_tok.span);
+                            callee = Expression::Member(MemberExpr {
+                                id: self.next_id(),
+                                span,
+                                object: Box::new(callee),
+                                property: MemberProperty::Identifier(prop_tok.lexeme.clone()),
+                            });
+                        } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftBracket)) {
+                            let start_span = callee.span();
+                            self.advance();
+                            let index = self.parse_expression()?;
+                            let end_tok = self.expect(TokenType::RightBracket)?;
+                            let span = start_span.merge(end_tok.span);
+                            callee = Expression::Member(MemberExpr {
+                                id: self.next_id(),
+                                span,
+                                object: Box::new(callee),
+                                property: MemberProperty::Expression(Box::new(index)),
+                            });
+                        } else {
+                            break;
+                        }
+                    }
+                    let (args, span) = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftParen)) {
+                        self.advance();
+                        let mut args = Vec::new();
+                        while !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightParen) | Some(TokenType::Eof) | None) {
+                            args.push(self.parse_expression()?);
+                            if !self.optional(TokenType::Comma) {
+                                break;
+                            }
+                        }
+                        let end_tok = self.expect(TokenType::RightParen)?;
+                        (args, callee.span().merge(end_tok.span))
+                    } else {
+                        (Vec::new(), callee.span())
+                    };
+                    self.end_recursion();
+                    return Ok(Expression::New(NewExpr {
+                        id: self.next_id(),
+                        span,
+                        callee: Box::new(callee),
+                        args,
+                    }));
                 }
                 _ => {
                     self.end_recursion();
@@ -692,6 +780,24 @@ impl Parser {
                     span,
                     object: Box::new(expr),
                     property: MemberProperty::Expression(Box::new(index)),
+                });
+            } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Increment)) {
+                let start_span = expr.span();
+                self.advance();
+                let span = start_span.merge(self.current().map(|t| t.span).unwrap_or(start_span));
+                expr = Expression::PostfixIncrement(PostfixExpr {
+                    id: self.next_id(),
+                    span,
+                    argument: Box::new(expr),
+                });
+            } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Decrement)) {
+                let start_span = expr.span();
+                self.advance();
+                let span = start_span.merge(self.current().map(|t| t.span).unwrap_or(start_span));
+                expr = Expression::PostfixDecrement(PostfixExpr {
+                    id: self.next_id(),
+                    span,
+                    argument: Box::new(expr),
                 });
             } else {
                 break;
@@ -937,6 +1043,35 @@ mod tests {
     fn parse_binary_add() {
         let script = parse_ok("function f() { return 1 + 2; }");
         assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_postfix_increment() {
+        let script = parse_ok("function f() { var x = 0; return x++; }");
+        assert_eq!(script.body.len(), 1);
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = f.body.as_ref() {
+                if let Statement::Return(r) = &b.body[1] {
+                    let arg = r.argument.as_ref().unwrap();
+                    assert!(matches!(arg.as_ref(), Expression::PostfixIncrement(_)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_plus_assign() {
+        let script = parse_ok("function f() { var x = 0; x += 1; return x; }");
+        assert_eq!(script.body.len(), 1);
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = f.body.as_ref() {
+                if let Statement::Expression(e) = &b.body[1] {
+                    if let Expression::Assign(a) = e.expression.as_ref() {
+                        assert!(matches!(a.right.as_ref(), Expression::Binary(bin) if bin.op == BinaryOp::Add));
+                    }
+                }
+            }
+        }
     }
 
     #[test]
