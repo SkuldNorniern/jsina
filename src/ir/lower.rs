@@ -966,6 +966,20 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "JSON") && prop == "parse" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::JsonParse,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "JSON") && prop == "stringify" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::JsonStringify,
+                            argc: 1,
+                            span: e.span,
+                        });
                     } else if prop == "push" {
                         compile_expression(&m.object, ctx)?;
                         for arg in &e.args {
@@ -1401,6 +1415,20 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 3, "Math.max(3,1,2) should be 3");
+    }
+
+    #[test]
+    fn lower_json_parse_stringify() {
+        let result = crate::driver::Driver::run(
+            "function main() { let obj = JSON.parse('{\"a\":42}'); return obj.a; }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "JSON.parse object property access");
+        let result = crate::driver::Driver::run(
+            "function main() { return JSON.parse(JSON.stringify(42)); }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "JSON round-trip number");
     }
 
     #[test]

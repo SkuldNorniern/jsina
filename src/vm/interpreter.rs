@@ -266,6 +266,30 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         };
                         stack.push(result);
                     }
+                    7 => {
+                        let arg = args.first().ok_or(VmError::StackUnderflow)?;
+                        let s = match arg {
+                            Value::String(s) => s.clone(),
+                            _ => {
+                                return Ok(Completion::Throw(Value::String(
+                                    "JSON.parse requires a string".to_string(),
+                                )));
+                            }
+                        };
+                        match crate::runtime::json_parse(&s, &mut heap) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => {
+                                return Ok(Completion::Throw(Value::String(e.message)));
+                            }
+                        }
+                    }
+                    8 => {
+                        let arg = args.first().ok_or(VmError::StackUnderflow)?;
+                        match crate::runtime::json_stringify(arg, &heap) {
+                            Some(s) => stack.push(Value::String(s)),
+                            None => stack.push(Value::Undefined),
+                        }
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }

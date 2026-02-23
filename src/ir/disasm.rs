@@ -76,6 +76,10 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                     2 => "arrayPop",
                     3 => "mathFloor",
                     4 => "mathAbs",
+                    5 => "mathMin",
+                    6 => "mathMax",
+                    7 => "jsonParse",
+                    8 => "jsonStringify",
                     _ => "?",
                 };
                 format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)

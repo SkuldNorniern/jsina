@@ -69,6 +69,8 @@ pub enum BuiltinId {
     MathAbs = 4,
     MathMin = 5,
     MathMax = 6,
+    JsonParse = 7,
+    JsonStringify = 8,
 }
 
 #[derive(Debug, Clone)]

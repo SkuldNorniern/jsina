@@ -91,6 +91,17 @@ impl Heap {
             Value::Undefined
         }
     }
+
+    pub fn object_keys(&self, obj_id: usize) -> Vec<String> {
+        self.objects
+            .get(obj_id)
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn array_elements(&self, arr_id: usize) -> Option<&[Value]> {
+        self.arrays.get(arr_id).map(|v| v.as_slice())
+    }
 }
 
 #[cfg(test)]
