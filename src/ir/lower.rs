@@ -93,7 +93,6 @@ fn compile_function(f: &FunctionDeclStmt, func_index: &HashMap<String, u32>) -> 
 }
 
 fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, LowerError> {
-    let ops = &mut ctx.blocks[ctx.current_block].ops;
     match stmt {
         Statement::Block(b) => {
             let mut hit_return = false;
@@ -108,20 +107,20 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
         Statement::Return(r) => {
             ctx.return_span = r.span;
             if let Some(ref expr) = r.argument {
-                compile_expression(expr, ops, &ctx.locals, &ctx.func_index)?;
+                compile_expression(expr, ctx)?;
             }
             return Ok(true);
         }
         Statement::Expression(e) => {
-            compile_expression(&e.expression, ops, &ctx.locals, &ctx.func_index)?;
-            ops.push(HirOp::Pop { span: e.span });
+            compile_expression(&e.expression, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::Pop { span: e.span });
             return Ok(false);
         }
         Statement::If(i) => {
             let cond_slot = ctx.next_slot;
             ctx.next_slot += 1;
-            compile_expression(&i.condition, ops, &ctx.locals, &ctx.func_index)?;
-            ops.push(HirOp::StoreLocal {
+            compile_expression(&i.condition, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                 id: cond_slot,
                 span: i.span,
             });
@@ -193,9 +192,8 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
 
             ctx.current_block = loop_id as usize;
-            let loop_ops = &mut ctx.blocks[ctx.current_block].ops;
-            compile_expression(&w.condition, loop_ops, &ctx.locals, &ctx.func_index)?;
-            loop_ops.push(HirOp::StoreLocal {
+            compile_expression(&w.condition, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                 id: cond_slot,
                 span: w.span,
             });
@@ -244,8 +242,8 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                     s
                 });
                 if let Some(ref init) = decl.init {
-                    compile_expression(init, ops, &ctx.locals, &ctx.func_index)?;
-                    ops.push(HirOp::StoreLocal {
+                    compile_expression(init, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: decl.span,
                     });
@@ -261,8 +259,8 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                     s
                 });
                 if let Some(ref init) = decl.init {
-                    compile_expression(init, ops, &ctx.locals, &ctx.func_index)?;
-                    ops.push(HirOp::StoreLocal {
+                    compile_expression(init, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: decl.span,
                     });
@@ -278,8 +276,8 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                     s
                 });
                 if let Some(ref init) = decl.init {
-                    compile_expression(init, ops, &ctx.locals, &ctx.func_index)?;
-                    ops.push(HirOp::StoreLocal {
+                    compile_expression(init, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: decl.span,
                     });
@@ -315,16 +313,15 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
 
             ctx.current_block = loop_id as usize;
-            let loop_ops = &mut ctx.blocks[ctx.current_block].ops;
             if let Some(ref cond) = f.condition {
-                compile_expression(cond, loop_ops, &ctx.locals, &ctx.func_index)?;
+                compile_expression(cond, ctx)?;
             } else {
-                loop_ops.push(HirOp::LoadConst {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                     value: HirConst::Int(1),
                     span: f.span,
                 });
             }
-            loop_ops.push(HirOp::StoreLocal {
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                 id: cond_slot,
                 span: f.span,
             });
@@ -346,10 +343,10 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
                 terminator: HirTerminator::Jump { target: 0 },
             });
             let update_id = ctx.blocks.len() as HirBlockId - 1;
-            let update_ops = &mut ctx.blocks[update_id as usize].ops;
+            ctx.current_block = update_id as usize;
             if let Some(ref upd) = f.update {
-                compile_expression(upd, update_ops, &ctx.locals, &ctx.func_index)?;
-                update_ops.push(HirOp::Pop { span: f.span });
+                compile_expression(upd, ctx)?;
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Pop { span: f.span });
             }
             ctx.blocks[update_id as usize].terminator = HirTerminator::Jump { target: loop_id };
 
@@ -426,12 +423,9 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx) -> Result<bool, Lower
     Ok(false)
 }
 
-fn compile_expression(
-    expr: &Expression,
-    ops: &mut Vec<HirOp>,
-    locals: &HashMap<String, u32>,
-    func_index: &HashMap<String, u32>,
-) -> Result<(), LowerError> {
+fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), LowerError> {
+    let locals = &ctx.locals;
+    let func_index = &ctx.func_index;
     match expr {
         Expression::Literal(e) => {
             let value = match &e.value {
@@ -446,7 +440,7 @@ fn compile_expression(
                     ));
                 }
             };
-            ops.push(HirOp::LoadConst {
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                 value,
                 span: e.span,
             });
@@ -455,49 +449,149 @@ fn compile_expression(
             let slot = locals.get(&e.name).ok_or_else(|| {
                 LowerError::Unsupported(format!("undefined variable '{}'", e.name), Some(e.span))
             })?;
-            ops.push(HirOp::LoadLocal {
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
                 id: *slot,
                 span: e.span,
             });
         }
         Expression::Binary(e) => {
-            compile_expression(&e.left, ops, locals, func_index)?;
-            compile_expression(&e.right, ops, locals, func_index)?;
             match e.op {
-                BinaryOp::Add => ops.push(HirOp::Add { span: e.span }),
-                BinaryOp::Sub => ops.push(HirOp::Sub { span: e.span }),
-                BinaryOp::Mul => ops.push(HirOp::Mul { span: e.span }),
-                BinaryOp::Div => ops.push(HirOp::Div { span: e.span }),
-                BinaryOp::Mod => ops.push(HirOp::Mod { span: e.span }),
-                BinaryOp::Pow => ops.push(HirOp::Pow { span: e.span }),
-                BinaryOp::Lt => ops.push(HirOp::Lt { span: e.span }),
-                BinaryOp::Lte => ops.push(HirOp::Lte { span: e.span }),
-                BinaryOp::Gt => ops.push(HirOp::Gt { span: e.span }),
-                BinaryOp::Gte => ops.push(HirOp::Gte { span: e.span }),
-                BinaryOp::StrictEq => ops.push(HirOp::StrictEq { span: e.span }),
-                BinaryOp::StrictNotEq => ops.push(HirOp::StrictNotEq { span: e.span }),
-                BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
-                    return Err(LowerError::Unsupported(
-                        format!("binary op {:?} not yet supported", e.op),
-                        Some(e.span),
-                    ));
+                BinaryOp::LogicalAnd => {
+                    let result_slot = ctx.next_slot;
+                    ctx.next_slot += 1;
+                    compile_expression(&e.left, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                    let else_id = ctx.blocks.len() as HirBlockId;
+                    ctx.blocks.push(HirBlock {
+                        id: else_id,
+                        ops: Vec::new(),
+                        terminator: HirTerminator::Jump { target: 0 },
+                    });
+                    let right_id = ctx.blocks.len() as HirBlockId;
+                    ctx.blocks.push(HirBlock {
+                        id: right_id,
+                        ops: Vec::new(),
+                        terminator: HirTerminator::Jump { target: 0 },
+                    });
+                    let merge_id = ctx.blocks.len() as HirBlockId;
+                    ctx.blocks.push(HirBlock {
+                        id: merge_id,
+                        ops: Vec::new(),
+                        terminator: HirTerminator::Jump { target: 0 },
+                    });
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                        cond: result_slot,
+                        then_block: right_id,
+                        else_block: else_id,
+                    };
+                    ctx.current_block = right_id as usize;
+                    compile_expression(&e.right, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_id };
+                    ctx.current_block = else_id as usize;
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_id };
+                    ctx.current_block = merge_id as usize;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                }
+                BinaryOp::LogicalOr => {
+                    let result_slot = ctx.next_slot;
+                    ctx.next_slot += 1;
+                    compile_expression(&e.left, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                    let else_id = ctx.blocks.len() as HirBlockId;
+                    ctx.blocks.push(HirBlock {
+                        id: else_id,
+                        ops: Vec::new(),
+                        terminator: HirTerminator::Jump { target: 0 },
+                    });
+                    let right_id = ctx.blocks.len() as HirBlockId;
+                    ctx.blocks.push(HirBlock {
+                        id: right_id,
+                        ops: Vec::new(),
+                        terminator: HirTerminator::Jump { target: 0 },
+                    });
+                    let merge_id = ctx.blocks.len() as HirBlockId;
+                    ctx.blocks.push(HirBlock {
+                        id: merge_id,
+                        ops: Vec::new(),
+                        terminator: HirTerminator::Jump { target: 0 },
+                    });
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                        cond: result_slot,
+                        then_block: right_id,
+                        else_block: else_id,
+                    };
+                    ctx.current_block = right_id as usize;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_id };
+                    ctx.current_block = else_id as usize;
+                    compile_expression(&e.right, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_id };
+                    ctx.current_block = merge_id as usize;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: result_slot,
+                        span: e.span,
+                    });
+                }
+                _ => {
+                    compile_expression(&e.left, ctx)?;
+                    compile_expression(&e.right, ctx)?;
+                    match e.op {
+                        BinaryOp::Add => ctx.blocks[ctx.current_block].ops.push(HirOp::Add { span: e.span }),
+                        BinaryOp::Sub => ctx.blocks[ctx.current_block].ops.push(HirOp::Sub { span: e.span }),
+                        BinaryOp::Mul => ctx.blocks[ctx.current_block].ops.push(HirOp::Mul { span: e.span }),
+                        BinaryOp::Div => ctx.blocks[ctx.current_block].ops.push(HirOp::Div { span: e.span }),
+                        BinaryOp::Mod => ctx.blocks[ctx.current_block].ops.push(HirOp::Mod { span: e.span }),
+                        BinaryOp::Pow => ctx.blocks[ctx.current_block].ops.push(HirOp::Pow { span: e.span }),
+                        BinaryOp::Lt => ctx.blocks[ctx.current_block].ops.push(HirOp::Lt { span: e.span }),
+                        BinaryOp::Lte => ctx.blocks[ctx.current_block].ops.push(HirOp::Lte { span: e.span }),
+                        BinaryOp::Gt => ctx.blocks[ctx.current_block].ops.push(HirOp::Gt { span: e.span }),
+                        BinaryOp::Gte => ctx.blocks[ctx.current_block].ops.push(HirOp::Gte { span: e.span }),
+                        BinaryOp::StrictEq => ctx.blocks[ctx.current_block].ops.push(HirOp::StrictEq { span: e.span }),
+                        BinaryOp::StrictNotEq => ctx.blocks[ctx.current_block].ops.push(HirOp::StrictNotEq { span: e.span }),
+                        BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
+                            return Err(LowerError::Unsupported(
+                                format!("binary op {:?} not yet supported", e.op),
+                                Some(e.span),
+                            ));
+                        }
+                    }
                 }
             }
         }
         Expression::Unary(e) => {
             match e.op {
-                UnaryOp::Plus => compile_expression(&e.argument, ops, locals, func_index)?,
+                UnaryOp::Plus => compile_expression(&e.argument, ctx)?,
                 UnaryOp::Minus => {
-                    ops.push(HirOp::LoadConst {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                         value: HirConst::Int(0),
                         span: e.span,
                     });
-                    compile_expression(&e.argument, ops, locals, func_index)?;
-                    ops.push(HirOp::Sub { span: e.span });
+                    compile_expression(&e.argument, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Sub { span: e.span });
                 }
                 UnaryOp::LogicalNot => {
-                    compile_expression(&e.argument, ops, locals, func_index)?;
-                    ops.push(HirOp::Not { span: e.span });
+                    compile_expression(&e.argument, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Not { span: e.span });
                 }
             }
         }
@@ -510,31 +604,31 @@ fn compile_expression(
                             Some(id.span),
                         )
                     })?;
-                    compile_expression(&e.right, ops, locals, func_index)?;
-                    ops.push(HirOp::StoreLocal {
+                    compile_expression(&e.right, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                         id: slot,
                         span: e.span,
                     });
-                    ops.push(HirOp::LoadLocal {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
                         id: slot,
                         span: e.span,
                     });
                 }
                 Expression::Member(m) => {
-                    compile_expression(&m.object, ops, locals, func_index)?;
+                    compile_expression(&m.object, ctx)?;
                     match &m.property {
                         MemberProperty::Identifier(key) => {
-                            compile_expression(&e.right, ops, locals, func_index)?;
-                            ops.push(HirOp::Swap { span: e.span });
-                            ops.push(HirOp::SetProp {
+                            compile_expression(&e.right, ctx)?;
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span: e.span });
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
                                 key: key.clone(),
                                 span: e.span,
                             });
                         }
                         MemberProperty::Expression(key_expr) => {
-                            compile_expression(key_expr, ops, locals, func_index)?;
-                            compile_expression(&e.right, ops, locals, func_index)?;
-                            ops.push(HirOp::SetPropDyn { span: e.span });
+                            compile_expression(key_expr, ctx)?;
+                            compile_expression(&e.right, ctx)?;
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::SetPropDyn { span: e.span });
                         }
                     }
                 }
@@ -562,52 +656,52 @@ fn compile_expression(
                 }
             };
             for arg in &e.args {
-                compile_expression(arg, ops, locals, func_index)?;
+                compile_expression(arg, ctx)?;
             }
-            ops.push(HirOp::Call {
+            ctx.blocks[ctx.current_block].ops.push(HirOp::Call {
                 func_index: idx,
                 argc: e.args.len() as u32,
                 span: e.span,
             });
         }
         Expression::ObjectLiteral(e) => {
-            ops.push(HirOp::NewObject { span: e.span });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::NewObject { span: e.span });
             for (key, value) in &e.properties {
-                ops.push(HirOp::Dup { span: e.span });
-                compile_expression(value, ops, locals, func_index)?;
-                ops.push(HirOp::Swap { span: e.span });
-                ops.push(HirOp::SetProp {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: e.span });
+                compile_expression(value, ctx)?;
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span: e.span });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
                     key: key.clone(),
                     span: e.span,
                 });
-                ops.push(HirOp::Pop { span: e.span });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Pop { span: e.span });
             }
         }
         Expression::ArrayLiteral(e) => {
-            ops.push(HirOp::NewArray { span: e.span });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::NewArray { span: e.span });
             for (i, elem) in e.elements.iter().enumerate() {
-                ops.push(HirOp::Dup { span: e.span });
-                compile_expression(elem, ops, locals, func_index)?;
-                ops.push(HirOp::Swap { span: e.span });
-                ops.push(HirOp::SetProp {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: e.span });
+                compile_expression(elem, ctx)?;
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span: e.span });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
                     key: i.to_string(),
                     span: e.span,
                 });
-                ops.push(HirOp::Pop { span: e.span });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Pop { span: e.span });
             }
         }
         Expression::Member(e) => {
-            compile_expression(&e.object, ops, locals, func_index)?;
+            compile_expression(&e.object, ctx)?;
             match &e.property {
                 MemberProperty::Identifier(key) => {
-                    ops.push(HirOp::GetProp {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
                         key: key.clone(),
                         span: e.span,
                     });
                 }
                 MemberProperty::Expression(key_expr) => {
-                    compile_expression(key_expr, ops, locals, func_index)?;
-                    ops.push(HirOp::GetPropDyn { span: e.span });
+                    compile_expression(key_expr, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::GetPropDyn { span: e.span });
                 }
             }
         }
@@ -850,5 +944,32 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "!==, >, >=, <= should work");
+    }
+
+    #[test]
+    fn lower_logical_and_or() {
+        let result = crate::driver::Driver::run(
+            "function main() { return 1 && 2; }",
+        )
+        .expect("run");
+        assert_eq!(result, 2, "1 && 2 should short-circuit to 2");
+
+        let result = crate::driver::Driver::run(
+            "function main() { return 0 && 99; }",
+        )
+        .expect("run");
+        assert_eq!(result, 0, "0 && 99 should short-circuit to 0");
+
+        let result = crate::driver::Driver::run(
+            "function main() { return 0 || 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "0 || 1 should return 1");
+
+        let result = crate::driver::Driver::run(
+            "function main() { return 1 || 99; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "1 || 99 should short-circuit to 1");
     }
 }
