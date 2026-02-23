@@ -1,5 +1,6 @@
 use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
 use crate::runtime::{Heap, Value};
+use std::io::Write;
 
 #[derive(Debug, Clone)]
 pub enum Completion {
@@ -140,6 +141,30 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     pc: 0,
                     locals: callee_locals,
                 });
+            }
+            x if x == Opcode::CallBuiltin as u8 => {
+                let builtin_id = *code.get(*pc).ok_or(VmError::StackUnderflow)?;
+                let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 2;
+                let mut args: Vec<Value> = (0..argc)
+                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+                    .collect::<Result<Vec<_>, _>>()?;
+                args.reverse();
+                match builtin_id {
+                    0 => {
+                        let mut out = std::io::stdout();
+                        for (i, v) in args.iter().enumerate() {
+                            if i > 0 {
+                                let _ = write!(out, " ");
+                            }
+                            let _ = write!(out, "{}", v);
+                        }
+                        let _ = writeln!(out);
+                        let _ = out.flush();
+                        stack.push(Value::Undefined);
+                    }
+                    _ => return Err(VmError::InvalidOpcode(builtin_id)),
+                }
             }
             x if x == Opcode::Add as u8 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;

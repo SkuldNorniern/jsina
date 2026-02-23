@@ -42,6 +42,7 @@ pub enum Opcode {
     GetPropDyn = 0x54,
     SetPropDyn = 0x55,
     Call = 0x40,
+    CallBuiltin = 0x41,
     JumpIfFalse = 0x30,
     JumpIfNullish = 0x32,
     Jump = 0x31,

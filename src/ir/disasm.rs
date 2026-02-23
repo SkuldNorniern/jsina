@@ -65,6 +65,13 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 pc += 2;
                 format!("  {:04}  Call  {}  {}", line_start, func_idx, argc)
             }
+            x if x == Opcode::CallBuiltin as u8 => {
+                let builtin_id = code.get(pc).copied().unwrap_or(0);
+                let argc = code.get(pc + 1).copied().unwrap_or(0);
+                pc += 2;
+                let name = if builtin_id == 0 { "print" } else { "?" };
+                format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)
+            }
             x if x == Opcode::JumpIfFalse as u8 => {
                 let offset = code.get(pc..pc + 2)
                     .map(|b| i16::from_le_bytes([b[0], b[1]]) as i32)

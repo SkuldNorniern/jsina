@@ -46,6 +46,12 @@ pub enum HirOp {
     Dup { span: Span },
     Swap { span: Span },
     Call { func_index: u32, argc: u32, span: Span },
+    CallBuiltin { builtin: BuiltinId, argc: u32, span: Span },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinId {
+    Print = 0,
 }
 
 #[derive(Debug, Clone)]

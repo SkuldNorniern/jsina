@@ -689,28 +689,40 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
             }
         }
         Expression::Call(e) => {
-            let idx = match e.callee.as_ref() {
-                Expression::Identifier(id) => *func_index.get(&id.name).ok_or_else(|| {
-                    LowerError::Unsupported(
-                        format!("call to undefined function '{}'", id.name),
-                        Some(id.span),
-                    )
-                })?,
+            match e.callee.as_ref() {
+                Expression::Identifier(id) if id.name == "print" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Print,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) => {
+                    let idx = *func_index.get(&id.name).ok_or_else(|| {
+                        LowerError::Unsupported(
+                            format!("call to undefined function '{}'", id.name),
+                            Some(id.span),
+                        )
+                    })?;
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Call {
+                        func_index: idx,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
                 _ => {
                     return Err(LowerError::Unsupported(
                         "call to non-identifier not yet supported".to_string(),
                         Some(e.span),
                     ));
                 }
-            };
-            for arg in &e.args {
-                compile_expression(arg, ctx)?;
             }
-            ctx.blocks[ctx.current_block].ops.push(HirOp::Call {
-                func_index: idx,
-                argc: e.args.len() as u32,
-                span: e.span,
-            });
         }
         Expression::ObjectLiteral(e) => {
             ctx.blocks[ctx.current_block].ops.push(HirOp::NewObject { span: e.span });
@@ -1019,6 +1031,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "1 || 99 should short-circuit to 1");
+    }
+
+    #[test]
+    fn lower_print() {
+        let result = crate::driver::Driver::run(
+            "function main() { print(42); return 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 0, "print should return undefined (coerced to 0), main returns 0");
     }
 
     #[test]
