@@ -434,12 +434,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
                 LiteralValue::True => HirConst::Int(1),
                 LiteralValue::False => HirConst::Int(0),
                 LiteralValue::Null => HirConst::Null,
-                LiteralValue::String(_) => {
-                    return Err(LowerError::Unsupported(
-                        format!("literal {:?} not yet supported", e.value),
-                        Some(e.span),
-                    ));
-                }
+                LiteralValue::String(s) => HirConst::String(s.clone()),
             };
             ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                 value,
@@ -690,6 +685,17 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx) -> Result<(), Lower
         }
         Expression::Call(e) => {
             match e.callee.as_ref() {
+                Expression::Member(m) if matches!(&m.property, MemberProperty::Identifier(s) if s == "push") => {
+                    compile_expression(&m.object, ctx)?;
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::ArrayPush,
+                        argc: (1 + e.args.len()) as u32,
+                        span: e.span,
+                    });
+                }
                 Expression::Identifier(id) if id.name == "print" => {
                     for arg in &e.args {
                         compile_expression(arg, ctx)?;
@@ -1031,6 +1037,33 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "1 || 99 should short-circuit to 1");
+    }
+
+    #[test]
+    fn lower_string_literal() {
+        let result = crate::driver::Driver::run(
+            "function main() { print(\"hello\"); return 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn lower_array_push() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [1, 2]; a.push(3); return a.length; }",
+        )
+        .expect("run");
+        assert_eq!(result, 3, "a.push(3) should make length 3");
+    }
+
+    #[test]
+    fn lower_string_concat() {
+        let result = crate::driver::Driver::run(
+            "function main() { let s = \"a\" + \"b\"; print(s); return 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 0);
     }
 
     #[test]

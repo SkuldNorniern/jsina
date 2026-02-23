@@ -163,6 +163,18 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         let _ = out.flush();
                         stack.push(Value::Undefined);
                     }
+                    1 => {
+                        let (arr, vals) = args.split_first().ok_or(VmError::StackUnderflow)?;
+                        let arr_id = match arr {
+                            Value::Array(id) => *id,
+                            _ => {
+                                stack.push(Value::Undefined);
+                                continue;
+                            }
+                        };
+                        let new_len = heap.array_push_values(arr_id, vals);
+                        stack.push(Value::Int(new_len));
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }
@@ -349,6 +361,9 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
 
 fn add_values(a: &Value, b: &Value) -> Result<Value, VmError> {
     match (a, b) {
+        (Value::String(x), Value::String(y)) => Ok(Value::String(format!("{}{}", x, y))),
+        (Value::String(x), y) => Ok(Value::String(format!("{}{}", x, y))),
+        (x, Value::String(y)) => Ok(Value::String(format!("{}{}", x, y))),
         (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x.saturating_add(*y))),
         (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x + y)),
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 + y)),

@@ -52,6 +52,7 @@ pub enum HirOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinId {
     Print = 0,
+    ArrayPush = 1,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +60,7 @@ pub enum HirConst {
     Int(i64),
     Float(f64),
     Null,
+    String(String),
 }
 
 #[derive(Debug, Clone)]

@@ -74,6 +74,15 @@ impl Heap {
             elements.push(value);
         }
     }
+
+    pub fn array_push_values(&mut self, arr_id: usize, values: &[Value]) -> i32 {
+        if let Some(elements) = self.arrays.get_mut(arr_id) {
+            elements.extend(values.iter().cloned());
+            elements.len() as i32
+        } else {
+            0
+        }
+    }
 }
 
 #[cfg(test)]

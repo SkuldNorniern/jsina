@@ -69,7 +69,11 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 let builtin_id = code.get(pc).copied().unwrap_or(0);
                 let argc = code.get(pc + 1).copied().unwrap_or(0);
                 pc += 2;
-                let name = if builtin_id == 0 { "print" } else { "?" };
+                let name = match builtin_id {
+                    0 => "print",
+                    1 => "arrayPush",
+                    _ => "?",
+                };
                 format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)
             }
             x if x == Opcode::JumpIfFalse as u8 => {
