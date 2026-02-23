@@ -22,6 +22,7 @@ pub enum HirOp {
     LoadConst { value: HirConst, span: Span },
     LoadLocal { id: u32, span: Span },
     StoreLocal { id: u32, span: Span },
+    Pop { span: Span },
 }
 
 #[derive(Debug, Clone)]
