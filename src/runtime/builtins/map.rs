@@ -1,6 +1,6 @@
 use crate::runtime::{Heap, Value};
 
-pub fn create(heap: &mut Heap) -> Value {
+pub fn create(_args: &[Value], heap: &mut Heap) -> Value {
     let id = heap.alloc_map();
     Value::Map(id)
 }
@@ -19,7 +19,7 @@ pub fn set(args: &[Value], heap: &mut Heap) -> Value {
     value.clone()
 }
 
-pub fn get(args: &[Value], heap: &Heap) -> Value {
+pub fn get(args: &[Value], heap: &mut Heap) -> Value {
     let (map_val, key_val) = match args {
         [m, k] => (m, k),
         _ => return Value::Undefined,
@@ -32,7 +32,7 @@ pub fn get(args: &[Value], heap: &Heap) -> Value {
     heap.map_get(map_id, &key)
 }
 
-pub fn has(args: &[Value], heap: &Heap) -> Value {
+pub fn has(args: &[Value], heap: &mut Heap) -> Value {
     let (map_val, key_val) = match args {
         [m, k] => (m, k),
         _ => return Value::Bool(false),

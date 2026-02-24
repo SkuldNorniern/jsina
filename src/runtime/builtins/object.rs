@@ -41,7 +41,7 @@ pub fn assign(args: &[Value], heap: &mut Heap) -> Value {
     Value::Object(target_id)
 }
 
-pub fn has_own_property(args: &[Value], heap: &Heap) -> Value {
+pub fn has_own_property(args: &[Value], heap: &mut Heap) -> Value {
     let key = args.get(1).map(to_prop_key).unwrap_or_default();
     let result = match args.first() {
         Some(Value::Object(id)) => heap.object_has_own_property(*id, &key),

@@ -1,12 +1,12 @@
 use super::to_number;
 use crate::runtime::{Heap, Value};
 
-pub fn string(args: &[Value]) -> Value {
+pub fn string(args: &[Value], _heap: &mut Heap) -> Value {
     let arg = args.first().map(|v| v.to_string()).unwrap_or_default();
     Value::String(arg)
 }
 
-pub fn trim(args: &[Value]) -> Value {
+pub fn trim(args: &[Value], _heap: &mut Heap) -> Value {
     let s = match args.first() {
         Some(Value::String(x)) => x.clone(),
         Some(v) => v.to_string(),
@@ -15,7 +15,7 @@ pub fn trim(args: &[Value]) -> Value {
     Value::String(s.trim().to_string())
 }
 
-pub fn to_lower_case(args: &[Value]) -> Value {
+pub fn to_lower_case(args: &[Value], _heap: &mut Heap) -> Value {
     let s = match args.first() {
         Some(Value::String(x)) => x.clone(),
         Some(v) => v.to_string(),
@@ -24,7 +24,7 @@ pub fn to_lower_case(args: &[Value]) -> Value {
     Value::String(s.to_lowercase())
 }
 
-pub fn to_upper_case(args: &[Value]) -> Value {
+pub fn to_upper_case(args: &[Value], _heap: &mut Heap) -> Value {
     let s = match args.first() {
         Some(Value::String(x)) => x.clone(),
         Some(v) => v.to_string(),
@@ -33,7 +33,7 @@ pub fn to_upper_case(args: &[Value]) -> Value {
     Value::String(s.to_uppercase())
 }
 
-pub fn repeat(args: &[Value]) -> Value {
+pub fn repeat(args: &[Value], _heap: &mut Heap) -> Value {
     let s = match args.first() {
         Some(Value::String(x)) => x.clone(),
         Some(v) => v.to_string(),
@@ -52,7 +52,7 @@ pub fn repeat(args: &[Value]) -> Value {
     Value::String(s.repeat(n))
 }
 
-pub fn char_at(args: &[Value]) -> Value {
+pub fn char_at(args: &[Value], _heap: &mut Heap) -> Value {
     let s = match args.first() {
         Some(Value::String(x)) => x.clone(),
         Some(v) => v.to_string(),

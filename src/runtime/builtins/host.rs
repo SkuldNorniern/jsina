@@ -1,7 +1,7 @@
-use crate::runtime::Value;
+use crate::runtime::{Heap, Value};
 use std::io::Write;
 
-pub fn print(args: &[Value]) -> Value {
+pub fn print(args: &[Value], _heap: &mut Heap) -> Value {
     let mut out = std::io::stdout();
     for (i, v) in args.iter().enumerate() {
         if i > 0 {

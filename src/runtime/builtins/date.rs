@@ -19,7 +19,7 @@ pub fn create(args: &[Value], heap: &mut Heap) -> Value {
     Value::Date(id)
 }
 
-pub fn now(_args: &[Value]) -> Value {
+pub fn now(_args: &[Value], _heap: &mut Heap) -> Value {
     let ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as f64)
@@ -27,7 +27,7 @@ pub fn now(_args: &[Value]) -> Value {
     number_to_value(ms)
 }
 
-pub fn get_time(args: &[Value], heap: &Heap) -> Value {
+pub fn get_time(args: &[Value], heap: &mut Heap) -> Value {
     let id = match args.first().and_then(Value::as_date_id) {
         Some(i) => i,
         None => return Value::Number(f64::NAN),
@@ -105,7 +105,7 @@ fn month_name(mo: i32) -> &'static str {
     }
 }
 
-pub fn to_string(args: &[Value], heap: &Heap) -> Value {
+pub fn to_string(args: &[Value], heap: &mut Heap) -> Value {
     let id = match args.first().and_then(Value::as_date_id) {
         Some(i) => i,
         None => return Value::String("Invalid Date".to_string()),
@@ -114,7 +114,7 @@ pub fn to_string(args: &[Value], heap: &Heap) -> Value {
     Value::String(format_date(ms))
 }
 
-pub fn to_iso_string(args: &[Value], heap: &Heap) -> Value {
+pub fn to_iso_string(args: &[Value], heap: &mut Heap) -> Value {
     let id = match args.first().and_then(Value::as_date_id) {
         Some(i) => i,
         None => return Value::String("Invalid Date".to_string()),

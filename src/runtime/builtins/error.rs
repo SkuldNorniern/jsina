@@ -8,7 +8,7 @@ pub fn error(args: &[Value], heap: &mut Heap) -> Value {
     Value::Object(obj_id)
 }
 
-pub fn is_error(args: &[Value], heap: &Heap) -> Value {
+pub fn is_error(args: &[Value], heap: &mut Heap) -> Value {
     let result = match args.first() {
         Some(Value::Object(id)) => heap.is_error_object(*id),
         _ => false,

@@ -40,7 +40,7 @@ pub fn unshift(args: &[Value], heap: &mut Heap) -> Value {
     Value::Int(new_len)
 }
 
-pub fn is_array(args: &[Value]) -> Value {
+pub fn is_array(args: &[Value], _heap: &mut Heap) -> Value {
     Value::Bool(matches!(args.first(), Some(Value::Array(_))))
 }
 
@@ -171,7 +171,7 @@ pub fn concat(args: &[Value], heap: &mut Heap) -> Value {
     }
 }
 
-pub fn index_of(args: &[Value], heap: &Heap) -> Value {
+fn index_of_impl(args: &[Value], heap: &Heap) -> Value {
     let receiver = match args.first() {
         Some(v) => v,
         None => return Value::Int(-1),
@@ -211,8 +211,12 @@ pub fn index_of(args: &[Value], heap: &Heap) -> Value {
     Value::Int(idx)
 }
 
-pub fn includes(args: &[Value], heap: &Heap) -> Value {
-    let idx_val = index_of(args, heap);
+pub fn index_of(args: &[Value], heap: &mut Heap) -> Value {
+    index_of_impl(args, heap)
+}
+
+pub fn includes(args: &[Value], heap: &mut Heap) -> Value {
+    let idx_val = index_of_impl(args, heap);
     let found = match idx_val {
         Value::Int(n) => n >= 0,
         _ => false,
@@ -220,7 +224,7 @@ pub fn includes(args: &[Value], heap: &Heap) -> Value {
     Value::Bool(found)
 }
 
-pub fn join(args: &[Value], heap: &Heap) -> Value {
+pub fn join(args: &[Value], heap: &mut Heap) -> Value {
     let arr = match args.first() {
         Some(v) => v,
         None => return Value::Undefined,

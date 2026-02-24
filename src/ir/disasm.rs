@@ -130,50 +130,9 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 let builtin_id = code.get(pc).copied().unwrap_or(0);
                 let argc = code.get(pc + 1).copied().unwrap_or(0);
                 pc += 2;
-                let name = match builtin_id {
-                    0 => "print",
-                    1 => "arrayPush",
-                    2 => "arrayPop",
-                    3 => "mathFloor",
-                    4 => "mathAbs",
-                    5 => "mathMin",
-                    6 => "mathMax",
-                    7 => "jsonParse",
-                    8 => "jsonStringify",
-                    9 => "objectCreate",
-                    10 => "arrayIsArray",
-                    11 => "objectKeys",
-                    12 => "string",
-                    13 => "error",
-                    14 => "number",
-                    15 => "boolean",
-                    16 => "arraySlice",
-                    17 => "arrayConcat",
-                    18 => "objectAssign",
-                    19 => "arrayIndexOf",
-                    20 => "arrayJoin",
-                    21 => "mathPow",
-                    22 => "arrayShift",
-                    23 => "arrayUnshift",
-                    24 => "stringSplit",
-                    25 => "stringTrim",
-                    26 => "stringToLowerCase",
-                    27 => "stringToUpperCase",
-                    28 => "mathCeil",
-                    29 => "mathRound",
-                    30 => "mathSqrt",
-                    31 => "mathRandom",
-                    32 => "objectHasOwnProperty",
-                    33 => "arrayReverse",
-                    34 => "stringCharAt",
-                    35 => "errorIsError",
-                    36 => "regExpEscape",
-                    37 => "includes",
-                    38 => "stringRepeat",
-                    39 => "arrayFill",
-                    _ => "?",
-                };
-                format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)
+                let name = crate::runtime::builtins::name(builtin_id);
+                let cat = crate::runtime::builtins::category(builtin_id);
+                format!("  {:04}  CallBuiltin  0x{:02X}  {}  ; {}.{}", line_start, builtin_id, argc, cat, name)
             }
             x if x == Opcode::JumpIfFalse as u8 => {
                 let offset = code.get(pc..pc + 2)

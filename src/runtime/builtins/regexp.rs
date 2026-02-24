@@ -1,4 +1,4 @@
-use crate::runtime::Value;
+use crate::runtime::{Heap, Value};
 
 fn escape_char(c: char) -> Option<&'static str> {
     match c {
@@ -21,7 +21,7 @@ fn escape_char(c: char) -> Option<&'static str> {
     }
 }
 
-pub fn escape(args: &[Value]) -> Value {
+pub fn escape(args: &[Value], _heap: &mut Heap) -> Value {
     let s = match args.first() {
         Some(Value::String(x)) => x.clone(),
         Some(v) => v.to_string(),
