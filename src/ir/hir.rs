@@ -102,6 +102,8 @@ pub enum BuiltinId {
     ArrayReverse = 33,
     StringCharAt = 34,
     ErrorIsError = 35,
+    RegExpEscape = 36,
+    Includes = 37,
 }
 
 

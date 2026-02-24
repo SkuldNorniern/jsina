@@ -1298,6 +1298,13 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "RegExp") && prop == "escape" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::RegExpEscape,
+                            argc: 1,
+                            span: e.span,
+                        });
                     } else if prop == "push" {
                         compile_expression(&m.object, ctx)?;
                         for arg in &e.args {
@@ -1372,6 +1379,31 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         }
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: crate::ir::hir::BuiltinId::ArrayIndexOf,
+                            argc: 3,
+                            span: e.span,
+                        });
+                    } else if prop == "includes" {
+                        compile_expression(&m.object, ctx)?;
+                        let search = e.args.first();
+                        let from = e.args.get(1);
+                        if let Some(s) = search {
+                            compile_expression(s, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        if let Some(f) = from {
+                            compile_expression(f, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Includes,
                             argc: 3,
                             span: e.span,
                         });
@@ -2288,6 +2320,24 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "String.toLowerCase, toUpperCase");
+    }
+
+    #[test]
+    fn lower_reg_exp_escape() {
+        let result = crate::driver::Driver::run(
+            r#"function main() { let s = RegExp.escape("."); if (s.length !== 2) return 0; let c = s.charAt(0); if (c.length !== 1) return 0; if (!RegExp.escape("a.b").includes(c)) return 0; return 1; }"#,
+        )
+        .expect("run");
+        assert_eq!(result, 1, "RegExp.escape");
+    }
+
+    #[test]
+    fn lower_includes() {
+        let result = crate::driver::Driver::run(
+            "function main() { if (!\"hello\".includes(\"ell\")) return 0; if (\"hello\".includes(\"x\")) return 0; let a = [1, 2, 3]; if (!a.includes(2)) return 0; if (a.includes(99)) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "String.includes and Array.includes");
     }
 
     #[test]

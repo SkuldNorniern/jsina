@@ -178,6 +178,15 @@ pub fn index_of(args: &[Value], heap: &Heap) -> Value {
     Value::Int(idx)
 }
 
+pub fn includes(args: &[Value], heap: &Heap) -> Value {
+    let idx_val = index_of(args, heap);
+    let found = match idx_val {
+        Value::Int(n) => n >= 0,
+        _ => false,
+    };
+    Value::Bool(found)
+}
+
 pub fn join(args: &[Value], heap: &Heap) -> Value {
     let arr = match args.first() {
         Some(v) => v,

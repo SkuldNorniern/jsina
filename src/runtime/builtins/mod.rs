@@ -11,6 +11,7 @@ mod json;
 mod math;
 mod number;
 mod object;
+mod regexp;
 mod string;
 
 use crate::runtime::{Heap, Value};
@@ -79,8 +80,9 @@ pub(crate) fn number_to_value(n: f64) -> Value {
     }
 }
 
+static RNG_STATE: AtomicU64 = AtomicU64::new(0);
+
 pub(crate) fn random_f64() -> f64 {
-    static RNG_STATE: AtomicU64 = AtomicU64::new(0);
     let mut state = RNG_STATE.load(Ordering::Relaxed);
     if state == 0 {
         state = std::time::SystemTime::now()
@@ -96,6 +98,10 @@ pub(crate) fn random_f64() -> f64 {
     state ^= state << 17;
     RNG_STATE.store(state, Ordering::Relaxed);
     (state as f64) / (u64::MAX as f64)
+}
+
+pub fn seed_random(seed: u64) {
+    RNG_STATE.store(if seed == 0 { 1 } else { seed }, Ordering::Relaxed);
 }
 
 pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, BuiltinError> {
@@ -136,6 +142,8 @@ pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, Builti
         33 => array::reverse(args, heap),
         34 => string::char_at(args),
         35 => error::is_error(args, heap),
+        36 => regexp::escape(args),
+        37 => array::includes(args, heap),
         _ => unreachable!("invalid builtin id checked by caller"),
     };
     Ok(result)
