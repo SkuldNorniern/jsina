@@ -55,6 +55,10 @@ struct Frame {
 }
 
 pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
+    interpret_program_with_trace(program, false)
+}
+
+pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Completion, VmError> {
     let mut heap = Heap::new();
     let mut stack: Vec<Value> = Vec::new();
     let entry_chunk = program
@@ -83,7 +87,13 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
         }
 
         let op = code[*pc];
+        let trace_pc = *pc;
         *pc += 1;
+
+        if trace {
+            let opname = crate::ir::disasm::opcode_name(op);
+            eprintln!("  {:04}  {}", trace_pc, opname);
+        }
 
         match op {
             x if x == Opcode::PushConst as u8 => {

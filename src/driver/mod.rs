@@ -2,7 +2,7 @@ use crate::backend::translate_to_lamina_ir;
 use crate::diagnostics::Diagnostic;
 use crate::frontend::{check_early_errors, Lexer, Parser};
 use crate::ir::{hir_to_bytecode, script_to_hir};
-use crate::vm::{interpret_program, Completion, Program};
+use crate::vm::{interpret_program_with_trace, Completion, Program};
 
 #[derive(Debug)]
 pub enum DriverError {
@@ -100,6 +100,10 @@ impl Driver {
     }
 
     pub fn run(source: &str) -> Result<i64, DriverError> {
+        Self::run_with_trace(source, false)
+    }
+
+    pub fn run_with_trace(source: &str, trace: bool) -> Result<i64, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
         let entry = funcs
@@ -115,7 +119,7 @@ impl Driver {
             chunks,
             entry,
         };
-        let completion = interpret_program(&program)?;
+        let completion = crate::vm::interpret_program_with_trace(&program, trace)?;
         let value = match completion {
             Completion::Return(v) => v,
             Completion::Normal(v) => v,

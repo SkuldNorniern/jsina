@@ -1,5 +1,49 @@
 use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
 
+pub fn opcode_name(op: u8) -> &'static str {
+    match op {
+        x if x == Opcode::PushConst as u8 => "PushConst",
+        x if x == Opcode::Pop as u8 => "Pop",
+        x if x == Opcode::Dup as u8 => "Dup",
+        x if x == Opcode::Swap as u8 => "Swap",
+        x if x == Opcode::LoadLocal as u8 => "LoadLocal",
+        x if x == Opcode::StoreLocal as u8 => "StoreLocal",
+        x if x == Opcode::LoadThis as u8 => "LoadThis",
+        x if x == Opcode::Add as u8 => "Add",
+        x if x == Opcode::Sub as u8 => "Sub",
+        x if x == Opcode::Mul as u8 => "Mul",
+        x if x == Opcode::Div as u8 => "Div",
+        x if x == Opcode::Mod as u8 => "Mod",
+        x if x == Opcode::Pow as u8 => "Pow",
+        x if x == Opcode::Lt as u8 => "Lt",
+        x if x == Opcode::Lte as u8 => "Lte",
+        x if x == Opcode::Gt as u8 => "Gt",
+        x if x == Opcode::Gte as u8 => "Gte",
+        x if x == Opcode::StrictEq as u8 => "StrictEq",
+        x if x == Opcode::StrictNotEq as u8 => "StrictNotEq",
+        x if x == Opcode::Not as u8 => "Not",
+        x if x == Opcode::Typeof as u8 => "Typeof",
+        x if x == Opcode::NewObject as u8 => "NewObject",
+        x if x == Opcode::NewObjectWithProto as u8 => "NewObjectWithProto",
+        x if x == Opcode::NewArray as u8 => "NewArray",
+        x if x == Opcode::GetProp as u8 => "GetProp",
+        x if x == Opcode::SetProp as u8 => "SetProp",
+        x if x == Opcode::GetPropDyn as u8 => "GetPropDyn",
+        x if x == Opcode::SetPropDyn as u8 => "SetPropDyn",
+        x if x == Opcode::Call as u8 => "Call",
+        x if x == Opcode::CallBuiltin as u8 => "CallBuiltin",
+        x if x == Opcode::CallMethod as u8 => "CallMethod",
+        x if x == Opcode::New as u8 => "New",
+        x if x == Opcode::Throw as u8 => "Throw",
+        x if x == Opcode::Rethrow as u8 => "Rethrow",
+        x if x == Opcode::JumpIfFalse as u8 => "JumpIfFalse",
+        x if x == Opcode::JumpIfNullish as u8 => "JumpIfNullish",
+        x if x == Opcode::Jump as u8 => "Jump",
+        x if x == Opcode::Return as u8 => "Return",
+        _ => "?",
+    }
+}
+
 pub fn disassemble(chunk: &BytecodeChunk) -> String {
     let mut out = String::new();
     let mut pc: usize = 0;
