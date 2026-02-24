@@ -11,6 +11,7 @@ struct HeapObject {
 pub struct Heap {
     objects: Vec<HeapObject>,
     arrays: Vec<Vec<Value>>,
+    maps: Vec<std::collections::HashMap<String, Value>>,
     error_object_ids: HashSet<usize>,
 }
 
@@ -36,6 +37,36 @@ impl Heap {
         let id = self.arrays.len();
         self.arrays.push(Vec::new());
         id
+    }
+
+    pub fn alloc_map(&mut self) -> usize {
+        let id = self.maps.len();
+        self.maps.push(std::collections::HashMap::new());
+        id
+    }
+
+    pub fn map_set(&mut self, map_id: usize, key: &str, value: Value) {
+        if let Some(m) = self.maps.get_mut(map_id) {
+            m.insert(key.to_string(), value);
+        }
+    }
+
+    pub fn map_get(&self, map_id: usize, key: &str) -> Value {
+        self.maps
+            .get(map_id)
+            .and_then(|m| m.get(key).cloned())
+            .unwrap_or(Value::Undefined)
+    }
+
+    pub fn map_has(&self, map_id: usize, key: &str) -> bool {
+        self.maps
+            .get(map_id)
+            .map(|m| m.contains_key(key))
+            .unwrap_or(false)
+    }
+
+    pub fn map_size(&self, map_id: usize) -> usize {
+        self.maps.get(map_id).map(|m| m.len()).unwrap_or(0)
     }
 
     pub fn get_prop(&self, obj_id: usize, key: &str) -> Value {

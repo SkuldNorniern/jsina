@@ -8,6 +8,7 @@ pub enum Value {
     String(String),
     Object(usize),
     Array(usize),
+    Map(usize),
     Function(usize),
 }
 
@@ -33,6 +34,10 @@ impl Value {
         matches!(self, Value::Array(_))
     }
 
+    pub fn is_map(&self) -> bool {
+        matches!(self, Value::Map(_))
+    }
+
     pub fn as_object_id(&self) -> Option<usize> {
         match self {
             Value::Object(id) => Some(*id),
@@ -43,6 +48,13 @@ impl Value {
     pub fn as_array_id(&self) -> Option<usize> {
         match self {
             Value::Array(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub fn as_map_id(&self) -> Option<usize> {
+        match self {
+            Value::Map(id) => Some(*id),
             _ => None,
         }
     }
@@ -59,6 +71,7 @@ impl std::fmt::Display for Value {
             Value::String(s) => write!(f, "{}", s),
             Value::Object(_) => write!(f, "[object Object]"),
             Value::Array(_) => write!(f, "[object Array]"),
+            Value::Map(_) => write!(f, "[object Map]"),
             Value::Function(_) => write!(f, "[object Function]"),
         }
     }

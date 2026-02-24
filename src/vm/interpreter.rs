@@ -280,7 +280,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
                     .collect::<Result<Vec<_>, _>>()?;
                 args.reverse();
-                if builtin_id > 39 {
+                if builtin_id > 43 {
                     return Err(VmError::InvalidOpcode(builtin_id));
                 }
                 match crate::runtime::builtins::dispatch(builtin_id, &args, &mut heap) {
@@ -496,7 +496,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     Value::Bool(_) => "boolean",
                     Value::Int(_) | Value::Number(_) => "number",
                     Value::String(_) => "string",
-                    Value::Object(_) | Value::Array(_) => "object",
+                    Value::Object(_) | Value::Array(_) | Value::Map(_) => "object",
                     Value::Function(_) => "function",
                 };
                 stack.push(Value::String(s.to_string()));
@@ -535,6 +535,8 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 let result = match &obj {
                     Value::Object(id) => getprop_cache.get(*id, false, &key_str, &heap),
                     Value::Array(id) => getprop_cache.get(*id, true, &key_str, &heap),
+                    Value::Map(id) if key_str == "size" => Value::Int(heap.map_size(*id) as i32),
+                    Value::Map(_) => Value::Undefined,
                     Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
                     Value::String(s) => {
                         if let Ok(idx) = key_str.parse::<usize>() {
@@ -570,6 +572,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                         getprop_cache.invalidate(*id, true, &key_str);
                         heap.set_array_prop(*id, &key_str, value.clone());
                     }
+                    Value::Map(id) => heap.map_set(*id, &key_str, value.clone()),
                     _ => {}
                 }
                 stack.push(value);
@@ -581,6 +584,8 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 let result = match &obj {
                     Value::Object(id) => heap.get_prop(*id, &key_str),
                     Value::Array(id) => heap.get_array_prop(*id, &key_str),
+                    Value::Map(id) if key_str == "size" => Value::Int(heap.map_size(*id) as i32),
+                    Value::Map(_) => Value::Undefined,
                     Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
                     Value::String(s) => {
                         if let Ok(idx) = key_str.parse::<usize>() {
@@ -601,6 +606,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 match &obj {
                     Value::Object(id) => heap.set_prop(*id, &key_str, value.clone()),
                     Value::Array(id) => heap.set_array_prop(*id, &key_str, value.clone()),
+                    Value::Map(id) => heap.map_set(*id, &key_str, value.clone()),
                     _ => {}
                 }
                 stack.push(value);
@@ -660,7 +666,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Function(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Function(_) => true,
     }
 }
 
@@ -672,7 +678,7 @@ fn value_to_prop_key(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
-        Value::Object(_) | Value::Array(_) => "[object Object]".to_string(),
+        Value::Object(_) | Value::Array(_) | Value::Map(_) => "[object Object]".to_string(),
         Value::Function(_) => "function".to_string(),
     }
 }
@@ -795,6 +801,7 @@ fn strict_eq_values(a: &Value, b: &Value) -> Value {
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Object(x), Value::Object(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => x == y,
+        (Value::Map(x), Value::Map(y)) => x == y,
         (Value::Function(x), Value::Function(y)) => x == y,
         _ => false,
     };

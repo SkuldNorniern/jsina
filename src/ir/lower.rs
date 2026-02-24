@@ -1332,6 +1332,31 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
+                    } else if prop == "set" && e.args.len() == 2 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_expression(&e.args[0], ctx)?;
+                        compile_expression(&e.args[1], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MapSet,
+                            argc: 3,
+                            span: e.span,
+                        });
+                    } else if prop == "get" && e.args.len() == 1 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MapGet,
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "has" && e.args.len() == 1 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MapHas,
+                            argc: 2,
+                            span: e.span,
+                        });
                     } else if prop == "slice" {
                         compile_expression(&m.object, ctx)?;
                         let start = e.args.get(0);
@@ -1689,6 +1714,13 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::Error,
                         argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "Map" && n.args.is_empty() => {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::MapCreate,
+                        argc: 0,
                         span: n.span,
                     });
                 }
@@ -2452,6 +2484,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "Object.hasOwnProperty");
+    }
+
+    #[test]
+    fn lower_map() {
+        let result = crate::driver::Driver::run(
+            "function main() { let m = new Map(); m.set(\"a\", 1); if (m.get(\"a\") !== 1) return 0; if (!m.has(\"a\")) return 0; if (m.size !== 1) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Map set, get, has, size");
     }
 
     #[test]

@@ -6,6 +6,7 @@
 mod array;
 mod boolean;
 mod error;
+mod map;
 mod host;
 mod json;
 mod math;
@@ -30,7 +31,7 @@ pub(crate) fn to_number(v: &Value) -> f64 {
         Value::Null => 0.0,
         Value::Undefined => f64::NAN,
         Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
-        Value::Object(_) | Value::Array(_) | Value::Function(_) => f64::NAN,
+        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Function(_) => f64::NAN,
     }
 }
 
@@ -40,7 +41,7 @@ pub(crate) fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Function(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Function(_) => true,
     }
 }
 
@@ -52,7 +53,7 @@ pub(crate) fn to_prop_key(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
-        Value::Object(_) | Value::Array(_) => "[object Object]".to_string(),
+        Value::Object(_) | Value::Array(_) | Value::Map(_) => "[object Object]".to_string(),
         Value::Function(_) => "function".to_string(),
     }
 }
@@ -67,6 +68,7 @@ pub(crate) fn strict_eq(a: &Value, b: &Value) -> bool {
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Object(x), Value::Object(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => x == y,
+        (Value::Map(x), Value::Map(y)) => x == y,
         (Value::Function(x), Value::Function(y)) => x == y,
         _ => false,
     }
@@ -146,6 +148,10 @@ pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, Builti
         37 => array::includes(args, heap),
         38 => string::repeat(args),
         39 => array::fill(args, heap),
+        40 => map::create(heap),
+        41 => map::set(args, heap),
+        42 => map::get(args, heap),
+        43 => map::has(args, heap),
         _ => unreachable!("invalid builtin id checked by caller"),
     };
     Ok(result)

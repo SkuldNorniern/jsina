@@ -353,6 +353,7 @@ pub fn json_stringify(v: &Value, heap: &Heap) -> Option<String> {
             }
         }
         Value::String(s) => Some(escape_string(s)),
+        Value::Map(_) => None,
         Value::Object(id) => {
             let keys = heap.object_keys(*id);
             let mut parts: Vec<String> = Vec::new();

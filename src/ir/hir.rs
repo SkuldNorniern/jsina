@@ -113,6 +113,10 @@ pub enum BuiltinId {
     Includes = 37,
     StringRepeat = 38,
     ArrayFill = 39,
+    MapCreate = 40,
+    MapSet = 41,
+    MapGet = 42,
+    MapHas = 43,
 }
 
 
