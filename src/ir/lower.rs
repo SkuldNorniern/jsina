@@ -67,6 +67,17 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
                 collect_function_exprs_stmt(f, out);
             }
         }
+        Statement::Switch(s) => {
+            collect_function_exprs_expr(&s.discriminant, out);
+            for c in &s.cases {
+                if let Some(t) = &c.test {
+                    collect_function_exprs_expr(t, out);
+                }
+                for stmt in &c.body {
+                    collect_function_exprs_stmt(stmt, out);
+                }
+            }
+        }
         Statement::Return(r) => {
             if let Some(arg) = &r.argument {
                 collect_function_exprs_expr(arg, out);
@@ -190,6 +201,7 @@ struct LowerCtx<'a> {
     func_index: &'a HashMap<String, u32>,
     func_expr_map: &'a HashMap<NodeId, u32>,
     loop_stack: Vec<(HirBlockId, HirBlockId)>,
+    switch_break_stack: Vec<HirBlockId>,
     exception_regions: Vec<ExceptionRegion>,
 }
 
@@ -229,6 +241,7 @@ fn compile_function(
         func_index,
         func_expr_map,
         loop_stack: Vec::new(),
+        switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
     };
 
@@ -714,15 +727,126 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
 
             ctx.current_block = exit_id as usize;
         }
+        Statement::Switch(s) => {
+            let disc_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            compile_expression(&s.discriminant, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: disc_slot,
+                span: s.span,
+            });
+
+            let exit_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: exit_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+
+            let mut body_block_ids: Vec<HirBlockId> = Vec::new();
+            for _case in &s.cases {
+                let body_id = ctx.blocks.len() as HirBlockId;
+                ctx.blocks.push(HirBlock {
+                    id: body_id,
+                    ops: Vec::new(),
+                    terminator: HirTerminator::Jump { target: 0 },
+                });
+                body_block_ids.push(body_id);
+            }
+
+            let default_block_id = s
+                .cases
+                .iter()
+                .enumerate()
+                .find(|(_, c)| c.test.is_none())
+                .map(|(i, _)| body_block_ids[i]);
+            let no_match_target = default_block_id.unwrap_or(exit_id);
+
+            let cases_with_test: Vec<(usize, &SwitchCase)> = s
+                .cases
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.test.is_some())
+                .collect();
+
+            let mut entry_block = no_match_target;
+            let mut next_else = no_match_target;
+            for (idx, (i, case)) in cases_with_test.iter().enumerate().rev() {
+                let check_id = ctx.blocks.len() as HirBlockId;
+                ctx.blocks.push(HirBlock {
+                    id: check_id,
+                    ops: Vec::new(),
+                    terminator: HirTerminator::Jump { target: 0 },
+                });
+
+                let cond_slot = ctx.next_slot;
+                ctx.next_slot += 1;
+                let check_block_idx = ctx.blocks.len() - 1;
+                ctx.blocks[check_block_idx].ops.push(HirOp::LoadLocal {
+                    id: disc_slot,
+                    span: case.span,
+                });
+                compile_expression(case.test.as_ref().unwrap(), ctx)?;
+                ctx.blocks[check_block_idx].ops.push(HirOp::StrictEq { span: case.span });
+                ctx.blocks[check_block_idx].ops.push(HirOp::StoreLocal {
+                    id: cond_slot,
+                    span: case.span,
+                });
+                ctx.blocks[check_block_idx].terminator = HirTerminator::Branch {
+                    cond: cond_slot,
+                    then_block: body_block_ids[*i],
+                    else_block: next_else,
+                };
+
+                next_else = check_id;
+                if idx == 0 {
+                    entry_block = check_id;
+                }
+            }
+
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+                target: entry_block,
+            };
+
+            ctx.switch_break_stack.push(exit_id);
+            for (i, case) in s.cases.iter().enumerate() {
+                let next_id = if i + 1 < s.cases.len() {
+                    body_block_ids[i + 1]
+                } else {
+                    exit_id
+                };
+                ctx.current_block = body_block_ids[i] as usize;
+                let mut hit_exit = false;
+                for stmt in &case.body {
+                    if compile_statement(stmt, ctx)? {
+                        hit_exit = true;
+                        break;
+                    }
+                }
+                if !hit_exit {
+                    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: next_id };
+                }
+            }
+            ctx.switch_break_stack.pop();
+
+            ctx.current_block = exit_id as usize;
+        }
         Statement::Break(b) => {
-            let (_, exit) = ctx.loop_stack.last().ok_or_else(|| {
-                LowerError::Unsupported("break outside loop".to_string(), Some(b.span))
-            })?;
+            let exit = if let Some(&switch_exit) = ctx.switch_break_stack.last() {
+                switch_exit
+            } else if let Some((_, loop_exit)) = ctx.loop_stack.last() {
+                *loop_exit
+            } else {
+                return Err(LowerError::Unsupported(
+                    "break outside loop or switch".to_string(),
+                    Some(b.span),
+                ));
+            };
             let break_block_id = ctx.blocks.len() as HirBlockId;
             ctx.blocks.push(HirBlock {
                 id: break_block_id,
                 ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: *exit },
+                terminator: HirTerminator::Jump { target: exit },
             });
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
                 target: break_block_id,
@@ -731,7 +855,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             ctx.blocks.push(HirBlock {
                 id: unreachable_id,
                 ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: *exit },
+                terminator: HirTerminator::Jump { target: exit },
             });
             ctx.current_block = unreachable_id as usize;
         }
@@ -791,6 +915,7 @@ fn compile_function_expr_to_hir(
         func_index,
         func_expr_map,
         loop_stack: Vec::new(),
+        switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
     };
     for param in &fe.params {
@@ -2095,6 +2220,15 @@ mod tests {
         } else {
             panic!("expected Return(5), got {:?}", completion);
         }
+    }
+
+    #[test]
+    fn lower_switch() {
+        let result = crate::driver::Driver::run(
+            "function main() { switch (2) { case 1: return 1; case 2: return 2; default: return 0; } }",
+        )
+        .expect("run");
+        assert_eq!(result, 2, "switch case 2");
     }
 
     #[test]

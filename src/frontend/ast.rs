@@ -26,6 +26,22 @@ pub enum Statement {
     FunctionDecl(FunctionDeclStmt),
     Throw(ThrowStmt),
     Try(TryStmt),
+    Switch(SwitchStmt),
+}
+
+#[derive(Debug, Clone)]
+pub struct SwitchStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub discriminant: Box<Expression>,
+    pub cases: Vec<SwitchCase>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SwitchCase {
+    pub span: Span,
+    pub test: Option<Box<Expression>>,
+    pub body: Vec<Statement>,
 }
 
 #[derive(Debug, Clone)]
@@ -347,6 +363,7 @@ impl Statement {
             Statement::FunctionDecl(s) => s.span,
             Statement::Throw(s) => s.span,
             Statement::Try(s) => s.span,
+            Statement::Switch(s) => s.span,
         }
     }
 }

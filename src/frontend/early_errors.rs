@@ -55,6 +55,7 @@ fn is_strict_reserved(name: &str) -> bool {
 struct CheckContext {
     in_function: bool,
     in_iteration: bool,
+    in_switch: bool,
     strict: bool,
 }
 
@@ -64,6 +65,7 @@ fn check_script(script: &Script, errors: &mut Vec<EarlyError>) {
     let ctx = CheckContext {
         in_function: false,
         in_iteration: false,
+        in_switch: false,
         strict: script_strict,
     };
     for stmt in &script.body {
@@ -112,6 +114,7 @@ fn check_statement(
             let fn_ctx = CheckContext {
                 in_function: true,
                 in_iteration: ctx.in_iteration,
+                in_switch: ctx.in_switch,
                 strict: fn_strict,
             };
             check_statement(&f.body, scope, &fn_ctx, errors);
@@ -133,10 +136,10 @@ fn check_statement(
                     message: format!("unknown label '{}'", label),
                     span: b.span,
                 });
-            } else if !ctx.in_iteration {
+            } else if !ctx.in_iteration && !ctx.in_switch {
                 errors.push(EarlyError {
                     code: "JSINA-EARLY-005".to_string(),
-                    message: "illegal break statement: not inside iteration".to_string(),
+                    message: "illegal break statement: not inside iteration or switch".to_string(),
                     span: b.span,
                 });
             }
@@ -214,6 +217,7 @@ fn check_statement(
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,
                 in_iteration: true,
+                in_switch: ctx.in_switch,
                 strict: ctx.strict,
             };
             check_statement(&w.body, scope, &iter_ctx, errors);
@@ -225,9 +229,23 @@ fn check_statement(
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,
                 in_iteration: true,
+                in_switch: ctx.in_switch,
                 strict: ctx.strict,
             };
             check_statement(&f.body, scope, &iter_ctx, errors);
+        }
+        Statement::Switch(s) => {
+            let switch_ctx = CheckContext {
+                in_function: ctx.in_function,
+                in_iteration: ctx.in_iteration,
+                in_switch: true,
+                strict: ctx.strict,
+            };
+            for case in &s.cases {
+                for stmt in &case.body {
+                    check_statement(stmt, scope, &switch_ctx, errors);
+                }
+            }
         }
         Statement::Expression(_) => {}
         Statement::Throw(_) => {}
@@ -376,6 +394,12 @@ mod tests {
     #[test]
     fn check_break_inside_while_ok() {
         let r = parse_and_check("while (true) { break; }");
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn check_break_inside_switch_ok() {
+        let r = parse_and_check("switch (1) { case 1: break; }");
         assert!(r.is_ok());
     }
 

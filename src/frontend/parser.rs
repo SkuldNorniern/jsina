@@ -168,6 +168,7 @@ impl Parser {
             TokenType::Let => self.parse_let_decl(),
             TokenType::Const => self.parse_const_decl(),
             TokenType::Try => self.parse_try(),
+            TokenType::Switch => self.parse_switch(),
             TokenType::LeftBrace => self.parse_block(),
             _ => self.parse_expression_statement(),
         }
@@ -320,6 +321,69 @@ impl Parser {
             catch_param,
             catch_body,
             finally_body,
+        }))
+    }
+
+    fn parse_switch(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.expect(TokenType::Switch)?.span;
+        let id = self.next_id();
+        self.expect(TokenType::LeftParen)?;
+        let discriminant = Box::new(self.parse_expression()?);
+        self.expect(TokenType::RightParen)?;
+        self.expect(TokenType::LeftBrace)?;
+
+        let mut cases = Vec::new();
+        loop {
+            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightBrace) | None) {
+                break;
+            }
+            let case_span = self.current().map(|t| t.span).unwrap_or(start_span);
+            if self.optional(TokenType::Default) {
+                self.expect(TokenType::Colon)?;
+                let mut body = Vec::new();
+                while !matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::RightBrace) | Some(TokenType::Case) | Some(TokenType::Default) | None
+                ) {
+                    body.push(self.parse_statement()?);
+                }
+                cases.push(crate::frontend::ast::SwitchCase {
+                    span: case_span,
+                    test: None,
+                    body,
+                });
+            } else if self.optional(TokenType::Case) {
+                let test = Box::new(self.parse_expression()?);
+                self.expect(TokenType::Colon)?;
+                let mut body = Vec::new();
+                while !matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::RightBrace) | Some(TokenType::Case) | Some(TokenType::Default) | None
+                ) {
+                    body.push(self.parse_statement()?);
+                }
+                cases.push(crate::frontend::ast::SwitchCase {
+                    span: case_span,
+                    test: Some(test),
+                    body,
+                });
+            } else {
+                return Err(ParseError {
+                    code: "JSINA-PARSE-008".to_string(),
+                    message: "expected case or default in switch".to_string(),
+                    span: Some(case_span),
+                });
+            }
+        }
+
+        let end_token = self.expect(TokenType::RightBrace)?;
+        let span = start_span.merge(end_token.span);
+
+        Ok(Statement::Switch(crate::frontend::ast::SwitchStmt {
+            id,
+            span,
+            discriminant,
+            cases,
         }))
     }
 
@@ -1853,6 +1917,23 @@ mod tests {
             }
         }
         panic!("expected try/catch in block");
+    }
+
+    #[test]
+    fn parse_switch() {
+        let script = parse_ok("function f() { switch (x) { case 1: return 1; case 2: return 2; default: return 0; } }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::Switch(s) = &b.body[0] {
+                    assert_eq!(s.cases.len(), 3);
+                    assert!(s.cases[0].test.is_some());
+                    assert!(s.cases[1].test.is_some());
+                    assert!(s.cases[2].test.is_none());
+                    return;
+                }
+            }
+        }
+        panic!("expected switch in block");
     }
 
     #[test]
