@@ -251,6 +251,7 @@ pub enum Expression {
     ArrayLiteral(ArrayLiteralExpr),
     Member(MemberExpr),
     FunctionExpr(FunctionExprData),
+    ArrowFunction(ArrowFunctionExpr),
     PostfixIncrement(PostfixExpr),
     PostfixDecrement(PostfixExpr),
     New(NewExpr),
@@ -278,6 +279,20 @@ pub struct FunctionExprData {
     pub name: Option<String>,
     pub params: Vec<Param>,
     pub body: Box<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrowFunctionExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub params: Vec<Param>,
+    pub body: ArrowBody,
+}
+
+#[derive(Debug, Clone)]
+pub enum ArrowBody {
+    Expression(Box<Expression>),
+    Block(Box<Statement>),
 }
 
 #[derive(Debug, Clone)]
@@ -373,6 +388,7 @@ pub enum BinaryOp {
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
+    Instanceof,
 }
 
 #[derive(Debug, Clone)]
@@ -462,6 +478,7 @@ impl Expression {
             Expression::ArrayLiteral(e) => e.span,
             Expression::Member(e) => e.span,
             Expression::FunctionExpr(e) => e.span,
+            Expression::ArrowFunction(e) => e.span,
             Expression::PostfixIncrement(e) | Expression::PostfixDecrement(e) => e.span,
             Expression::New(e) => e.span,
         }
