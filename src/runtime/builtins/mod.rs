@@ -17,6 +17,7 @@ mod object;
 mod regexp;
 mod string;
 mod symbol;
+mod typed_array;
 mod dollar262;
 mod encode;
 mod eval;
@@ -188,23 +189,28 @@ const BUILTINS: &[BuiltinDef] = &[
     // Json 0..1
     BuiltinDef { category: "Json", name: "parse", entry: BuiltinEntry::Throwing(json::parse) },
     BuiltinDef { category: "Json", name: "stringify", entry: BuiltinEntry::Normal(json::stringify) },
-    // Object 0..3
+    // Object 0..7
     BuiltinDef { category: "Object", name: "create", entry: BuiltinEntry::Normal(object::create) },
     BuiltinDef { category: "Object", name: "keys", entry: BuiltinEntry::Normal(object::keys) },
     BuiltinDef { category: "Object", name: "assign", entry: BuiltinEntry::Normal(object::assign) },
     BuiltinDef { category: "Object", name: "hasOwnProperty", entry: BuiltinEntry::Normal(object::has_own_property) },
+    BuiltinDef { category: "Object", name: "preventExtensions", entry: BuiltinEntry::Normal(object::prevent_extensions) },
+    BuiltinDef { category: "Object", name: "seal", entry: BuiltinEntry::Normal(object::seal) },
+    BuiltinDef { category: "Object", name: "setPrototypeOf", entry: BuiltinEntry::Normal(object::set_prototype_of) },
+    BuiltinDef { category: "Object", name: "propertyIsEnumerable", entry: BuiltinEntry::Normal(object::property_is_enumerable) },
     // Type 0..3 (String, Error, Number, Boolean constructors)
     BuiltinDef { category: "Type", name: "String", entry: BuiltinEntry::Normal(string::string) },
     BuiltinDef { category: "Type", name: "Error", entry: BuiltinEntry::Normal(error::error) },
     BuiltinDef { category: "Type", name: "Number", entry: BuiltinEntry::Normal(number::number) },
     BuiltinDef { category: "Type", name: "Boolean", entry: BuiltinEntry::Normal(boolean::boolean) },
-    // String 0..5 (methods)
+    // String 0..6 (methods)
     BuiltinDef { category: "String", name: "split", entry: BuiltinEntry::Normal(string::split) },
     BuiltinDef { category: "String", name: "trim", entry: BuiltinEntry::Normal(string::trim) },
     BuiltinDef { category: "String", name: "toLowerCase", entry: BuiltinEntry::Normal(string::to_lower_case) },
     BuiltinDef { category: "String", name: "toUpperCase", entry: BuiltinEntry::Normal(string::to_upper_case) },
     BuiltinDef { category: "String", name: "charAt", entry: BuiltinEntry::Normal(string::char_at) },
     BuiltinDef { category: "String", name: "repeat", entry: BuiltinEntry::Normal(string::repeat) },
+    BuiltinDef { category: "String", name: "fromCharCode", entry: BuiltinEntry::Normal(string::from_char_code) },
     // Error 0 (isError)
     BuiltinDef { category: "Error", name: "isError", entry: BuiltinEntry::Normal(error::is_error) },
     // RegExp 0..1
@@ -243,6 +249,12 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "Global", name: "encodeURIComponent", entry: BuiltinEntry::Normal(encode::encode_uri_component_builtin) },
     BuiltinDef { category: "Global", name: "parseInt", entry: BuiltinEntry::Normal(number::parse_int) },
     BuiltinDef { category: "Global", name: "parseFloat", entry: BuiltinEntry::Normal(number::parse_float) },
+    BuiltinDef { category: "Global", name: "decodeURI", entry: BuiltinEntry::Throwing(encode::decode_uri_builtin) },
+    BuiltinDef { category: "Global", name: "decodeURIComponent", entry: BuiltinEntry::Throwing(encode::decode_uri_component_builtin) },
+    BuiltinDef { category: "TypedArray", name: "Int32Array", entry: BuiltinEntry::Normal(typed_array::int32_array) },
+    BuiltinDef { category: "TypedArray", name: "Uint8Array", entry: BuiltinEntry::Normal(typed_array::uint8_array) },
+    BuiltinDef { category: "TypedArray", name: "Uint8ClampedArray", entry: BuiltinEntry::Normal(typed_array::uint8_clamped_array) },
+    BuiltinDef { category: "TypedArray", name: "ArrayBuffer", entry: BuiltinEntry::Normal(typed_array::array_buffer) },
 ];
 
 const INVALID: u8 = 0xFF;
@@ -277,52 +289,63 @@ static ENCODED_TO_INDEX: [u8; 256] = {
     t[0x41] = 25;
     t[0x42] = 26;
     t[0x43] = 27;
-    t[0x50] = 28;
-    t[0x51] = 29;
-    t[0x52] = 30;
-    t[0x53] = 31;
-    t[0x60] = 32;
-    t[0x61] = 33;
-    t[0x62] = 34;
-    t[0x63] = 35;
-    t[0x64] = 36;
-    t[0x65] = 37;
-    t[0x70] = 38;
-    t[0x80] = 39;
-    t[0x81] = 40;
-    t[0x82] = 41;
-    t[0x90] = 42;
-    t[0x91] = 43;
-    t[0x92] = 44;
-    t[0x93] = 45;
-    t[0xA0] = 46;
-    t[0xA1] = 47;
-    t[0xA2] = 48;
-    t[0xA3] = 49;
-    t[0xB0] = 50;
-    t[0xC0] = 51;
-    t[0xC1] = 52;
-    t[0xC2] = 53;
-    t[0xC3] = 54;
-    t[0xC4] = 55;
-    t[0xD0] = 56;
-    t[0xD1] = 57;
-    t[0xD2] = 58;
-    t[0xD3] = 59;
-    t[0xD4] = 60;
-    t[0xD5] = 61;
-    t[0xD6] = 62;
-    t[0xD7] = 63;
-    t[0xD8] = 64;
-    t[0xD9] = 65;
-    t[0xDA] = 66;
-    t[0xDB] = 67;
-    t[0xDC] = 68;
-    t[0xDD] = 69;
+    t[0x44] = 28;
+    t[0x45] = 29;
+    t[0x46] = 30;
+    t[0x47] = 31;
+    t[0x50] = 32;
+    t[0x51] = 33;
+    t[0x52] = 34;
+    t[0x53] = 35;
+    t[0x60] = 36;
+    t[0x61] = 37;
+    t[0x62] = 38;
+    t[0x63] = 39;
+    t[0x64] = 40;
+    t[0x65] = 41;
+    t[0x66] = 42;
+    t[0x70] = 43;
+    t[0x80] = 44;
+    t[0x81] = 45;
+    t[0x82] = 46;
+    t[0x90] = 47;
+    t[0x91] = 48;
+    t[0x92] = 49;
+    t[0x93] = 50;
+    t[0xA0] = 51;
+    t[0xA1] = 52;
+    t[0xA2] = 53;
+    t[0xA3] = 54;
+    t[0xB0] = 55;
+    t[0xC0] = 56;
+    t[0xC1] = 57;
+    t[0xC2] = 58;
+    t[0xC3] = 59;
+    t[0xC4] = 60;
+    t[0xD0] = 61;
+    t[0xD1] = 62;
+    t[0xD2] = 63;
+    t[0xD3] = 64;
+    t[0xD4] = 65;
+    t[0xD5] = 66;
+    t[0xD6] = 67;
+    t[0xD7] = 68;
+    t[0xD8] = 69;
+    t[0xD9] = 70;
+    t[0xDA] = 71;
+    t[0xDB] = 72;
+    t[0xDC] = 73;
+    t[0xDD] = 74;
+    t[0xDE] = 75;
+    t[0xDF] = 76;
+    t[0xE0] = 77;
+    t[0xE1] = 78;
+    t[0xE2] = 79;
+    t[0xE3] = 80;
     t
 };
 
-pub const MAX_BUILTIN_ID: u8 = 0xDD;
+pub const MAX_BUILTIN_ID: u8 = 0xE3;
 
 fn index_for(id: u8) -> Option<usize> {
     let idx = ENCODED_TO_INDEX[id as usize];
@@ -355,13 +378,13 @@ pub fn all() -> &'static [BuiltinDef] {
     BUILTINS
 }
 
-const INDEX_TO_ENCODED: [u8; 70] = [
+const INDEX_TO_ENCODED: [u8; 81] = [
     0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
     0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
     0x30, 0x31,
-    0x40, 0x41, 0x42, 0x43,
+    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
     0x50, 0x51, 0x52, 0x53,
-    0x60, 0x61, 0x62, 0x63, 0x64, 0x65,
+    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
     0x70,
     0x80, 0x81, 0x82,
     0x90, 0x91, 0x92, 0x93,
@@ -372,6 +395,8 @@ const INDEX_TO_ENCODED: [u8; 70] = [
     0xD5, 0xD6, 0xD7, 0xD8,
     0xD9, 0xDA, 0xDB,
     0xDC, 0xDD,
+    0xDE, 0xDF,
+    0xE0, 0xE1, 0xE2, 0xE3,
 ];
 
 pub fn by_category(cat: &str) -> impl Iterator<Item = (u8, &'static BuiltinDef)> {
@@ -413,6 +438,9 @@ mod tests {
         assert_eq!(resolve("Array", "push"), Some(0x10));
         assert_eq!(resolve("Math", "floor"), Some(0x20));
         assert_eq!(resolve("Json", "parse"), Some(0x30));
+        assert_eq!(resolve("Object", "preventExtensions"), Some(0x44));
+        assert_eq!(resolve("Object", "setPrototypeOf"), Some(0x46));
+        assert_eq!(resolve("String", "fromCharCode"), Some(0x66));
         assert_eq!(resolve("Date", "now"), Some(0xC1));
         assert_eq!(resolve("Unknown", "foo"), None);
     }

@@ -54,6 +54,10 @@ impl Heap {
         self.set_prop(obj_id, "keys", Value::Builtin(0x41));
         self.set_prop(obj_id, "assign", Value::Builtin(0x42));
         self.set_prop(obj_id, "hasOwnProperty", Value::Builtin(0x43));
+        self.set_prop(obj_id, "preventExtensions", Value::Builtin(0x44));
+        self.set_prop(obj_id, "seal", Value::Builtin(0x45));
+        self.set_prop(obj_id, "setPrototypeOf", Value::Builtin(0x46));
+        self.set_prop(obj_id, "propertyIsEnumerable", Value::Builtin(0x47));
         self.set_prop(global_id, "Object", Value::Object(obj_id));
 
         let arr_id = self.alloc_object();
@@ -95,6 +99,7 @@ impl Heap {
         self.set_prop(str_id, "toUpperCase", Value::Builtin(0x63));
         self.set_prop(str_id, "charAt", Value::Builtin(0x64));
         self.set_prop(str_id, "repeat", Value::Builtin(0x65));
+        self.set_prop(str_id, "fromCharCode", Value::Builtin(0x66));
         self.set_prop(global_id, "String", Value::Object(str_id));
 
         self.set_prop(global_id, "Number", Value::Builtin(0x52));
@@ -106,20 +111,29 @@ impl Heap {
         self.set_prop(global_id, "Error", Value::Object(err_id));
 
         let ref_err_id = self.alloc_object();
+        self.set_prop(ref_err_id, "name", Value::String("ReferenceError".to_string()));
         self.set_prop(ref_err_id, "__call__", Value::Builtin(0x51));
         self.set_prop(global_id, "ReferenceError", Value::Object(ref_err_id));
 
         let type_err_id = self.alloc_object();
+        self.set_prop(type_err_id, "name", Value::String("TypeError".to_string()));
         self.set_prop(type_err_id, "__call__", Value::Builtin(0x51));
         self.set_prop(global_id, "TypeError", Value::Object(type_err_id));
 
         let range_err_id = self.alloc_object();
+        self.set_prop(range_err_id, "name", Value::String("RangeError".to_string()));
         self.set_prop(range_err_id, "__call__", Value::Builtin(0x51));
         self.set_prop(global_id, "RangeError", Value::Object(range_err_id));
 
         let syntax_err_id = self.alloc_object();
+        self.set_prop(syntax_err_id, "name", Value::String("SyntaxError".to_string()));
         self.set_prop(syntax_err_id, "__call__", Value::Builtin(0x51));
         self.set_prop(global_id, "SyntaxError", Value::Object(syntax_err_id));
+
+        let uri_err_id = self.alloc_object();
+        self.set_prop(uri_err_id, "name", Value::String("URIError".to_string()));
+        self.set_prop(uri_err_id, "__call__", Value::Builtin(0x51));
+        self.set_prop(global_id, "URIError", Value::Object(uri_err_id));
 
         let regexp_id = self.alloc_object();
         self.set_prop(regexp_id, "escape", Value::Builtin(0x80));
@@ -157,8 +171,14 @@ impl Heap {
         self.set_prop(global_id, "eval", Value::Builtin(0xD9));
         self.set_prop(global_id, "encodeURI", Value::Builtin(0xDA));
         self.set_prop(global_id, "encodeURIComponent", Value::Builtin(0xDB));
+        self.set_prop(global_id, "decodeURI", Value::Builtin(0xDE));
+        self.set_prop(global_id, "decodeURIComponent", Value::Builtin(0xDF));
         self.set_prop(global_id, "parseInt", Value::Builtin(0xDC));
         self.set_prop(global_id, "parseFloat", Value::Builtin(0xDD));
+        self.set_prop(global_id, "Int32Array", Value::Builtin(0xE0));
+        self.set_prop(global_id, "Uint8Array", Value::Builtin(0xE1));
+        self.set_prop(global_id, "Uint8ClampedArray", Value::Builtin(0xE2));
+        self.set_prop(global_id, "ArrayBuffer", Value::Builtin(0xE3));
     }
 
     /// Add $262 host object for test262 harness. Match V8/Bun/Deno: $262 only exists when running via test262.

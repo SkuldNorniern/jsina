@@ -376,18 +376,33 @@ pub fn interpret_program_with_heap(
                 let builtin_id = read_u8(code, *pc);
                 let argc = read_u8(code, *pc + 1) as usize;
                 *pc += 2;
+                let call_pc = *pc - 3;
                 match execute_builtin(builtin_id, argc, &mut stack, heap) {
                     Ok(BuiltinResult::Push(v)) => {
                         getprop_cache.invalidate_all();
                         stack.push(v);
                     }
-                    Ok(BuiltinResult::Throw(v)) => return Ok(Completion::Throw(v)),
+                    Ok(BuiltinResult::Throw(v)) => {
+                        let handler = chunk.handlers.iter().find(|h| {
+                            (h.try_start as usize) <= call_pc && call_pc < (h.try_end as usize)
+                        });
+                        if let Some(h) = handler {
+                            if (h.catch_slot as usize) < locals.len() {
+                                locals[h.catch_slot as usize] = v.clone();
+                            }
+                            frame.rethrow_after_finally = h.is_finally;
+                            *pc = h.handler_pc as usize;
+                        } else {
+                            return Ok(Completion::Throw(v));
+                        }
+                    }
                     Err(e) => return Err(e),
                 }
             }
             0x42 => {
                 let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 1;
+                let call_pc = *pc - 2;
                 let mut args: Vec<Value> = (0..argc)
                     .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
                     .collect::<Result<Vec<_>, _>>()?;
@@ -404,7 +419,20 @@ pub fn interpret_program_with_heap(
                             getprop_cache.invalidate_all();
                             stack.push(v);
                         }
-                        Ok(BuiltinResult::Throw(v)) => return Ok(Completion::Throw(v)),
+                        Ok(BuiltinResult::Throw(v)) => {
+                            let handler = chunk.handlers.iter().find(|h| {
+                                (h.try_start as usize) <= call_pc && call_pc < (h.try_end as usize)
+                            });
+                            if let Some(h) = handler {
+                                if (h.catch_slot as usize) < locals.len() {
+                                    locals[h.catch_slot as usize] = v.clone();
+                                }
+                                frame.rethrow_after_finally = h.is_finally;
+                                *pc = h.handler_pc as usize;
+                            } else {
+                                return Ok(Completion::Throw(v));
+                            }
+                        }
                         Err(e) => return Err(e),
                     }
                 } else if let Value::Function(i) = callee {
@@ -842,6 +870,7 @@ fn instanceof_check(value: &Value, constructor: &Value, heap: &Heap) -> bool {
         (Value::Object(id), Some("TypeError")) => heap.is_error_object(*id) && matches!(heap.get_prop(*id, "name"), Value::String(s) if s == "TypeError"),
         (Value::Object(id), Some("RangeError")) => heap.is_error_object(*id) && matches!(heap.get_prop(*id, "name"), Value::String(s) if s == "RangeError"),
         (Value::Object(id), Some("SyntaxError")) => heap.is_error_object(*id) && matches!(heap.get_prop(*id, "name"), Value::String(s) if s == "SyntaxError"),
+        (Value::Object(id), Some("URIError")) => heap.is_error_object(*id) && matches!(heap.get_prop(*id, "name"), Value::String(s) if s == "URIError"),
         (Value::Object(id), Some("Object")) => {
             !heap.is_error_object(*id)
         }
@@ -879,7 +908,7 @@ fn get_constructor_name(constructor: &Value, heap: &Heap) -> Option<String> {
                 return Some(name);
             }
             let global = heap.global_object();
-            for name in ["Array", "Object", "Error", "ReferenceError", "TypeError", "RangeError", "SyntaxError", "Map", "Set", "Date"] {
+            for name in ["Array", "Object", "Error", "ReferenceError", "TypeError", "RangeError", "SyntaxError", "URIError", "Map", "Set", "Date"] {
                 if let Value::Object(gid) = heap.get_prop(global, name) {
                     if gid == *id {
                         return Some(name.to_string());
