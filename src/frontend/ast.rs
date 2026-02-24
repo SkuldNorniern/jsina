@@ -16,6 +16,8 @@ pub enum Statement {
     If(IfStmt),
     While(WhileStmt),
     For(ForStmt),
+    ForIn(ForInStmt),
+    ForOf(ForOfStmt),
     Return(ReturnStmt),
     Break(BreakStmt),
     Continue(ContinueStmt),
@@ -93,6 +95,32 @@ pub struct ForStmt {
     pub condition: Option<Box<Expression>>,
     pub update: Option<Box<Expression>>,
     pub body: Box<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForInStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub left: ForInOfLeft,
+    pub right: Box<Expression>,
+    pub body: Box<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForOfStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub left: ForInOfLeft,
+    pub right: Box<Expression>,
+    pub body: Box<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ForInOfLeft {
+    VarDecl(String),
+    LetDecl(String),
+    ConstDecl(String),
+    Identifier(String),
 }
 
 #[derive(Debug, Clone)]
@@ -364,6 +392,8 @@ impl Statement {
             Statement::Throw(s) => s.span,
             Statement::Try(s) => s.span,
             Statement::Switch(s) => s.span,
+            Statement::ForIn(s) => s.span,
+            Statement::ForOf(s) => s.span,
         }
     }
 }

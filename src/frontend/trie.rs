@@ -1,5 +1,6 @@
 use super::token_type::TokenType;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 struct TrieNode {
@@ -70,7 +71,7 @@ impl Trie {
         node.is_keyword
     }
 
-    pub fn build_js_trie() -> Self {
+    fn build_js_trie_impl() -> Self {
         let mut trie = Self::new();
 
         let keywords = [
@@ -175,6 +176,15 @@ impl Trie {
         }
 
         trie
+    }
+
+    pub fn build_js_trie() -> Self {
+        Self::build_js_trie_impl()
+    }
+
+    pub fn js_trie() -> &'static Self {
+        static TRIE: OnceLock<Trie> = OnceLock::new();
+        TRIE.get_or_init(Self::build_js_trie_impl)
     }
 }
 

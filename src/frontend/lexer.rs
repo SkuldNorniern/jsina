@@ -2,14 +2,14 @@ use crate::diagnostics::{Position, Span};
 use super::token_type::{Token, TokenType};
 use super::trie::Trie;
 
-pub struct Lexer {
+pub struct Lexer<'a> {
     source: String,
     position: Position,
     current_char: Option<char>,
-    keywords_trie: Trie,
+    keywords_trie: &'a Trie,
 }
 
-impl Lexer {
+impl Lexer<'_> {
     pub fn new(source: String) -> Self {
         let position = Position::start();
         let first_char = source.chars().next();
@@ -18,7 +18,7 @@ impl Lexer {
             source,
             position,
             current_char: first_char,
-            keywords_trie: Trie::build_js_trie(),
+            keywords_trie: Trie::js_trie(),
         }
     }
 
