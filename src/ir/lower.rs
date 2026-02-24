@@ -1384,8 +1384,17 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
             }
         }
         Expression::ObjectLiteral(e) => {
-            ctx.blocks[ctx.current_block].ops.push(HirOp::NewObject { span: e.span });
+            let proto_prop = e.properties.iter().find(|(k, _)| k == "__proto__");
+            if let Some((_, proto_expr)) = proto_prop {
+                compile_expression(proto_expr, ctx)?;
+                ctx.blocks[ctx.current_block].ops.push(HirOp::NewObjectWithProto { span: e.span });
+            } else {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::NewObject { span: e.span });
+            }
             for (key, value) in &e.properties {
+                if key == "__proto__" {
+                    continue;
+                }
                 ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: e.span });
                 compile_expression(value, ctx)?;
                 ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span: e.span });
@@ -1591,6 +1600,15 @@ mod tests {
         } else {
             panic!("expected Return(30), got {:?}", completion);
         }
+    }
+
+    #[test]
+    fn lower_object_literal_proto() {
+        let result = crate::driver::Driver::run(
+            "function main() { let proto = { y: 10 }; let o = { __proto__: proto, x: 1 }; return o.x + o.y; }",
+        )
+        .expect("run");
+        assert_eq!(result, 11, "__proto__ in object literal sets prototype");
     }
 
     #[test]

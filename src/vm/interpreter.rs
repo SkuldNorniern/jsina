@@ -505,6 +505,16 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 let id = heap.alloc_object();
                 stack.push(Value::Object(id));
             }
+            x if x == Opcode::NewObjectWithProto as u8 => {
+                let proto = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let prototype = match &proto {
+                    Value::Null | Value::Undefined => None,
+                    Value::Object(id) => Some(*id),
+                    _ => None,
+                };
+                let id = heap.alloc_object_with_prototype(prototype);
+                stack.push(Value::Object(id));
+            }
             x if x == Opcode::NewArray as u8 => {
                 let id = heap.alloc_array();
                 stack.push(Value::Array(id));

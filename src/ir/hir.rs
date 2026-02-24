@@ -48,6 +48,7 @@ pub enum HirOp {
     Not { span: Span },
     Typeof { span: Span },
     NewObject { span: Span },
+    NewObjectWithProto { span: Span },
     NewArray { span: Span },
     GetProp { key: String, span: Span },
     SetProp { key: String, span: Span },

@@ -50,6 +50,7 @@ pub enum Opcode {
     Not = 0x18,
     Typeof = 0x1d,
     NewObject = 0x50,
+    NewObjectWithProto = 0x56,
     NewArray = 0x51,
     GetProp = 0x52,
     SetProp = 0x53,
