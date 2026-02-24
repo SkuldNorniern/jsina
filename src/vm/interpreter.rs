@@ -515,7 +515,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     Value::Bool(_) => "boolean",
                     Value::Int(_) | Value::Number(_) => "number",
                     Value::String(_) => "string",
-                    Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) => "object",
+                    Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "object",
                     Value::Function(_) => "function",
                 };
                 stack.push(Value::String(s.to_string()));
@@ -689,7 +689,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Function(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) => true,
     }
 }
 
@@ -701,7 +701,7 @@ fn value_to_prop_key(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
-        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) => "[object Object]".to_string(),
+        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "[object Object]".to_string(),
         Value::Function(_) => "function".to_string(),
     }
 }

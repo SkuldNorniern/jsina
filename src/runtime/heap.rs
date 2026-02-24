@@ -13,6 +13,7 @@ pub struct Heap {
     arrays: Vec<Vec<Value>>,
     maps: Vec<std::collections::HashMap<String, Value>>,
     sets: Vec<std::collections::HashSet<String>>,
+    dates: Vec<f64>,
     error_object_ids: HashSet<usize>,
 }
 
@@ -91,6 +92,16 @@ impl Heap {
 
     pub fn set_size(&self, set_id: usize) -> usize {
         self.sets.get(set_id).map(|s| s.len()).unwrap_or(0)
+    }
+
+    pub fn alloc_date(&mut self, timestamp_ms: f64) -> usize {
+        let id = self.dates.len();
+        self.dates.push(timestamp_ms);
+        id
+    }
+
+    pub fn date_timestamp(&self, date_id: usize) -> f64 {
+        self.dates.get(date_id).copied().unwrap_or(0.0)
     }
 
     pub fn get_prop(&self, obj_id: usize, key: &str) -> Value {

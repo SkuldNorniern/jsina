@@ -122,6 +122,11 @@ pub enum BuiltinId {
     SetHas = 46,
     SetSize = 47,
     CollectionHas = 48,
+    DateCreate = 49,
+    DateNow = 50,
+    DateGetTime = 51,
+    DateToString = 52,
+    DateToISOString = 53,
 }
 
 

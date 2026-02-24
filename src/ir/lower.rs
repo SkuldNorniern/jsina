@@ -1308,6 +1308,12 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Date") && prop == "now" && e.args.is_empty() {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::DateNow,
+                            argc: 0,
+                            span: e.span,
+                        });
                     } else if matches!(obj_name.as_deref(), Some(s) if s == "RegExp") && prop == "escape" && e.args.len() == 1 {
                         compile_expression(&e.args[0], ctx)?;
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
@@ -1363,6 +1369,27 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: crate::ir::hir::BuiltinId::SetAdd,
                             argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "getTime" && e.args.is_empty() {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::DateGetTime,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "toString" && e.args.is_empty() {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::DateToString,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "toISOString" && e.args.is_empty() {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::DateToISOString,
+                            argc: 1,
                             span: e.span,
                         });
                     } else if prop == "slice" {
@@ -1736,6 +1763,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::SetCreate,
                         argc: 0,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "Date" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::DateCreate,
+                        argc: n.args.len() as u32,
                         span: n.span,
                     });
                 }

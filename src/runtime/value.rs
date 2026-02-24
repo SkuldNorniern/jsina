@@ -10,6 +10,7 @@ pub enum Value {
     Array(usize),
     Map(usize),
     Set(usize),
+    Date(usize),
     Function(usize),
 }
 
@@ -70,6 +71,18 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn is_date(&self) -> bool {
+        matches!(self, Value::Date(_))
+    }
+
+    pub fn as_date_id(&self) -> Option<usize> {
+        match self {
+            Value::Date(id) => Some(*id),
+            _ => None,
+        }
+    }
+
 }
 
 impl std::fmt::Display for Value {
@@ -85,6 +98,7 @@ impl std::fmt::Display for Value {
             Value::Array(_) => write!(f, "[object Array]"),
             Value::Map(_) => write!(f, "[object Map]"),
             Value::Set(_) => write!(f, "[object Set]"),
+            Value::Date(_) => write!(f, "[object Date]"),
             Value::Function(_) => write!(f, "[object Function]"),
         }
     }

@@ -5,6 +5,7 @@
 
 mod array;
 mod boolean;
+mod date;
 mod error;
 mod map;
 mod set;
@@ -32,7 +33,7 @@ pub(crate) fn to_number(v: &Value) -> f64 {
         Value::Null => 0.0,
         Value::Undefined => f64::NAN,
         Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
-        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Function(_) => f64::NAN,
+        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) => f64::NAN,
     }
 }
 
@@ -42,7 +43,7 @@ pub(crate) fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Function(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) => true,
     }
 }
 
@@ -54,7 +55,7 @@ pub(crate) fn to_prop_key(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
-        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) => "[object Object]".to_string(),
+        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "[object Object]".to_string(),
         Value::Function(_) => "function".to_string(),
     }
 }
@@ -71,6 +72,7 @@ pub(crate) fn strict_eq(a: &Value, b: &Value) -> bool {
         (Value::Array(x), Value::Array(y)) => x == y,
         (Value::Map(x), Value::Map(y)) => x == y,
         (Value::Set(x), Value::Set(y)) => x == y,
+        (Value::Date(x), Value::Date(y)) => x == y,
         (Value::Function(x), Value::Function(y)) => x == y,
         _ => false,
     }
@@ -123,7 +125,7 @@ pub fn seed_random(seed: u64) {
     RNG_STATE.store(if seed == 0 { 1 } else { seed }, Ordering::Relaxed);
 }
 
-pub const MAX_BUILTIN_ID: u8 = 48;
+pub const MAX_BUILTIN_ID: u8 = 53;
 
 pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, BuiltinError> {
     if id > MAX_BUILTIN_ID {
@@ -181,6 +183,11 @@ pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, Builti
         46 => set::has(args, heap),
         47 => set::size(args, heap),
         48 => collection_has(args, heap),
+        49 => date::create(args, heap),
+        50 => date::now(args),
+        51 => date::get_time(args, heap),
+        52 => date::to_string(args, heap),
+        53 => date::to_iso_string(args, heap),
         _ => unreachable!("invalid builtin id checked by caller"),
     };
     Ok(result)
