@@ -1401,6 +1401,13 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: (1 + e.args.len()) as u32,
                             span: e.span,
                         });
+                    } else if prop == "reverse" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayReverse,
+                            argc: 1,
+                            span: e.span,
+                        });
                     } else if prop == "split" {
                         compile_expression(&m.object, ctx)?;
                         let sep = e.args.first();
@@ -1436,6 +1443,22 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: crate::ir::hir::BuiltinId::StringToUpperCase,
                             argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "charAt" {
+                        compile_expression(&m.object, ctx)?;
+                        let idx = e.args.first();
+                        if let Some(a) = idx {
+                            compile_expression(a, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::StringCharAt,
+                            argc: 2,
                             span: e.span,
                         });
                     } else if prop == "hasOwnProperty" {
@@ -2234,6 +2257,15 @@ mod tests {
     }
 
     #[test]
+    fn lower_array_reverse() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [1, 2, 3]; let b = a.reverse(); if (a[0] !== 3 || a[1] !== 2 || a[2] !== 1) return 0; if (a !== b) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Array.reverse mutates and returns self");
+    }
+
+    #[test]
     fn lower_string_concat_split_trim() {
         let result = crate::driver::Driver::run(
             "function main() { let s = \"a\".concat(\"b\", \"c\"); if (s !== \"abc\") return 0; let parts = \"x-y-z\".split(\"-\"); if (parts.length !== 3 || parts[0] !== \"x\") return 0; let t = \"  hi  \".trim(); if (t !== \"hi\") return 0; return 1; }",
@@ -2249,6 +2281,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "String.toLowerCase, toUpperCase");
+    }
+
+    #[test]
+    fn lower_string_char_at() {
+        let result = crate::driver::Driver::run(
+            "function main() { if (\"hello\".charAt(0) !== \"h\") return 0; if (\"hello\".charAt(4) !== \"o\") return 0; if (\"hello\".charAt(99) !== \"\") return 0; if (\"hello\".charAt(-1) !== \"o\") return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "String.charAt");
     }
 
     #[test]

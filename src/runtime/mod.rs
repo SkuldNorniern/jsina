@@ -1,3 +1,4 @@
+pub mod builtins;
 pub mod heap;
 pub mod json;
 pub mod value;

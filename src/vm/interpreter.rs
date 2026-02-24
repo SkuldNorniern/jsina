@@ -1,6 +1,5 @@
 use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
 use crate::runtime::{Heap, Value};
-use crate::vm::builtins;
 
 const MAX_CALL_DEPTH: usize = 1000;
 
@@ -210,12 +209,12 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
                     .collect::<Result<Vec<_>, _>>()?;
                 args.reverse();
-                if builtin_id > 32 {
+                if builtin_id > 34 {
                     return Err(VmError::InvalidOpcode(builtin_id));
                 }
-                match builtins::dispatch(builtin_id, &args, &mut heap) {
+                match crate::runtime::builtins::dispatch(builtin_id, &args, &mut heap) {
                     Ok(v) => stack.push(v),
-                    Err(builtins::BuiltinError::Throw(v)) => return Ok(Completion::Throw(v)),
+                    Err(crate::runtime::builtins::BuiltinError::Throw(v)) => return Ok(Completion::Throw(v)),
                 }
             }
             x if x == Opcode::CallMethod as u8 => {

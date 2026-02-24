@@ -99,6 +99,8 @@ pub enum BuiltinId {
     MathSqrt = 30,
     MathRandom = 31,
     ObjectHasOwnProperty = 32,
+    ArrayReverse = 33,
+    StringCharAt = 34,
 }
 
 

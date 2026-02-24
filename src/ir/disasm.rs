@@ -106,6 +106,8 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                     30 => "mathSqrt",
                     31 => "mathRandom",
                     32 => "objectHasOwnProperty",
+                    33 => "arrayReverse",
+                    34 => "stringCharAt",
                     _ => "?",
                 };
                 format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)
