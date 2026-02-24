@@ -1007,6 +1007,12 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         BinaryOp::Gte => ctx.blocks[ctx.current_block].ops.push(HirOp::Gte { span: e.span }),
                         BinaryOp::StrictEq => ctx.blocks[ctx.current_block].ops.push(HirOp::StrictEq { span: e.span }),
                         BinaryOp::StrictNotEq => ctx.blocks[ctx.current_block].ops.push(HirOp::StrictNotEq { span: e.span }),
+                        BinaryOp::LeftShift => ctx.blocks[ctx.current_block].ops.push(HirOp::LeftShift { span: e.span }),
+                        BinaryOp::RightShift => ctx.blocks[ctx.current_block].ops.push(HirOp::RightShift { span: e.span }),
+                        BinaryOp::UnsignedRightShift => ctx.blocks[ctx.current_block].ops.push(HirOp::UnsignedRightShift { span: e.span }),
+                        BinaryOp::BitwiseAnd => ctx.blocks[ctx.current_block].ops.push(HirOp::BitwiseAnd { span: e.span }),
+                        BinaryOp::BitwiseOr => ctx.blocks[ctx.current_block].ops.push(HirOp::BitwiseOr { span: e.span }),
+                        BinaryOp::BitwiseXor => ctx.blocks[ctx.current_block].ops.push(HirOp::BitwiseXor { span: e.span }),
                         BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::LogicalAnd | BinaryOp::LogicalOr
                         | BinaryOp::NullishCoalescing => {
                             return Err(LowerError::Unsupported(
@@ -1083,6 +1089,10 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 UnaryOp::LogicalNot => {
                     compile_expression(&e.argument, ctx)?;
                     ctx.blocks[ctx.current_block].ops.push(HirOp::Not { span: e.span });
+                }
+                UnaryOp::BitwiseNot => {
+                    compile_expression(&e.argument, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::BitwiseNot { span: e.span });
                 }
                 UnaryOp::Typeof => {
                     compile_expression(&e.argument, ctx)?;

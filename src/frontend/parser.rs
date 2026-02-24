@@ -28,8 +28,12 @@ fn binary_op_precedence(op: BinaryOp) -> u8 {
         BinaryOp::Pow => 14,
         BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => 12,
         BinaryOp::Add | BinaryOp::Sub => 11,
+        BinaryOp::LeftShift | BinaryOp::RightShift | BinaryOp::UnsignedRightShift => 10,
         BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => 9,
         BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::StrictEq | BinaryOp::StrictNotEq => 8,
+        BinaryOp::BitwiseAnd => 7,
+        BinaryOp::BitwiseXor => 6,
+        BinaryOp::BitwiseOr => 5,
         BinaryOp::LogicalAnd => 4,
         BinaryOp::LogicalOr => 3,
         BinaryOp::NullishCoalescing => 2,
@@ -562,6 +566,12 @@ impl Parser {
                 Some(TokenType::LogicalAnd) => BinaryOp::LogicalAnd,
                 Some(TokenType::LogicalOr) => BinaryOp::LogicalOr,
                 Some(TokenType::NullishCoalescing) => BinaryOp::NullishCoalescing,
+                Some(TokenType::LeftShift) => BinaryOp::LeftShift,
+                Some(TokenType::RightShift) => BinaryOp::RightShift,
+                Some(TokenType::UnsignedRightShift) => BinaryOp::UnsignedRightShift,
+                Some(TokenType::BitwiseAnd) => BinaryOp::BitwiseAnd,
+                Some(TokenType::BitwiseOr) => BinaryOp::BitwiseOr,
+                Some(TokenType::BitwiseXor) => BinaryOp::BitwiseXor,
                 Some(TokenType::Assign) => {
                     self.end_recursion();
                     let left_span = left.span();
@@ -656,6 +666,10 @@ impl Parser {
                 TokenType::LogicalNot => {
                     self.advance();
                     (UnaryOp::LogicalNot, t.span)
+                }
+                TokenType::BitwiseNot => {
+                    self.advance();
+                    (UnaryOp::BitwiseNot, t.span)
                 }
                 TokenType::Typeof => {
                     self.advance();

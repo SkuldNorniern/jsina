@@ -21,6 +21,10 @@ impl Value {
         }
     }
 
+    pub fn to_i32(&self) -> i32 {
+        self.to_i64() as i32
+    }
+
     pub fn is_object(&self) -> bool {
         matches!(self, Value::Object(_))
     }

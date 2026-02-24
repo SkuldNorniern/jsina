@@ -274,6 +274,12 @@ pub enum BinaryOp {
     LogicalAnd,
     LogicalOr,
     NullishCoalescing,
+    LeftShift,
+    RightShift,
+    UnsignedRightShift,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
 }
 
 #[derive(Debug, Clone)]
@@ -289,6 +295,7 @@ pub enum UnaryOp {
     Minus,
     Plus,
     LogicalNot,
+    BitwiseNot,
     Typeof,
 }
 

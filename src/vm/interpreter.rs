@@ -1,4 +1,6 @@
-use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
+use crate::ir::bytecode::{BytecodeChunk, ConstEntry};
+#[cfg(test)]
+use crate::ir::bytecode::Opcode;
 use crate::runtime::{Heap, Value};
 
 const MAX_CALL_DEPTH: usize = 1000;
@@ -441,9 +443,50 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 let result = Value::Bool(!matches!(eq, Value::Bool(true)));
                 stack.push(result);
             }
+            0x1e => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let (a, b) = (lhs.to_i32(), rhs.to_i32());
+                stack.push(Value::Int(a << b));
+            }
+            0x1f => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let (a, b) = (lhs.to_i32(), rhs.to_i32());
+                stack.push(Value::Int(a >> b));
+            }
+            0x23 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let (a, b) = (lhs.to_i32() as u32, rhs.to_i32() as u32);
+                stack.push(Value::Int((a >> b) as i32));
+            }
+            0x24 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let (a, b) = (lhs.to_i32(), rhs.to_i32());
+                stack.push(Value::Int(a & b));
+            }
+            0x25 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let (a, b) = (lhs.to_i32(), rhs.to_i32());
+                stack.push(Value::Int(a | b));
+            }
+            0x26 => {
+                let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let (a, b) = (lhs.to_i32(), rhs.to_i32());
+                stack.push(Value::Int(a ^ b));
+            }
             0x18 => {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 stack.push(Value::Bool(!is_truthy(&val)));
+            }
+            0x27 => {
+                let val = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let n = val.to_i32();
+                stack.push(Value::Int(!n));
             }
             0x1d => {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
