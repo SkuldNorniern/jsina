@@ -3,6 +3,13 @@ use crate::runtime::{Heap, Value};
 
 const MAX_CALL_DEPTH: usize = 1000;
 
+#[inline(always)]
+fn read_u8(code: &[u8], pc: usize) -> u8 {
+    debug_assert!(pc < code.len());
+    // SAFETY: Loop exits when pc >= code.len(); each opcode consumes correct operand bytes.
+    unsafe { *code.get_unchecked(pc) }
+}
+
 #[derive(Debug, Clone)]
 pub enum Completion {
     Normal(Value),
@@ -58,6 +65,12 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
     interpret_program_with_trace(program, false)
 }
 
+#[cold]
+fn trace_op(pc: usize, op: u8) {
+    let opname = crate::ir::disasm::opcode_name(op);
+    eprintln!("  {:04}  {}", pc, opname);
+}
+
 pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Completion, VmError> {
     let mut heap = Heap::new();
     let mut stack: Vec<Value> = Vec::new();
@@ -91,13 +104,12 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
         *pc += 1;
 
         if trace {
-            let opname = crate::ir::disasm::opcode_name(op);
-            eprintln!("  {:04}  {}", trace_pc, opname);
+            trace_op(trace_pc, op);
         }
 
         match op {
             0x01 => {
-                let idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let idx = read_u8(code, *pc) as usize;
                 *pc += 1;
                 let val = constants
                     .get(idx)
@@ -119,13 +131,13 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 stack.push(a);
             }
             0x03 => {
-                let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let slot = read_u8(code, *pc) as usize;
                 *pc += 1;
                 let val = locals.get(slot).cloned().unwrap_or(Value::Undefined);
                 stack.push(val);
             }
             0x04 => {
-                let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let slot = read_u8(code, *pc) as usize;
                 *pc += 1;
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 if slot < locals.len() {
@@ -297,19 +309,28 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
             0x10 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
-                let result = add_values(&lhs, &rhs)?;
+                let result = match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) => Value::Int(a.saturating_add(*b)),
+                    _ => add_values(&lhs, &rhs)?,
+                };
                 stack.push(result);
             }
             0x11 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
-                let result = sub_values(&lhs, &rhs)?;
+                let result = match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) => Value::Int(a.saturating_sub(*b)),
+                    _ => sub_values(&lhs, &rhs)?,
+                };
                 stack.push(result);
             }
             0x12 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
-                let result = mul_values(&lhs, &rhs)?;
+                let result = match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) => Value::Int(a.saturating_mul(*b)),
+                    _ => mul_values(&lhs, &rhs)?,
+                };
                 stack.push(result);
             }
             0x13 => {
@@ -333,7 +354,10 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
             0x14 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
-                let result = lt_values(&lhs, &rhs)?;
+                let result = match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) => Value::Bool(a < b),
+                    _ => lt_values(&lhs, &rhs)?,
+                };
                 stack.push(result);
             }
             0x19 => {
@@ -483,7 +507,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 stack.push(value);
             }
             0x30 => {
-                let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
+                let offset_bytes = &code[*pc..*pc + 2];
                 *pc += 2;
                 let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
@@ -492,7 +516,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 }
             }
             0x32 => {
-                let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
+                let offset_bytes = &code[*pc..*pc + 2];
                 *pc += 2;
                 let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
@@ -501,7 +525,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 }
             }
             0x31 => {
-                let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
+                let offset_bytes = &code[*pc..*pc + 2];
                 *pc += 2;
                 let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
                 *pc = (*pc as isize + offset) as usize;
