@@ -17,6 +17,7 @@ pub struct Heap {
     maps: Vec<std::collections::HashMap<String, Value>>,
     sets: Vec<std::collections::HashSet<String>>,
     dates: Vec<f64>,
+    symbols: Vec<Option<String>>,
     error_object_ids: HashSet<usize>,
     global_object_id: usize,
 }
@@ -30,6 +31,7 @@ impl Default for Heap {
             maps: Vec::new(),
             sets: Vec::new(),
             dates: Vec::new(),
+            symbols: Vec::new(),
             error_object_ids: HashSet::new(),
             global_object_id: 0,
         };
@@ -144,6 +146,7 @@ impl Heap {
 
         self.set_prop(global_id, "NaN", Value::Number(f64::NAN));
         self.set_prop(global_id, "Infinity", Value::Number(f64::INFINITY));
+        self.set_prop(global_id, "Symbol", Value::Builtin(0xD0));
 
         self.set_prop(global_id, "print", Value::Builtin(0x00));
     }
@@ -170,6 +173,16 @@ impl Heap {
         self.arrays.push(Vec::new());
         self.array_props.push(HashMap::new());
         id
+    }
+
+    pub fn alloc_symbol(&mut self, description: Option<String>) -> usize {
+        let id = self.symbols.len();
+        self.symbols.push(description);
+        id
+    }
+
+    pub fn symbol_description(&self, id: usize) -> Option<&str> {
+        self.symbols.get(id).and_then(|o| o.as_deref())
     }
 
     pub fn alloc_map(&mut self) -> usize {

@@ -6,6 +6,7 @@ pub enum Value {
     Int(i32),
     Number(f64),
     String(String),
+    Symbol(usize),
     Object(usize),
     Array(usize),
     Map(usize),
@@ -84,6 +85,13 @@ impl Value {
         }
     }
 
+    pub fn as_symbol_id(&self) -> Option<usize> {
+        match self {
+            Value::Symbol(id) => Some(*id),
+            _ => None,
+        }
+    }
+
 }
 
 impl std::fmt::Display for Value {
@@ -95,6 +103,7 @@ impl std::fmt::Display for Value {
             Value::Int(n) => write!(f, "{}", n),
             Value::Number(n) => write!(f, "{}", n),
             Value::String(s) => write!(f, "{}", s),
+            Value::Symbol(_) => write!(f, "Symbol()"),
             Value::Object(_) => write!(f, "[object Object]"),
             Value::Array(_) => write!(f, "[object Array]"),
             Value::Map(_) => write!(f, "[object Map]"),

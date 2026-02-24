@@ -16,6 +16,7 @@ mod number;
 mod object;
 mod regexp;
 mod string;
+mod symbol;
 
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,7 +34,7 @@ pub(crate) fn to_number(v: &Value) -> f64 {
         Value::Null => 0.0,
         Value::Undefined => f64::NAN,
         Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
-        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => f64::NAN,
+        Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => f64::NAN,
     }
 }
 
@@ -43,7 +44,7 @@ pub(crate) fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => true,
+        Value::String(_) | Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => true,
     }
 }
 
@@ -55,6 +56,7 @@ pub(crate) fn to_prop_key(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
+        Value::Symbol(_) => "Symbol()".to_string(),
         Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "[object Object]".to_string(),
         Value::Function(_) | Value::Builtin(_) => "function".to_string(),
     }
@@ -68,6 +70,7 @@ pub(crate) fn strict_eq(a: &Value, b: &Value) -> bool {
         (Value::Int(x), Value::Int(y)) => x == y,
         (Value::Number(x), Value::Number(y)) => !x.is_nan() && !y.is_nan() && x == y,
         (Value::String(x), Value::String(y)) => x == y,
+        (Value::Symbol(x), Value::Symbol(y)) => x == y,
         (Value::Object(x), Value::Object(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => x == y,
         (Value::Map(x), Value::Map(y)) => x == y,
@@ -223,6 +226,7 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "Date", name: "getTime", entry: BuiltinEntry::Normal(date::get_time) },
     BuiltinDef { category: "Date", name: "toString", entry: BuiltinEntry::Normal(date::to_string) },
     BuiltinDef { category: "Date", name: "toISOString", entry: BuiltinEntry::Normal(date::to_iso_string) },
+    BuiltinDef { category: "Symbol", name: "create", entry: BuiltinEntry::Normal(symbol::symbol) },
 ];
 
 const INVALID: u8 = 0xFF;
@@ -285,10 +289,11 @@ static ENCODED_TO_INDEX: [u8; 256] = {
     t[0xC2] = 53;
     t[0xC3] = 54;
     t[0xC4] = 55;
+    t[0xD0] = 56;
     t
 };
 
-pub const MAX_BUILTIN_ID: u8 = 0xC4;
+pub const MAX_BUILTIN_ID: u8 = 0xD0;
 
 fn index_for(id: u8) -> Option<usize> {
     let idx = ENCODED_TO_INDEX[id as usize];
@@ -321,7 +326,7 @@ pub fn all() -> &'static [BuiltinDef] {
     BUILTINS
 }
 
-const INDEX_TO_ENCODED: [u8; 56] = [
+const INDEX_TO_ENCODED: [u8; 57] = [
     0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
     0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
     0x30, 0x31,
@@ -334,6 +339,7 @@ const INDEX_TO_ENCODED: [u8; 56] = [
     0xA0, 0xA1, 0xA2, 0xA3,
     0xB0,
     0xC0, 0xC1, 0xC2, 0xC3, 0xC4,
+    0xD0,
 ];
 
 pub fn by_category(cat: &str) -> impl Iterator<Item = (u8, &'static BuiltinDef)> {
