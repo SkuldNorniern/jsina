@@ -1,6 +1,8 @@
 use super::Value;
 use std::collections::{HashMap, HashSet};
 
+const MAX_ARRAY_LENGTH: usize = 10_000_000;
+
 #[derive(Debug)]
 struct HeapObject {
     props: HashMap<String, Value>,
@@ -11,6 +13,7 @@ struct HeapObject {
 pub struct Heap {
     objects: Vec<HeapObject>,
     arrays: Vec<Vec<Value>>,
+    array_props: Vec<HashMap<String, Value>>,
     maps: Vec<std::collections::HashMap<String, Value>>,
     sets: Vec<std::collections::HashSet<String>>,
     dates: Vec<f64>,
@@ -38,6 +41,7 @@ impl Heap {
     pub fn alloc_array(&mut self) -> usize {
         let id = self.arrays.len();
         self.arrays.push(Vec::new());
+        self.array_props.push(HashMap::new());
         id
     }
 
@@ -131,7 +135,14 @@ impl Heap {
                 return Value::Int(elements.len() as i32);
             }
             if let Ok(idx) = key.parse::<usize>() {
-                return elements.get(idx).cloned().unwrap_or(Value::Undefined);
+                if idx < elements.len() {
+                    return elements.get(idx).cloned().unwrap_or(Value::Undefined);
+                }
+                if let Some(props) = self.array_props.get(arr_id) {
+                    if let Some(v) = props.get(key) {
+                        return v.clone();
+                    }
+                }
             }
         }
         Value::Undefined
@@ -148,16 +159,21 @@ impl Heap {
             if key == "length" {
                 if let Value::Int(n) = value {
                     if n >= 0 {
-                        elements.truncate(n as usize);
+                        let n = n as usize;
+                        elements.truncate(n.min(MAX_ARRAY_LENGTH));
                     }
                 }
                 return;
             }
             if let Ok(idx) = key.parse::<usize>() {
-                while elements.len() <= idx {
-                    elements.push(Value::Undefined);
+                if idx < MAX_ARRAY_LENGTH {
+                    while elements.len() <= idx {
+                        elements.push(Value::Undefined);
+                    }
+                    elements[idx] = value;
+                } else if let Some(props) = self.array_props.get_mut(arr_id) {
+                    props.insert(key.to_string(), value);
                 }
-                elements[idx] = value;
             }
         }
     }

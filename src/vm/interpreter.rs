@@ -3,6 +3,7 @@ use crate::ir::bytecode::{BytecodeChunk, ConstEntry};
 use crate::ir::bytecode::Opcode;
 use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_CALL_DEPTH: usize = 1000;
 
@@ -50,6 +51,8 @@ pub enum VmError {
     InvalidOpcode(u8),
     InvalidConstIndex(usize),
     CallDepthExceeded,
+    StepLimitExceeded,
+    Cancelled,
 }
 
 impl std::fmt::Display for VmError {
@@ -59,6 +62,8 @@ impl std::fmt::Display for VmError {
             VmError::InvalidOpcode(b) => write!(f, "invalid opcode: 0x{:02x}", b),
             VmError::InvalidConstIndex(i) => write!(f, "invalid constant index: {}", i),
             VmError::CallDepthExceeded => write!(f, "maximum call depth exceeded"),
+            VmError::StepLimitExceeded => write!(f, "step limit exceeded (infinite loop?)"),
+            VmError::Cancelled => write!(f, "execution cancelled (timeout)"),
         }
     }
 }
@@ -90,6 +95,23 @@ struct Frame {
 
 pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
     interpret_program_with_trace(program, false)
+}
+
+pub fn interpret_program_with_limit(
+    program: &Program,
+    trace: bool,
+    step_limit: Option<u64>,
+) -> Result<Completion, VmError> {
+    interpret_program_with_trace_and_limit(program, trace, step_limit, None)
+}
+
+pub fn interpret_program_with_limit_and_cancel(
+    program: &Program,
+    trace: bool,
+    step_limit: Option<u64>,
+    cancel: Option<&AtomicBool>,
+) -> Result<Completion, VmError> {
+    interpret_program_with_trace_and_limit(program, trace, step_limit, cancel)
 }
 
 #[cold]
@@ -140,7 +162,17 @@ impl GetPropCache {
 }
 
 pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Completion, VmError> {
+    interpret_program_with_trace_and_limit(program, trace, None, None)
+}
+
+fn interpret_program_with_trace_and_limit(
+    program: &Program,
+    trace: bool,
+    step_limit: Option<u64>,
+    cancel: Option<&AtomicBool>,
+) -> Result<Completion, VmError> {
     let mut heap = Heap::new();
+    let mut steps_remaining = step_limit;
     let mut stack: Vec<Value> = Vec::new();
     let mut getprop_cache = GetPropCache {
         obj_id: usize::MAX,
@@ -162,6 +194,18 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
     }];
 
     loop {
+        if let Some(c) = cancel {
+            if c.load(Ordering::Relaxed) {
+                return Err(VmError::Cancelled);
+            }
+        }
+        if let Some(ref mut n) = steps_remaining {
+            if *n == 0 {
+                return Err(VmError::StepLimitExceeded);
+            }
+            *n -= 1;
+        }
+
         let frame = frames.last_mut().ok_or(VmError::StackUnderflow)?;
         let chunk = &program.chunks[frame.chunk_index];
         let code = &chunk.code;

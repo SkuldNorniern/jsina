@@ -4,6 +4,7 @@ use crate::frontend::{check_early_errors, Lexer, Parser};
 use crate::host::{with_host, CliHost, HostHooks};
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::vm::{Completion, Program};
+use std::sync::atomic::AtomicBool;
 
 #[derive(Debug)]
 pub enum DriverError {
@@ -118,7 +119,33 @@ impl Driver {
         with_host(host, || Self::run_with_host_inner(source, trace))
     }
 
+    /// Run with step limit. Use for test262 to prevent infinite loops from exhausting memory.
+    pub fn run_with_step_limit(source: &str, step_limit: u64) -> Result<i64, DriverError> {
+        let host = CliHost;
+        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, Some(step_limit), None))
+    }
+
+    /// Run with step limit and cancellation flag. When cancel is set, execution stops.
+    /// Use for test262 to avoid zombie threads when wall-clock timeout fires.
+    pub fn run_with_step_limit_and_cancel(
+        source: &str,
+        step_limit: u64,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<i64, DriverError> {
+        let host = CliHost;
+        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, Some(step_limit), cancel))
+    }
+
     fn run_with_host_inner(source: &str, trace: bool) -> Result<i64, DriverError> {
+        Self::run_with_host_and_limit_inner(source, trace, None, None)
+    }
+
+    fn run_with_host_and_limit_inner(
+        source: &str,
+        trace: bool,
+        step_limit: Option<u64>,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<i64, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
         let entry = funcs
@@ -134,7 +161,12 @@ impl Driver {
             chunks,
             entry,
         };
-        let completion = crate::vm::interpret_program_with_trace(&program, trace)?;
+        let completion = crate::vm::interpret_program_with_limit_and_cancel(
+            &program,
+            trace,
+            step_limit,
+            cancel,
+        )?;
         let value = match completion {
             Completion::Return(v) => v,
             Completion::Normal(v) => v,
@@ -147,5 +179,32 @@ impl Driver {
             }
         };
         Ok(value.to_i64())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct CaptureHost(Rc<RefCell<Vec<String>>>);
+
+    impl crate::host::HostHooks for CaptureHost {
+        fn print(&self, args: &[&str]) {
+            for s in args {
+                self.0.borrow_mut().push((*s).to_string());
+            }
+        }
+    }
+
+    #[test]
+    fn run_with_host_custom_print() {
+        let captured = Rc::new(RefCell::new(Vec::new()));
+        let host = CaptureHost(captured.clone());
+        let r = Driver::run_with_host(&host, "function main() { print(\"hi\"); return 0; }", false);
+        assert!(r.is_ok());
+        let v = captured.borrow();
+        assert_eq!(v.as_slice(), &["hi"]);
     }
 }
