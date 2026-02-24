@@ -91,6 +91,8 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                     15 => "boolean",
                     16 => "arraySlice",
                     17 => "arrayConcat",
+                    18 => "objectAssign",
+                    19 => "arrayIndexOf",
                     _ => "?",
                 };
                 format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)

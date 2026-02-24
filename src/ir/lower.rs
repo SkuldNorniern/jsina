@@ -1239,6 +1239,15 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "assign" && e.args.len() >= 1 {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ObjectAssign,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
                     } else if matches!(obj_name.as_deref(), Some(s) if s == "Array") && prop == "isArray" && e.args.len() == 1 {
                         compile_expression(&e.args[0], ctx)?;
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
@@ -1296,6 +1305,31 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: crate::ir::hir::BuiltinId::ArrayConcat,
                             argc: (e.args.len() + 1) as u32,
+                            span: e.span,
+                        });
+                    } else if prop == "indexOf" {
+                        compile_expression(&m.object, ctx)?;
+                        let search = e.args.first();
+                        let from = e.args.get(1);
+                        if let Some(s) = search {
+                            compile_expression(s, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        if let Some(f) = from {
+                            compile_expression(f, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayIndexOf,
+                            argc: 3,
                             span: e.span,
                         });
                     } else {
@@ -2012,6 +2046,33 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 5, "string.length");
+    }
+
+    #[test]
+    fn lower_object_assign() {
+        let result = crate::driver::Driver::run(
+            "function main() { let t = { a: 1 }; let s = { b: 2 }; Object.assign(t, s); if (t.a !== 1 || t.b !== 2) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Object.assign copies properties");
+    }
+
+    #[test]
+    fn lower_array_index_of() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [10, 20, 30, 20]; if (a.indexOf(20) !== 1) return 0; if (a.indexOf(99) !== -1) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Array.indexOf");
+    }
+
+    #[test]
+    fn lower_string_index_of_slice() {
+        let result = crate::driver::Driver::run(
+            "function main() { let s = \"hello\"; if (s.indexOf(\"l\") !== 2) return 0; if (s.slice(1, 4) !== \"ell\") return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "String.indexOf and String.slice");
     }
 
     #[test]

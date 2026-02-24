@@ -375,42 +375,68 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         stack.push(Value::Bool(b));
                     }
                     16 => {
-                        let arr = args.first().ok_or(VmError::StackUnderflow)?;
-                        let arr_id = match arr {
-                            Value::Array(id) => *id,
-                            _ => {
-                                stack.push(Value::Undefined);
-                                continue;
-                            }
-                        };
-                        let elements: Vec<Value> = heap
-                            .array_elements(arr_id)
-                            .map(|s| s.to_vec())
-                            .unwrap_or_default();
-                        let len = elements.len() as i32;
+                        let receiver = args.first().ok_or(VmError::StackUnderflow)?;
                         let start_val = args.get(1);
                         let end_val = args.get(2);
-                        let start = start_val.map(|v| value_to_number(v) as i32).unwrap_or(0);
-                        let end = end_val
-                            .map(|v| {
-                                let n = value_to_number(v);
-                                if n.is_nan() || n.is_infinite() {
-                                    len
-                                } else {
-                                    n as i32
+                        if let Value::String(s) = receiver {
+                            let len = s.len() as i32;
+                            let start = start_val
+                                .map(|v| {
+                                    let n = value_to_number(v) as i32;
+                                    if n < 0 {
+                                        (len + n).max(0)
+                                    } else {
+                                        n.min(len)
+                                    }
+                                })
+                                .unwrap_or(0) as usize;
+                            let end = end_val
+                                .map(|v| {
+                                    let n = value_to_number(v);
+                                    if n.is_nan() || n.is_infinite() {
+                                        len
+                                    } else {
+                                        let n = n as i32;
+                                        if n < 0 {
+                                            (len + n).max(0)
+                                        } else {
+                                            n.min(len)
+                                        }
+                                    }
+                                })
+                                .unwrap_or(len) as usize;
+                            let end = end.max(start);
+                            stack.push(Value::String(s[start..end].to_string()));
+                        } else if let Value::Array(id) = receiver {
+                            let elements: Vec<Value> = heap
+                                .array_elements(*id)
+                                .map(|s| s.to_vec())
+                                .unwrap_or_default();
+                            let len = elements.len() as i32;
+                            let start = start_val.map(|v| value_to_number(v) as i32).unwrap_or(0);
+                            let end = end_val
+                                .map(|v| {
+                                    let n = value_to_number(v);
+                                    if n.is_nan() || n.is_infinite() {
+                                        len
+                                    } else {
+                                        n as i32
+                                    }
+                                })
+                                .unwrap_or(len);
+                            let start = start.max(0).min(len) as usize;
+                            let end = end.max(0).min(len as i32) as usize;
+                            let end = end.max(start);
+                            let new_id = heap.alloc_array();
+                            for i in start..end {
+                                if let Some(v) = elements.get(i) {
+                                    heap.array_push(new_id, v.clone());
                                 }
-                            })
-                            .unwrap_or(len);
-                        let start = start.max(0).min(len) as usize;
-                        let end = end.max(0).min(len as i32) as usize;
-                        let end = end.max(start);
-                        let new_id = heap.alloc_array();
-                        for i in start..end {
-                            if let Some(v) = elements.get(i) {
-                                heap.array_push(new_id, v.clone());
                             }
+                            stack.push(Value::Array(new_id));
+                        } else {
+                            stack.push(Value::Undefined);
                         }
-                        stack.push(Value::Array(new_id));
                     }
                     17 => {
                         let arr = args.first().ok_or(VmError::StackUnderflow)?;
@@ -442,36 +468,98 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         }
                         stack.push(Value::Array(new_id));
                     }
+                    18 => {
+                        let target = args.first().ok_or(VmError::StackUnderflow)?;
+                        let target_id = match target {
+                            Value::Object(id) => *id,
+                            _ => {
+                                stack.push(target.clone());
+                                continue;
+                            }
+                        };
+                        for source in args.iter().skip(1) {
+                            if let Value::Object(src_id) = source {
+                                let keys = heap.object_keys(*src_id);
+                                for key in keys {
+                                    let val = heap.get_prop(*src_id, &key);
+                                    heap.set_prop(target_id, &key, val);
+                                }
+                            }
+                        }
+                        stack.push(Value::Object(target_id));
+                    }
+                    19 => {
+                        let receiver = args.first().ok_or(VmError::StackUnderflow)?;
+                        let search = args.get(1).cloned().unwrap_or(Value::Undefined);
+                        let from_val = args.get(2);
+                        let idx = if let Value::String(s) = receiver {
+                            let search_str = search.to_string();
+                            let from = from_val
+                                .map(|v| {
+                                    let n = value_to_number(&v) as i32;
+                                    if n < 0 {
+                                        ((s.len() as i32) + n).max(0) as usize
+                                    } else {
+                                        n.min(s.len() as i32) as usize
+                                    }
+                                })
+                                .unwrap_or(0);
+                            s[from..].find(&search_str).map(|i| (from + i) as i32).unwrap_or(-1)
+                        } else if let Value::Array(id) = receiver {
+                            let elements: Vec<Value> = heap
+                                .array_elements(*id)
+                                .map(|s| s.to_vec())
+                                .unwrap_or_default();
+                            let from = from_val
+                                .map(|v| {
+                                    let n = value_to_number(v) as i32;
+                                    if n < 0 {
+                                        ((elements.len() as i32) + n).max(0) as usize
+                                    } else {
+                                        n.min(elements.len() as i32) as usize
+                                    }
+                                })
+                                .unwrap_or(0);
+                            let mut found = -1i32;
+                            for (i, v) in elements.iter().skip(from).enumerate() {
+                                if matches!(strict_eq_values(v, &search), Value::Bool(true)) {
+                                    found = (from + i) as i32;
+                                    break;
+                                }
+                            }
+                            found
+                        } else {
+                            -1
+                        };
+                        stack.push(Value::Int(idx));
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }
             x if x == Opcode::CallMethod as u8 => {
-                let (func_idx, callee_locals, receiver) = {
-                    let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
-                    *pc += 1;
-                    let mut args: Vec<Value> = (0..argc)
-                        .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    args.reverse();
-                    let callee = stack.pop().ok_or(VmError::StackUnderflow)?;
-                    let receiver = stack.pop().ok_or(VmError::StackUnderflow)?;
-                    let func_idx = match &callee {
-                        Value::Function(i) => *i,
-                        _ => {
-                            return Ok(Completion::Throw(Value::String(
-                                "callee is not a function".to_string(),
-                            )));
-                        }
-                    };
-                    let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
-                    let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
-                    for (i, v) in args.into_iter().enumerate() {
-                        if i < callee_locals.len() {
-                            callee_locals[i] = v;
-                        }
+                let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 1;
+                let mut args: Vec<Value> = (0..argc)
+                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+                    .collect::<Result<Vec<_>, _>>()?;
+                args.reverse();
+                let callee = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let receiver = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let func_idx = match &callee {
+                    Value::Function(i) => *i,
+                    _ => {
+                        return Ok(Completion::Throw(Value::String(
+                            "callee is not a function".to_string(),
+                        )));
                     }
-                    (func_idx, callee_locals, receiver)
                 };
+                let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
+                let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
+                for (i, v) in args.into_iter().enumerate() {
+                    if i < callee_locals.len() {
+                        callee_locals[i] = v;
+                    }
+                }
                 if frames.len() >= MAX_CALL_DEPTH {
                     return Err(VmError::CallDepthExceeded);
                 }

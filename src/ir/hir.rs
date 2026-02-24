@@ -84,7 +84,10 @@ pub enum BuiltinId {
     Boolean = 15,
     ArraySlice = 16,
     ArrayConcat = 17,
+    ObjectAssign = 18,
+    ArrayIndexOf = 19,
 }
+
 
 #[derive(Debug, Clone)]
 pub enum HirConst {
