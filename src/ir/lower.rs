@@ -253,9 +253,60 @@ fn compile_function(
         exception_regions: Vec::new(),
     };
 
-    for param in &f.params {
-        ctx.locals.insert(param.clone(), ctx.next_slot);
+    let param_names: Vec<String> = f.params.iter().map(|p| p.name().to_string()).collect();
+    for name in &param_names {
+        ctx.locals.insert(name.clone(), ctx.next_slot);
         ctx.next_slot += 1;
+    }
+
+    for param in &f.params {
+        if let Param::Default(_, default_expr) = param {
+            let param_slot = ctx.locals.get(param.name()).copied().expect("param in locals");
+            let cond_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: param_slot,
+                span: default_expr.span(),
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                value: HirConst::Undefined,
+                span: default_expr.span(),
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StrictEq {
+                span: default_expr.span(),
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: cond_slot,
+                span: default_expr.span(),
+            });
+            let default_block_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: default_block_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let continue_block_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: continue_block_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: cond_slot,
+                then_block: default_block_id,
+                else_block: continue_block_id,
+            };
+            ctx.current_block = default_block_id as usize;
+            compile_expression(default_expr, &mut ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: param_slot,
+                span: default_expr.span(),
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+                target: continue_block_id,
+            };
+            ctx.current_block = continue_block_id as usize;
+        }
     }
 
     let _ = compile_statement(&f.body, &mut ctx)?;
@@ -264,7 +315,7 @@ fn compile_function(
 
     Ok(HirFunction {
         name: Some(f.name.clone()),
-        params: f.params.clone(),
+        params: param_names,
         num_locals: ctx.next_slot,
         entry_block: 0,
         blocks: ctx.blocks,
@@ -290,11 +341,13 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             if let Some(ref expr) = r.argument {
                 compile_expression(expr, ctx)?;
             }
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Return { span: r.span };
             return Ok(true);
         }
         Statement::Throw(t) => {
             ctx.throw_span = Some(t.span);
             compile_expression(&t.argument, ctx)?;
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Throw { span: t.span };
             return Ok(true);
         }
         Statement::Try(t) => {
@@ -1183,15 +1236,65 @@ fn compile_function_expr_to_hir(
         switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
     };
-    for param in &fe.params {
-        ctx.locals.insert(param.clone(), ctx.next_slot);
+    let param_names: Vec<String> = fe.params.iter().map(|p| p.name().to_string()).collect();
+    for name in &param_names {
+        ctx.locals.insert(name.clone(), ctx.next_slot);
         ctx.next_slot += 1;
+    }
+    for param in &fe.params {
+        if let Param::Default(_, default_expr) = param {
+            let param_slot = ctx.locals.get(param.name()).copied().expect("param in locals");
+            let cond_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: param_slot,
+                span: default_expr.span(),
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                value: HirConst::Undefined,
+                span: default_expr.span(),
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StrictEq {
+                span: default_expr.span(),
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: cond_slot,
+                span: default_expr.span(),
+            });
+            let default_block_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: default_block_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let continue_block_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: continue_block_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: cond_slot,
+                then_block: default_block_id,
+                else_block: continue_block_id,
+            };
+            ctx.current_block = default_block_id as usize;
+            compile_expression(default_expr, &mut ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: param_slot,
+                span: default_expr.span(),
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+                target: continue_block_id,
+            };
+            ctx.current_block = continue_block_id as usize;
+        }
     }
     let _ = compile_statement(&fe.body, &mut ctx)?;
     ctx.blocks[ctx.current_block].terminator = terminator_for_exit(&ctx);
     Ok(HirFunction {
         name: fe.name.clone(),
-        params: fe.params.clone(),
+        params: param_names,
         num_locals: ctx.next_slot,
         entry_block: 0,
         blocks: ctx.blocks,
@@ -2931,6 +3034,20 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "String.toLowerCase, toUpperCase");
+    }
+
+    #[test]
+    fn lower_default_param() {
+        let result = crate::driver::Driver::run(
+            "function f(x, y) { return x + y; } function main() { return f(10, 5); }",
+        )
+        .expect("run");
+        assert_eq!(result, 15, "two params");
+        let result2 = crate::driver::Driver::run(
+            "function f(x, y = 5) { return x + y; } function main() { return f(10); }",
+        )
+        .expect("run");
+        assert_eq!(result2, 15, "default param y=5 when f(10) called");
     }
 
     #[test]

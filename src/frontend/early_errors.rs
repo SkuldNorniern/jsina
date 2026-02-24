@@ -96,17 +96,18 @@ fn check_statement(
                     false
                 });
             for param in &f.params {
-                if fn_strict && is_strict_reserved(param) {
+                let name = param.name();
+                if fn_strict && is_strict_reserved(name) {
                     errors.push(EarlyError {
                         code: "JSINA-EARLY-008".to_string(),
-                        message: format!("'{}' may not be used as parameter name in strict mode", param),
+                        message: format!("'{}' may not be used as parameter name in strict mode", name),
                         span: f.span,
                     });
                 }
-                if let Some(prev) = scope.add_lexical(param, f.span) {
+                if let Some(prev) = scope.add_lexical(name, f.span) {
                     errors.push(EarlyError {
                         code: "JSINA-EARLY-001".to_string(),
-                        message: format!("duplicate parameter name '{}'", param),
+                        message: format!("duplicate parameter name '{}'", name),
                         span: prev,
                     });
                 }

@@ -212,12 +212,22 @@ impl Parser {
         }))
     }
 
-    fn parse_params(&mut self) -> Result<Vec<String>, ParseError> {
+    fn parse_params(&mut self) -> Result<Vec<crate::frontend::ast::Param>, ParseError> {
         let mut params = Vec::new();
-        while matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
-            let token = self.expect(TokenType::Identifier)?;
-            params.push(token.lexeme);
-            if !self.optional(TokenType::Comma) {
+        loop {
+            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
+                let token = self.expect(TokenType::Identifier)?;
+                let name = token.lexeme;
+                if self.optional(TokenType::Assign) {
+                    let default_expr = self.parse_expression()?;
+                    params.push(crate::frontend::ast::Param::Default(name, Box::new(default_expr)));
+                } else {
+                    params.push(crate::frontend::ast::Param::Ident(name));
+                }
+                if !self.optional(TokenType::Comma) {
+                    break;
+                }
+            } else {
                 break;
             }
         }
@@ -1214,6 +1224,16 @@ mod tests {
         if let Statement::FunctionDecl(f) = &script.body[0] {
             assert_eq!(f.name, "foo");
             assert!(f.params.is_empty());
+        }
+    }
+
+    #[test]
+    fn parse_function_default_param() {
+        let script = parse_ok("function f(x, y = 10) { return x + y; }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            assert_eq!(f.params.len(), 2);
+            assert!(matches!(&f.params[0], crate::frontend::ast::Param::Ident(n) if n == "x"));
+            assert!(matches!(&f.params[1], crate::frontend::ast::Param::Default(n, _) if n == "y"));
         }
     }
 

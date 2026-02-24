@@ -185,8 +185,22 @@ pub struct FunctionDeclStmt {
     pub id: NodeId,
     pub span: Span,
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<Param>,
     pub body: Box<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Param {
+    Ident(String),
+    Default(String, Box<Expression>),
+}
+
+impl Param {
+    pub fn name(&self) -> &str {
+        match self {
+            Param::Ident(n) | Param::Default(n, _) => n,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -228,7 +242,7 @@ pub struct FunctionExprData {
     pub id: NodeId,
     pub span: Span,
     pub name: Option<String>,
-    pub params: Vec<String>,
+    pub params: Vec<Param>,
     pub body: Box<Statement>,
 }
 
