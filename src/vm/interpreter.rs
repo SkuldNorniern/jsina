@@ -177,6 +177,16 @@ fn interpret_program_with_trace_and_limit(
     if test262_mode {
         heap.init_test262_globals();
     }
+    interpret_program_with_heap(program, &mut heap, trace, step_limit, cancel)
+}
+
+pub fn interpret_program_with_heap(
+    program: &Program,
+    heap: &mut Heap,
+    trace: bool,
+    step_limit: Option<u64>,
+    cancel: Option<&AtomicBool>,
+) -> Result<Completion, VmError> {
     let mut steps_remaining = step_limit;
     let mut stack: Vec<Value> = Vec::new();
     let mut getprop_cache = GetPropCache {
@@ -366,7 +376,7 @@ fn interpret_program_with_trace_and_limit(
                 let builtin_id = read_u8(code, *pc);
                 let argc = read_u8(code, *pc + 1) as usize;
                 *pc += 2;
-                match execute_builtin(builtin_id, argc, &mut stack, &mut heap) {
+                match execute_builtin(builtin_id, argc, &mut stack, heap) {
                     Ok(BuiltinResult::Push(v)) => {
                         getprop_cache.invalidate_all();
                         stack.push(v);
@@ -389,7 +399,7 @@ fn interpret_program_with_trace_and_limit(
                         stack.push(a.clone());
                     }
                     stack.push(receiver);
-                    match execute_builtin(builtin_id, argc + 1, &mut stack, &mut heap) {
+                    match execute_builtin(builtin_id, argc + 1, &mut stack, heap) {
                         Ok(BuiltinResult::Push(v)) => {
                             getprop_cache.invalidate_all();
                             stack.push(v);
@@ -620,6 +630,27 @@ fn interpret_program_with_trace_and_limit(
                 let constructor = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let value = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = instanceof_check(&value, &constructor, &heap);
+                stack.push(Value::Bool(result));
+            }
+            0x29 => {
+                let key = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let obj_val = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_str = value_to_prop_key(&key);
+                let result = match &obj_val {
+                    Value::Object(id) => {
+                        heap.delete_prop(*id, &key_str);
+                        true
+                    }
+                    Value::Array(id) => {
+                        if key_str == "length" {
+                            false
+                        } else {
+                            heap.delete_array_prop(*id, &key_str);
+                            true
+                        }
+                    }
+                    _ => true,
+                };
                 stack.push(Value::Bool(result));
             }
             0x1d => {

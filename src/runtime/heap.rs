@@ -154,6 +154,9 @@ impl Heap {
         self.set_prop(global_id, "console", Value::Object(console_id));
 
         self.set_prop(global_id, "print", Value::Builtin(0x00));
+        self.set_prop(global_id, "eval", Value::Builtin(0xD9));
+        self.set_prop(global_id, "encodeURI", Value::Builtin(0xDA));
+        self.set_prop(global_id, "encodeURIComponent", Value::Builtin(0xDB));
     }
 
     /// Add $262 host object for test262 harness. Match V8/Bun/Deno: $262 only exists when running via test262.
@@ -316,6 +319,27 @@ impl Heap {
     pub fn set_prop(&mut self, obj_id: usize, key: &str, value: Value) {
         if let Some(obj) = self.objects.get_mut(obj_id) {
             obj.props.insert(key.to_string(), value);
+        }
+    }
+
+    pub fn delete_prop(&mut self, obj_id: usize, key: &str) {
+        if let Some(obj) = self.objects.get_mut(obj_id) {
+            obj.props.remove(key);
+        }
+    }
+
+    pub fn delete_array_prop(&mut self, arr_id: usize, key: &str) {
+        if key == "length" {
+            return;
+        }
+        if let Ok(idx) = key.parse::<usize>() {
+            if let Some(elements) = self.arrays.get_mut(arr_id) {
+                if idx < elements.len() {
+                    elements[idx] = Value::Undefined;
+                }
+            }
+        } else if let Some(props) = self.array_props.get_mut(arr_id) {
+            props.remove(key);
         }
     }
 

@@ -7,6 +7,7 @@ const GLOBAL_NAMES: &[&str] = &[
     "Object", "Array", "String", "Number", "Boolean", "Error", "Math", "JSON",
     "Date", "RegExp", "Map", "Set", "Symbol", "NaN", "Infinity", "$262", "console", "print",
     "ReferenceError", "TypeError", "RangeError", "SyntaxError", "globalThis",
+    "eval", "encodeURI", "encodeURIComponent",
 ];
 
 #[derive(Debug)]
@@ -1708,6 +1709,28 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     compile_expression(&e.argument, ctx)?;
                     ctx.blocks[ctx.current_block].ops.push(HirOp::Typeof { span: e.span });
                 }
+                UnaryOp::Delete => {
+                    if let Expression::Member(m) = e.argument.as_ref() {
+                        compile_expression(&m.object, ctx)?;
+                        match &m.property {
+                            MemberProperty::Identifier(k) => {
+                                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                    value: HirConst::String(k.clone()),
+                                    span: e.span,
+                                });
+                            }
+                            MemberProperty::Expression(k) => compile_expression(k, ctx)?,
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::Delete { span: e.span });
+                    } else {
+                        compile_expression(&e.argument, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::Pop { span: e.span });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                            value: HirConst::Int(1),
+                            span: e.span,
+                        });
+                    }
+                }
             }
         }
         Expression::PostfixIncrement(p) | Expression::PostfixDecrement(p) => {
@@ -2401,6 +2424,36 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::Host0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "eval" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Eval0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "encodeURI" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::EncodeUri0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "encodeURIComponent" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::EncodeUriComponent0,
                         argc: e.args.len() as u32,
                         span: e.span,
                     });
