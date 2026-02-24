@@ -71,9 +71,56 @@ fn trace_op(pc: usize, op: u8) {
     eprintln!("  {:04}  {}", pc, opname);
 }
 
+struct GetPropCache {
+    obj_id: usize,
+    is_array: bool,
+    key: String,
+    value: Option<Value>,
+}
+
+impl GetPropCache {
+    fn get(
+        &mut self,
+        obj_id: usize,
+        is_array: bool,
+        key: &str,
+        heap: &crate::runtime::Heap,
+    ) -> Value {
+        if self.obj_id == obj_id && self.is_array == is_array && self.key == key {
+            if let Some(ref v) = self.value {
+                return v.clone();
+            }
+        }
+        let result = if is_array {
+            heap.get_array_prop(obj_id, key)
+        } else {
+            heap.get_prop(obj_id, key)
+        };
+        self.obj_id = obj_id;
+        self.is_array = is_array;
+        self.key = key.to_string();
+        self.value = Some(result.clone());
+        result
+    }
+    fn invalidate(&mut self, obj_id: usize, is_array: bool, key: &str) {
+        if self.obj_id == obj_id && self.is_array == is_array && self.key == key {
+            self.value = None;
+        }
+    }
+    fn invalidate_all(&mut self) {
+        self.value = None;
+    }
+}
+
 pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Completion, VmError> {
     let mut heap = Heap::new();
     let mut stack: Vec<Value> = Vec::new();
+    let mut getprop_cache = GetPropCache {
+        obj_id: usize::MAX,
+        is_array: false,
+        key: String::new(),
+        value: None,
+    };
     let entry_chunk = program
         .chunks
         .get(program.entry)
@@ -235,7 +282,10 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     return Err(VmError::InvalidOpcode(builtin_id));
                 }
                 match crate::runtime::builtins::dispatch(builtin_id, &args, &mut heap) {
-                    Ok(v) => stack.push(v),
+                    Ok(v) => {
+                        getprop_cache.invalidate_all();
+                        stack.push(v);
+                    }
                     Err(crate::runtime::builtins::BuiltinError::Throw(v)) => return Ok(Completion::Throw(v)),
                 }
             }
@@ -427,7 +477,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 stack.push(Value::Array(id));
             }
             0x52 => {
-                let key_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let key_idx = read_u8(code, *pc) as usize;
                 *pc += 1;
                 let key = constants
                     .get(key_idx)
@@ -440,8 +490,8 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     _ => return Err(VmError::InvalidConstIndex(key_idx)),
                 };
                 let result = match &obj {
-                    Value::Object(id) => heap.get_prop(*id, &key_str),
-                    Value::Array(id) => heap.get_array_prop(*id, &key_str),
+                    Value::Object(id) => getprop_cache.get(*id, false, &key_str, &heap),
+                    Value::Array(id) => getprop_cache.get(*id, true, &key_str, &heap),
                     Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
                     Value::String(s) => {
                         if let Ok(idx) = key_str.parse::<usize>() {
@@ -455,7 +505,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 stack.push(result);
             }
             0x53 => {
-                let key_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let key_idx = read_u8(code, *pc) as usize;
                 *pc += 1;
                 let key = constants
                     .get(key_idx)
@@ -469,8 +519,14 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     _ => return Err(VmError::InvalidConstIndex(key_idx)),
                 };
                 match &obj {
-                    Value::Object(id) => heap.set_prop(*id, &key_str, value.clone()),
-                    Value::Array(id) => heap.set_array_prop(*id, &key_str, value.clone()),
+                    Value::Object(id) => {
+                        getprop_cache.invalidate(*id, false, &key_str);
+                        heap.set_prop(*id, &key_str, value.clone());
+                    }
+                    Value::Array(id) => {
+                        getprop_cache.invalidate(*id, true, &key_str);
+                        heap.set_array_prop(*id, &key_str, value.clone());
+                    }
                     _ => {}
                 }
                 stack.push(value);
