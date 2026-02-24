@@ -472,11 +472,23 @@ impl Parser {
             self.advance();
             None
         } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Var) | Some(TokenType::Let) | Some(TokenType::Const)) {
-            let stmt = self.parse_statement()?;
+            let decl_stmt = self.parse_for_in_of_decl()?;
+            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::In)) {
+                return self.parse_for_in_of(start_span, id, decl_stmt, true);
+            }
+            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Of)) {
+                return self.parse_for_in_of(start_span, id, decl_stmt, false);
+            }
             self.optional(TokenType::Semicolon);
-            Some(Box::new(stmt))
+            Some(Box::new(decl_stmt))
         } else {
             let expr = self.parse_expression()?;
+            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::In)) {
+                return self.parse_for_in_of_expr(start_span, id, expr, true);
+            }
+            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Of)) {
+                return self.parse_for_in_of_expr(start_span, id, expr, false);
+            }
             let span = expr.span();
             self.expect(TokenType::Semicolon)?;
             Some(Box::new(Statement::Expression(ExpressionStmt {
@@ -519,6 +531,142 @@ impl Parser {
             update,
             body,
         }))
+    }
+
+    fn parse_for_in_of_decl(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.current().map(|t| t.span).unwrap_or_else(|| crate::diagnostics::Span::point(crate::diagnostics::Position::start()));
+        let id = self.next_id();
+        let is_var = matches!(self.current().map(|t| &t.token_type), Some(TokenType::Var));
+        let is_let = matches!(self.current().map(|t| &t.token_type), Some(TokenType::Let));
+        let is_const = matches!(self.current().map(|t| &t.token_type), Some(TokenType::Const));
+        if !is_var && !is_let && !is_const {
+            return Err(ParseError {
+                code: "JSINA-PARSE-010".to_string(),
+                message: "expected var, let, or const".to_string(),
+                span: Some(start_span),
+            });
+        }
+        self.advance();
+        let declarations = self.parse_declarators()?;
+        let span = declarations.last().map(|d| start_span.merge(d.span)).unwrap_or(start_span);
+        if is_var {
+            Ok(Statement::VarDecl(VarDeclStmt { id, span, declarations }))
+        } else if is_let {
+            Ok(Statement::LetDecl(LetDeclStmt { id, span, declarations }))
+        } else {
+            Ok(Statement::ConstDecl(ConstDeclStmt { id, span, declarations }))
+        }
+    }
+
+    fn parse_for_in_of(
+        &mut self,
+        start_span: crate::diagnostics::Span,
+        id: NodeId,
+        decl_stmt: Statement,
+        is_in: bool,
+    ) -> Result<Statement, ParseError> {
+        let left = match &decl_stmt {
+            Statement::VarDecl(v) => {
+                let name = v.declarations.first().map(|d| d.name.clone()).ok_or_else(|| {
+                    ParseError {
+                        code: "JSINA-PARSE-009".to_string(),
+                        message: "for-in/for-of requires a variable name".to_string(),
+                        span: Some(start_span),
+                    }
+                })?;
+                crate::frontend::ast::ForInOfLeft::VarDecl(name)
+            }
+            Statement::LetDecl(l) => {
+                let name = l.declarations.first().map(|d| d.name.clone()).ok_or_else(|| {
+                    ParseError {
+                        code: "JSINA-PARSE-009".to_string(),
+                        message: "for-in/for-of requires a variable name".to_string(),
+                        span: Some(start_span),
+                    }
+                })?;
+                crate::frontend::ast::ForInOfLeft::LetDecl(name)
+            }
+            Statement::ConstDecl(c) => {
+                let name = c.declarations.first().map(|d| d.name.clone()).ok_or_else(|| {
+                    ParseError {
+                        code: "JSINA-PARSE-009".to_string(),
+                        message: "for-in/for-of requires a variable name".to_string(),
+                        span: Some(start_span),
+                    }
+                })?;
+                crate::frontend::ast::ForInOfLeft::ConstDecl(name)
+            }
+            _ => {
+                return Err(ParseError {
+                    code: "JSINA-PARSE-009".to_string(),
+                    message: "for-in/for-of left must be var/let/const declaration".to_string(),
+                    span: Some(start_span),
+                });
+            }
+        };
+        self.expect(if is_in { TokenType::In } else { TokenType::Of })?;
+        let right = Box::new(self.parse_expression()?);
+        self.expect(TokenType::RightParen)?;
+        let body = Box::new(self.parse_statement()?);
+        let span = start_span.merge(body.span());
+        if is_in {
+            Ok(Statement::ForIn(crate::frontend::ast::ForInStmt {
+                id,
+                span,
+                left,
+                right,
+                body,
+            }))
+        } else {
+            Ok(Statement::ForOf(crate::frontend::ast::ForOfStmt {
+                id,
+                span,
+                left,
+                right,
+                body,
+            }))
+        }
+    }
+
+    fn parse_for_in_of_expr(
+        &mut self,
+        start_span: crate::diagnostics::Span,
+        id: NodeId,
+        expr: Expression,
+        is_in: bool,
+    ) -> Result<Statement, ParseError> {
+        let left = match &expr {
+            Expression::Identifier(e) => crate::frontend::ast::ForInOfLeft::Identifier(e.name.clone()),
+            _ => {
+                return Err(ParseError {
+                    code: "JSINA-PARSE-009".to_string(),
+                    message: "for-in/for-of left must be identifier or var/let/const".to_string(),
+                    span: Some(expr.span()),
+                });
+            }
+        };
+        self.expect(if is_in { TokenType::In } else { TokenType::Of })?;
+        let right = Box::new(self.parse_expression()?);
+        self.expect(TokenType::RightParen)?;
+        let body = Box::new(self.parse_statement()?);
+        let span = start_span.merge(body.span());
+        if is_in {
+            Ok(Statement::ForIn(crate::frontend::ast::ForInStmt {
+                id,
+                span,
+                left,
+                right,
+                body,
+            }))
+        } else {
+            Ok(Statement::ForOf(crate::frontend::ast::ForOfStmt {
+                id,
+                span,
+                left,
+                right,
+                body,
+            }))
+        }
     }
 
     fn parse_var_decl(&mut self) -> Result<Statement, ParseError> {
@@ -1934,6 +2082,34 @@ mod tests {
             }
         }
         panic!("expected switch in block");
+    }
+
+    #[test]
+    fn parse_for_in() {
+        let script = parse_ok("function f() { for (let x in obj) { return x; } }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::ForIn(s) = &b.body[0] {
+                    assert!(matches!(s.left, ForInOfLeft::LetDecl(ref n) if n == "x"));
+                    return;
+                }
+            }
+        }
+        panic!("expected for-in in block");
+    }
+
+    #[test]
+    fn parse_for_of() {
+        let script = parse_ok("function f() { for (const x of arr) { return x; } }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::ForOf(s) = &b.body[0] {
+                    assert!(matches!(s.left, ForInOfLeft::ConstDecl(ref n) if n == "x"));
+                    return;
+                }
+            }
+        }
+        panic!("expected for-of in block");
     }
 
     #[test]

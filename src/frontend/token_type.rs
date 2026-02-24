@@ -39,6 +39,7 @@ pub enum TokenType {
     Import,
     In,
     Instanceof,
+    Of,
     Let,
     New,
     Return,
@@ -128,7 +129,8 @@ impl TokenType {
                 | TokenType::Else | TokenType::Export | TokenType::Extends
                 | TokenType::Finally | TokenType::For | TokenType::Function
                 | TokenType::If | TokenType::Import | TokenType::In
-                | TokenType::Instanceof | TokenType::Let | TokenType::New | TokenType::Return
+                | TokenType::Instanceof | TokenType::Let | TokenType::New | TokenType::Of
+                | TokenType::Return
                 | TokenType::Super | TokenType::Switch | TokenType::This
                 | TokenType::Throw | TokenType::Try | TokenType::Typeof
                 | TokenType::Var | TokenType::Void | TokenType::While

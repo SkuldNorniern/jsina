@@ -95,6 +95,7 @@ impl Trie {
             ("import", TokenType::Import),
             ("in", TokenType::In),
             ("instanceof", TokenType::Instanceof),
+            ("of", TokenType::Of),
             ("let", TokenType::Let),
             ("new", TokenType::New),
             ("return", TokenType::Return),

@@ -58,6 +58,14 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
             }
             collect_function_exprs_stmt(&f.body, out);
         }
+        Statement::ForIn(f) => {
+            collect_function_exprs_expr(&f.right, out);
+            collect_function_exprs_stmt(&f.body, out);
+        }
+        Statement::ForOf(f) => {
+            collect_function_exprs_expr(&f.right, out);
+            collect_function_exprs_stmt(&f.body, out);
+        }
         Statement::Try(t) => {
             collect_function_exprs_stmt(&t.body, out);
             if let Some(c) = &t.catch_body {
@@ -726,6 +734,12 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             }
 
             ctx.current_block = exit_id as usize;
+        }
+        Statement::ForIn(_) | Statement::ForOf(_) => {
+            return Err(LowerError::Unsupported(
+                "for-in and for-of not yet implemented".to_string(),
+                None,
+            ));
         }
         Statement::Switch(s) => {
             let disc_slot = ctx.next_slot;

@@ -234,6 +234,62 @@ fn check_statement(
             };
             check_statement(&f.body, scope, &iter_ctx, errors);
         }
+        Statement::ForIn(f) => {
+            if let ForInOfLeft::LetDecl(ref n) | ForInOfLeft::ConstDecl(ref n) = f.left {
+                if ctx.strict && is_strict_reserved(n) {
+                    errors.push(EarlyError {
+                        code: "JSINA-EARLY-008".to_string(),
+                        message: format!("'{}' may not be used as binding in strict mode", n),
+                        span: f.span,
+                    });
+                }
+                if let Some(prev) = scope.add_lexical(n, f.span) {
+                    errors.push(EarlyError {
+                        code: "JSINA-EARLY-003".to_string(),
+                        message: format!("duplicate lexical declaration '{}'", n),
+                        span: prev,
+                    });
+                }
+            }
+            if let ForInOfLeft::VarDecl(ref n) = f.left {
+                scope.add_var(n);
+            }
+            let iter_ctx = CheckContext {
+                in_function: ctx.in_function,
+                in_iteration: true,
+                in_switch: ctx.in_switch,
+                strict: ctx.strict,
+            };
+            check_statement(&f.body, scope, &iter_ctx, errors);
+        }
+        Statement::ForOf(f) => {
+            if let ForInOfLeft::LetDecl(ref n) | ForInOfLeft::ConstDecl(ref n) = f.left {
+                if ctx.strict && is_strict_reserved(n) {
+                    errors.push(EarlyError {
+                        code: "JSINA-EARLY-008".to_string(),
+                        message: format!("'{}' may not be used as binding in strict mode", n),
+                        span: f.span,
+                    });
+                }
+                if let Some(prev) = scope.add_lexical(n, f.span) {
+                    errors.push(EarlyError {
+                        code: "JSINA-EARLY-003".to_string(),
+                        message: format!("duplicate lexical declaration '{}'", n),
+                        span: prev,
+                    });
+                }
+            }
+            if let ForInOfLeft::VarDecl(ref n) = f.left {
+                scope.add_var(n);
+            }
+            let iter_ctx = CheckContext {
+                in_function: ctx.in_function,
+                in_iteration: true,
+                in_switch: ctx.in_switch,
+                strict: ctx.strict,
+            };
+            check_statement(&f.body, scope, &iter_ctx, errors);
+        }
         Statement::Switch(s) => {
             let switch_ctx = CheckContext {
                 in_function: ctx.in_function,
