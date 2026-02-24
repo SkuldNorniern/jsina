@@ -52,6 +52,7 @@ pub enum HirOp {
     BitwiseAnd { span: Span },
     BitwiseOr { span: Span },
     BitwiseXor { span: Span },
+    Instanceof { span: Span },
     Not { span: Span },
     BitwiseNot { span: Span },
     Typeof { span: Span },

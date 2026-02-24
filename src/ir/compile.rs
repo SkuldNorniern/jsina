@@ -19,6 +19,7 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
             | HirOp::Lt { .. } | HirOp::Lte { .. } | HirOp::Gt { .. } | HirOp::Gte { .. } | HirOp::StrictEq { .. } | HirOp::StrictNotEq { .. }
             | HirOp::LeftShift { .. } | HirOp::RightShift { .. } | HirOp::UnsignedRightShift { .. }
             | HirOp::BitwiseAnd { .. } | HirOp::BitwiseOr { .. } | HirOp::BitwiseXor { .. }
+            | HirOp::Instanceof { .. }
             | HirOp::Not { .. } | HirOp::BitwiseNot { .. } | HirOp::Typeof { .. } => 1,
             HirOp::NewObject { .. } | HirOp::NewObjectWithProto { .. } | HirOp::NewArray { .. } => 1,
             HirOp::GetProp { .. } | HirOp::SetProp { .. } => 2,
@@ -103,6 +104,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 HirOp::BitwiseAnd { .. } => code.push(Opcode::BitwiseAnd as u8),
                 HirOp::BitwiseOr { .. } => code.push(Opcode::BitwiseOr as u8),
                 HirOp::BitwiseXor { .. } => code.push(Opcode::BitwiseXor as u8),
+                HirOp::Instanceof { .. } => code.push(Opcode::Instanceof as u8),
                 HirOp::Not { .. } => code.push(Opcode::Not as u8),
                 HirOp::BitwiseNot { .. } => code.push(Opcode::BitwiseNot as u8),
             HirOp::Typeof { .. } => code.push(Opcode::Typeof as u8),

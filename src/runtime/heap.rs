@@ -146,6 +146,7 @@ impl Heap {
 
         self.set_prop(global_id, "NaN", Value::Number(f64::NAN));
         self.set_prop(global_id, "Infinity", Value::Number(f64::INFINITY));
+        self.set_prop(global_id, "globalThis", Value::Object(global_id));
         self.set_prop(global_id, "Symbol", Value::Builtin(0xD0));
 
         let console_id = self.alloc_object();
@@ -171,6 +172,10 @@ impl Heap {
         self.get_prop(self.global_object_id, name)
     }
 
+    pub fn global_object(&self) -> usize {
+        self.global_object_id
+    }
+
     pub fn alloc_object(&mut self) -> usize {
         self.alloc_object_with_prototype(None)
     }
@@ -182,6 +187,10 @@ impl Heap {
             prototype,
         });
         id
+    }
+
+    pub fn get_proto(&self, obj_id: usize) -> Option<usize> {
+        self.objects.get(obj_id).and_then(|o| o.prototype)
     }
 
     pub fn alloc_array(&mut self) -> usize {

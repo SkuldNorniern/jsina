@@ -57,6 +57,7 @@ pub enum Opcode {
     BitwiseXor = 0x26,
     Not = 0x18,
     BitwiseNot = 0x27,
+    Instanceof = 0x28,
     Typeof = 0x1d,
     NewObject = 0x50,
     NewObjectWithProto = 0x56,

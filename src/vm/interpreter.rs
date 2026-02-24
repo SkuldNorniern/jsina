@@ -616,6 +616,12 @@ fn interpret_program_with_trace_and_limit(
                 let n = val.to_i32();
                 stack.push(Value::Int(!n));
             }
+            0x28 => {
+                let constructor = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let value = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let result = instanceof_check(&value, &constructor, &heap);
+                stack.push(Value::Bool(result));
+            }
             0x1d => {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let s = match &val {
@@ -791,6 +797,68 @@ fn add_values(a: &Value, b: &Value) -> Result<Value, VmError> {
 
 fn is_nullish(v: &Value) -> bool {
     matches!(v, Value::Undefined | Value::Null)
+}
+
+fn instanceof_check(value: &Value, constructor: &Value, heap: &Heap) -> bool {
+    let constructor_name = get_constructor_name(constructor, heap);
+    match (value, constructor_name.as_deref()) {
+        (Value::Array(_), Some("Array")) => true,
+        (Value::Map(_), Some("Map")) => true,
+        (Value::Set(_), Some("Set")) => true,
+        (Value::Date(_), Some("Date")) => true,
+        (Value::Object(id), Some("Error")) => heap.is_error_object(*id),
+        (Value::Object(id), Some("ReferenceError")) => heap.is_error_object(*id) && matches!(heap.get_prop(*id, "name"), Value::String(s) if s == "ReferenceError"),
+        (Value::Object(id), Some("TypeError")) => heap.is_error_object(*id) && matches!(heap.get_prop(*id, "name"), Value::String(s) if s == "TypeError"),
+        (Value::Object(id), Some("RangeError")) => heap.is_error_object(*id) && matches!(heap.get_prop(*id, "name"), Value::String(s) if s == "RangeError"),
+        (Value::Object(id), Some("SyntaxError")) => heap.is_error_object(*id) && matches!(heap.get_prop(*id, "name"), Value::String(s) if s == "SyntaxError"),
+        (Value::Object(id), Some("Object")) => {
+            !heap.is_error_object(*id)
+        }
+        (Value::Object(id), _) => {
+            let constructor_proto = match constructor {
+                Value::Object(cid) => heap.get_prop(*cid, "prototype"),
+                _ => return false,
+            };
+            let proto_id = match &constructor_proto {
+                Value::Object(pid) => *pid,
+                _ => return false,
+            };
+            let mut current = Some(*id);
+            let mut depth = 0;
+            while let Some(obj_id) = current {
+                if depth > 100 { break; }
+                depth += 1;
+                let obj_proto = heap.get_proto(obj_id);
+                match obj_proto {
+                    Some(pid) if pid == proto_id => return true,
+                    Some(pid) => current = Some(pid),
+                    None => break,
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn get_constructor_name(constructor: &Value, heap: &Heap) -> Option<String> {
+    match constructor {
+        Value::Object(id) => {
+            if let Value::String(name) = heap.get_prop(*id, "name") {
+                return Some(name);
+            }
+            let global = heap.global_object();
+            for name in ["Array", "Object", "Error", "ReferenceError", "TypeError", "RangeError", "SyntaxError", "Map", "Set", "Date"] {
+                if let Value::Object(gid) = heap.get_prop(global, name) {
+                    if gid == *id {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 fn is_truthy(v: &Value) -> bool {

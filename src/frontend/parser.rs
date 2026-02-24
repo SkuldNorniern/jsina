@@ -2,8 +2,6 @@ use crate::diagnostics::Span;
 use crate::frontend::ast::*;
 use crate::frontend::token_type::{Token, TokenType};
 use crate::frontend::Lexer;
-use std::iter::Peekable;
-use std::vec::IntoIter;
 
 const MAX_RECURSION: u32 = 256;
 
@@ -29,7 +27,7 @@ fn binary_op_precedence(op: BinaryOp) -> u8 {
         BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => 12,
         BinaryOp::Add | BinaryOp::Sub => 11,
         BinaryOp::LeftShift | BinaryOp::RightShift | BinaryOp::UnsignedRightShift => 10,
-        BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => 9,
+        BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte | BinaryOp::Instanceof => 9,
         BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::StrictEq | BinaryOp::StrictNotEq => 8,
         BinaryOp::BitwiseAnd => 7,
         BinaryOp::BitwiseXor => 6,
@@ -41,8 +39,8 @@ fn binary_op_precedence(op: BinaryOp) -> u8 {
 }
 
 pub struct Parser {
-    tokens: Peekable<IntoIter<Token>>,
-    current: Option<Token>,
+    tokens: Vec<Token>,
+    pos: usize,
     next_id: u32,
     recursion_depth: u32,
 }
@@ -51,26 +49,26 @@ impl Parser {
     pub fn new(source: &str) -> Self {
         let mut lexer = Lexer::new(source.to_string());
         let tokens: Vec<Token> = lexer.tokenize();
-        let mut parser = Self {
-            tokens: tokens.into_iter().peekable(),
-            current: None,
+        Self {
+            tokens,
+            pos: 0,
             next_id: 0,
             recursion_depth: 0,
-        };
-        parser.advance();
-        parser
+        }
     }
 
     fn advance(&mut self) {
-        self.current = self.tokens.next();
+        if self.pos < self.tokens.len() {
+            self.pos += 1;
+        }
     }
 
-    fn peek(&mut self) -> Option<&TokenType> {
-        self.tokens.peek().map(|t| &t.token_type)
+    fn peek(&self) -> Option<&TokenType> {
+        self.tokens.get(self.pos + 1).map(|t| &t.token_type)
     }
 
     fn current(&self) -> Option<&Token> {
-        self.current.as_ref()
+        self.tokens.get(self.pos)
     }
 
     fn next_id(&mut self) -> NodeId {
@@ -260,6 +258,174 @@ impl Parser {
             params,
             body,
         })
+    }
+
+    fn try_parse_arrow_function(&mut self) -> Result<Option<(Expression, Span)>, ParseError> {
+        let saved_pos = self.pos;
+        let start_span = self.current().map(|t| t.span).unwrap_or_else(|| Span::point(crate::diagnostics::Position::start()));
+        self.advance();
+
+        let mut params = Vec::new();
+        let is_arrow = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightParen)) {
+            self.advance();
+            matches!(self.current().map(|t| &t.token_type), Some(TokenType::Arrow))
+        } else {
+            let mut looks_like_params = true;
+            loop {
+                let is_rest = self.optional(TokenType::Spread);
+                if !matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
+                    looks_like_params = false;
+                    break;
+                }
+                let name = self.expect(TokenType::Identifier)?.lexeme;
+                let param = if is_rest {
+                    Param::Rest(name)
+                } else if self.optional(TokenType::Assign) {
+                    Param::Default(name, Box::new(self.parse_expression()?))
+                } else {
+                    Param::Ident(name)
+                };
+                params.push(param);
+
+                if is_rest {
+                    if !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightParen)) {
+                        looks_like_params = false;
+                    }
+                    break;
+                }
+
+                if matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightParen)) {
+                    break;
+                }
+                if !self.optional(TokenType::Comma) {
+                    looks_like_params = false;
+                    break;
+                }
+            }
+            if looks_like_params && matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightParen)) {
+                self.advance();
+                matches!(self.current().map(|t| &t.token_type), Some(TokenType::Arrow))
+            } else {
+                false
+            }
+        };
+
+        if is_arrow {
+            self.advance();
+            return Ok(Some(self.parse_arrow_body(start_span, params)?));
+        }
+
+        self.pos = saved_pos;
+        Ok(None)
+    }
+
+    fn parse_arrow_body(&mut self, start_span: Span, params: Vec<Param>) -> Result<(Expression, Span), ParseError> {
+        let body = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftBrace)) {
+            ArrowBody::Block(Box::new(self.parse_block()?))
+        } else {
+            ArrowBody::Expression(Box::new(self.parse_expression()?))
+        };
+        let end_span = match &body {
+            ArrowBody::Block(s) => s.span(),
+            ArrowBody::Expression(e) => e.span(),
+        };
+        let span = start_span.merge(end_span);
+        Ok((Expression::ArrowFunction(ArrowFunctionExpr {
+            id: self.next_id(),
+            span,
+            params,
+            body,
+        }), span))
+    }
+
+    fn parse_template_literal(&mut self, raw: &str, span: Span) -> Result<Expression, ParseError> {
+        let inner = raw.strip_prefix('`').and_then(|s| s.strip_suffix('`')).unwrap_or(raw);
+        
+        let mut parts: Vec<Expression> = Vec::new();
+        let mut text_buf = String::new();
+        let mut chars = inner.chars().peekable();
+        
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                if let Some(escaped) = chars.next() {
+                    match escaped {
+                        'n' => text_buf.push('\n'),
+                        't' => text_buf.push('\t'),
+                        'r' => text_buf.push('\r'),
+                        '`' => text_buf.push('`'),
+                        '$' => text_buf.push('$'),
+                        '\\' => text_buf.push('\\'),
+                        _ => {
+                            text_buf.push('\\');
+                            text_buf.push(escaped);
+                        }
+                    }
+                }
+            } else if ch == '$' && chars.peek() == Some(&'{') {
+                chars.next();
+                if !text_buf.is_empty() {
+                    parts.push(Expression::Literal(LiteralExpr {
+                        id: self.next_id(),
+                        span,
+                        value: LiteralValue::String(std::mem::take(&mut text_buf)),
+                    }));
+                }
+                let mut expr_src = String::new();
+                let mut brace_count = 1;
+                for ch in chars.by_ref() {
+                    if ch == '{' {
+                        brace_count += 1;
+                        expr_src.push(ch);
+                    } else if ch == '}' {
+                        brace_count -= 1;
+                        if brace_count == 0 {
+                            break;
+                        }
+                        expr_src.push(ch);
+                    } else {
+                        expr_src.push(ch);
+                    }
+                }
+                let mut inner_parser = Parser::new(&expr_src);
+                let inner_expr = inner_parser.parse_expression()?;
+                parts.push(inner_expr);
+            } else {
+                text_buf.push(ch);
+            }
+        }
+        
+        if !text_buf.is_empty() {
+            parts.push(Expression::Literal(LiteralExpr {
+                id: self.next_id(),
+                span,
+                value: LiteralValue::String(text_buf),
+            }));
+        }
+        
+        if parts.is_empty() {
+            return Ok(Expression::Literal(LiteralExpr {
+                id: self.next_id(),
+                span,
+                value: LiteralValue::String(String::new()),
+            }));
+        }
+        
+        if parts.len() == 1 {
+            return Ok(parts.remove(0));
+        }
+        
+        let mut result = parts.remove(0);
+        for part in parts {
+            result = Expression::Binary(BinaryExpr {
+                id: self.next_id(),
+                span,
+                op: BinaryOp::Add,
+                left: Box::new(result),
+                right: Box::new(part),
+            });
+        }
+        
+        Ok(result)
     }
 
     fn parse_return(&mut self) -> Result<Statement, ParseError> {
@@ -892,6 +1058,7 @@ impl Parser {
                 Some(TokenType::BitwiseAnd) => BinaryOp::BitwiseAnd,
                 Some(TokenType::BitwiseOr) => BinaryOp::BitwiseOr,
                 Some(TokenType::BitwiseXor) => BinaryOp::BitwiseXor,
+                Some(TokenType::Instanceof) => BinaryOp::Instanceof,
                 Some(TokenType::Assign) => {
                     self.end_recursion();
                     let left_span = left.span();
@@ -1196,6 +1363,13 @@ impl Parser {
                     },
                 }), span)
             }
+            TokenType::TemplateLiteral => {
+                let span = token.span;
+                let raw = token.lexeme.clone();
+                self.advance();
+                let expr = self.parse_template_literal(&raw, span)?;
+                (expr, span)
+            }
             TokenType::This => {
                 let span = token.span;
                 self.advance();
@@ -1205,13 +1379,22 @@ impl Parser {
                 let span = token.span;
                 let name = token.lexeme.clone();
                 self.advance();
+                if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Arrow)) {
+                    self.advance();
+                    let (arrow_expr, _) = self.parse_arrow_body(span, vec![Param::Ident(name.clone())])?;
+                    return Ok(arrow_expr);
+                }
                 (Expression::Identifier(IdentifierExpr { id: self.next_id(), span, name }), span)
             }
             TokenType::LeftParen => {
+                let start_span = token.span;
+                if let Some((arrow_expr, _)) = self.try_parse_arrow_function()? {
+                    return Ok(arrow_expr);
+                }
                 self.advance();
                 let expr = self.parse_expression()?;
                 let end_tok = self.expect(TokenType::RightParen)?;
-                let span = token.span.merge(end_tok.span);
+                let span = start_span.merge(end_tok.span);
                 (expr, span)
             }
             TokenType::LeftBrace => {
@@ -1344,6 +1527,30 @@ mod tests {
             assert!(matches!(&f.params[1], crate::frontend::ast::Param::Ident(n) if n == "b"));
             assert!(matches!(&f.params[2], crate::frontend::ast::Param::Rest(n) if n == "rest"));
         }
+    }
+
+    #[test]
+    fn parse_arrow_single_param() {
+        let script = parse_ok("function f() { var g = x => x + 1; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_arrow_multi_param() {
+        let script = parse_ok("function f() { var g = (a, b) => a + b; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_arrow_no_param() {
+        let script = parse_ok("function f() { var g = () => 42; }");
+        assert_eq!(script.body.len(), 1);
+    }
+
+    #[test]
+    fn parse_arrow_block_body() {
+        let script = parse_ok("function f() { var g = (x) => { return x * 2; }; }");
+        assert_eq!(script.body.len(), 1);
     }
 
     #[test]

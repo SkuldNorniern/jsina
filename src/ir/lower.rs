@@ -6,7 +6,7 @@ use std::collections::HashMap;
 const GLOBAL_NAMES: &[&str] = &[
     "Object", "Array", "String", "Number", "Boolean", "Error", "Math", "JSON",
     "Date", "RegExp", "Map", "Set", "Symbol", "NaN", "Infinity", "$262", "console", "print",
-    "ReferenceError", "TypeError", "RangeError", "SyntaxError",
+    "ReferenceError", "TypeError", "RangeError", "SyntaxError", "globalThis",
 ];
 
 #[derive(Debug)]
@@ -26,6 +26,23 @@ impl std::fmt::Display for LowerError {
 }
 
 impl std::error::Error for LowerError {}
+
+fn arrow_body_to_block(body: &ArrowBody, span: Span) -> Statement {
+    match body {
+        ArrowBody::Block(s) => (**s).clone(),
+        ArrowBody::Expression(e) => {
+            Statement::Block(BlockStmt {
+                id: NodeId(0),
+                span,
+                body: vec![Statement::Return(ReturnStmt {
+                    id: NodeId(0),
+                    span: e.span(),
+                    argument: Some(e.clone()),
+                })],
+            })
+        }
+    }
+}
 
 fn collect_function_exprs(script: &Script) -> Vec<(NodeId, FunctionExprData)> {
     let mut out = Vec::new();
@@ -123,6 +140,18 @@ fn collect_function_exprs_expr(expr: &Expression, out: &mut Vec<(NodeId, Functio
         Expression::FunctionExpr(fe) => {
             out.push((fe.id, fe.clone()));
             collect_function_exprs_stmt(&fe.body, out);
+        }
+        Expression::ArrowFunction(af) => {
+            let body = arrow_body_to_block(&af.body, af.span);
+            let fe_data = FunctionExprData {
+                id: af.id,
+                span: af.span,
+                name: None,
+                params: af.params.clone(),
+                body: Box::new(body),
+            };
+            out.push((af.id, fe_data.clone()));
+            collect_function_exprs_stmt(&fe_data.body, out);
         }
         Expression::Call(e) => {
             collect_function_exprs_expr(&e.callee, out);
@@ -1593,6 +1622,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         BinaryOp::BitwiseAnd => ctx.blocks[ctx.current_block].ops.push(HirOp::BitwiseAnd { span: e.span }),
                         BinaryOp::BitwiseOr => ctx.blocks[ctx.current_block].ops.push(HirOp::BitwiseOr { span: e.span }),
                         BinaryOp::BitwiseXor => ctx.blocks[ctx.current_block].ops.push(HirOp::BitwiseXor { span: e.span }),
+                        BinaryOp::Instanceof => ctx.blocks[ctx.current_block].ops.push(HirOp::Instanceof { span: e.span }),
                         BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::LogicalAnd | BinaryOp::LogicalOr
                         | BinaryOp::NullishCoalescing => {
                             return Err(LowerError::Unsupported(
@@ -2255,6 +2285,26 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
+                Expression::ArrowFunction(af) => {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Undefined,
+                        span: e.span,
+                    });
+                    let idx = *ctx.func_expr_map.get(&af.id).ok_or_else(|| {
+                        LowerError::Unsupported("arrow function not in map".to_string(), Some(af.span))
+                    })?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Function(idx),
+                        span: af.span,
+                    });
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
                 Expression::Identifier(id) if id.name == "String" => {
                     for arg in &e.args {
                         compile_expression(arg, ctx)?;
@@ -2356,20 +2406,37 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     });
                 }
                 Expression::Identifier(id) => {
-                    let idx = *func_index.get(&id.name).ok_or_else(|| {
-                        LowerError::Unsupported(
+                    if let Some(&idx) = func_index.get(&id.name) {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::Call {
+                            func_index: idx,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if let Some(&slot) = ctx.locals.get(&id.name) {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                            value: HirConst::Undefined,
+                            span: e.span,
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                            id: slot,
+                            span: id.span,
+                        });
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else {
+                        return Err(LowerError::Unsupported(
                             format!("call to undefined function '{}'", id.name),
                             Some(id.span),
-                        )
-                    })?;
-                    for arg in &e.args {
-                        compile_expression(arg, ctx)?;
+                        ));
                     }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::Call {
-                        func_index: idx,
-                        argc: e.args.len() as u32,
-                        span: e.span,
-                    });
                 }
                 _ => {
                     return Err(LowerError::Unsupported(
@@ -2547,6 +2614,15 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
         }
         Expression::FunctionExpr(fe) => {
             compile_function_expr(fe, ctx)?;
+        }
+        Expression::ArrowFunction(af) => {
+            let idx = *ctx.func_expr_map.get(&af.id).ok_or_else(|| {
+                LowerError::Unsupported("arrow function not in map".to_string(), Some(af.span))
+            })?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                value: HirConst::Function(idx),
+                span: af.span,
+            });
         }
     }
     Ok(())
@@ -2832,12 +2908,75 @@ mod tests {
     }
 
     #[test]
+    fn lower_arrow_function() {
+        let result = crate::driver::Driver::run(
+            "function main() { var add = (a, b) => a + b; return add(3, 4); }",
+        )
+        .expect("run");
+        assert_eq!(result, 7, "arrow function (a,b) => a+b");
+
+        let result = crate::driver::Driver::run(
+            "function main() { var double = x => x * 2; return double(5); }",
+        )
+        .expect("run");
+        assert_eq!(result, 10, "arrow function x => x*2");
+
+        let result = crate::driver::Driver::run(
+            "function main() { var k = () => 42; return k(); }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "arrow function () => 42");
+
+        let result = crate::driver::Driver::run(
+            "function main() { var inc = (x) => { return x + 1; }; return inc(10); }",
+        )
+        .expect("run");
+        assert_eq!(result, 11, "arrow function with block body");
+    }
+
+    #[test]
+    fn lower_global_this() {
+        let result = crate::driver::Driver::run(
+            "function main() { globalThis.x = 42; return globalThis.x; }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "globalThis.x should work");
+
+        let result = crate::driver::Driver::run(
+            "function main() { return typeof globalThis === 'object' ? 1 : 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "typeof globalThis === 'object'");
+    }
+
+    #[test]
     fn lower_comparison_ops() {
         let result = crate::driver::Driver::run(
             "function main() { if (1 !== 2) return 1; if (5 > 4) return 2; if (3 >= 3) return 3; if (1 <= 2) return 4; return 0; }",
         )
         .expect("run");
         assert_eq!(result, 1, "!==, >, >=, <= should work");
+    }
+
+    #[test]
+    fn lower_instanceof() {
+        let result = crate::driver::Driver::run(
+            "function main() { var arr = [1, 2]; return arr instanceof Array ? 1 : 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "array instanceof Array");
+
+        let result = crate::driver::Driver::run(
+            "function main() { var e = new Error('test'); return e instanceof Error ? 1 : 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Error instanceof Error");
+
+        let result = crate::driver::Driver::run(
+            "function main() { var obj = {}; return obj instanceof Array ? 1 : 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 0, "plain object not instanceof Array");
     }
 
     #[test]
@@ -2874,6 +3013,27 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn lower_template_literal() {
+        let result = crate::driver::Driver::run(
+            "function main() { return `hello`.length; }",
+        )
+        .expect("run");
+        assert_eq!(result, 5, "simple template literal length");
+
+        let result = crate::driver::Driver::run(
+            "function main() { var x = 42; var s = `x = ${x}`; return s.length; }",
+        )
+        .expect("run");
+        assert_eq!(result, 6, "template with expression: 'x = 42' length");
+
+        let result = crate::driver::Driver::run(
+            "function main() { var s = `a` + `b`; return s.length; }",
+        )
+        .expect("run");
+        assert_eq!(result, 2, "template concatenation length");
     }
 
     #[test]
