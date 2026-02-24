@@ -1162,6 +1162,10 @@ impl Parser {
                     self.advance();
                     (UnaryOp::Typeof, t.span)
                 }
+                TokenType::Delete => {
+                    self.advance();
+                    (UnaryOp::Delete, t.span)
+                }
                 TokenType::New => {
                     self.advance();
                     let mut callee = self.parse_primary()?;

@@ -406,6 +406,7 @@ pub enum UnaryOp {
     LogicalNot,
     BitwiseNot,
     Typeof,
+    Delete,
 }
 
 #[derive(Debug, Clone)]

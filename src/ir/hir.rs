@@ -56,6 +56,7 @@ pub enum HirOp {
     Not { span: Span },
     BitwiseNot { span: Span },
     Typeof { span: Span },
+    Delete { span: Span },
     NewObject { span: Span },
     NewObjectWithProto { span: Span },
     NewArray { span: Span },
@@ -140,6 +141,9 @@ pub enum BuiltinId {
     TypeErr0 = 0xD2,
     RangeErr0 = 0xD3,
     SyntaxErr0 = 0xD4,
+    Eval0 = 0xD9,
+    EncodeUri0 = 0xDA,
+    EncodeUriComponent0 = 0xDB,
 }
 
 #[derive(Debug, Clone)]
