@@ -1303,6 +1303,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
+                Expression::Identifier(id) if id.name == "Error" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Error,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
                 Expression::Identifier(id) if id.name == "print" => {
                     for arg in &e.args {
                         compile_expression(arg, ctx)?;
@@ -1339,6 +1349,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
         }
         Expression::New(n) => {
             match n.callee.as_ref() {
+                Expression::Identifier(id) if id.name == "Error" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Error,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
                 Expression::Identifier(id) => {
                     let idx = *ctx.func_index.get(&id.name).ok_or_else(|| {
                         LowerError::Unsupported(
@@ -1901,6 +1921,21 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 42, "IIFE should return 42");
+    }
+
+    #[test]
+    fn lower_error_builtin() {
+        let result = crate::driver::Driver::run(
+            "function main() { let e = new Error(\"fail\"); return e.message === \"fail\" ? 1 : 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "new Error(msg) should set message property");
+
+        let result = crate::driver::Driver::run(
+            "function main() { let e = Error(\"x\"); return e.message === \"x\" ? 1 : 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Error(msg) as function call creates object with message");
     }
 
     #[test]

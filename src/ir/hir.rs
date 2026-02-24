@@ -78,6 +78,7 @@ pub enum BuiltinId {
     ArrayIsArray = 10,
     ObjectKeys = 11,
     String = 12,
+    Error = 13,
 }
 
 #[derive(Debug, Clone)]

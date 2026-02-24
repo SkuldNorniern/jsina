@@ -341,6 +341,15 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         let arg = args.first().ok_or(VmError::StackUnderflow)?;
                         stack.push(Value::String(arg.to_string()));
                     }
+                    13 => {
+                        let msg = args
+                            .first()
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| String::new());
+                        let obj_id = heap.alloc_object();
+                        heap.set_prop(obj_id, "message", Value::String(msg));
+                        stack.push(Value::Object(obj_id));
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }

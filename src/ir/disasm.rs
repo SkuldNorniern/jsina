@@ -84,6 +84,8 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                     9 => "objectCreate",
                     10 => "arrayIsArray",
                     11 => "objectKeys",
+                    12 => "string",
+                    13 => "error",
                     _ => "?",
                 };
                 format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)
