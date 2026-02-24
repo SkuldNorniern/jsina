@@ -148,7 +148,23 @@ impl Heap {
         self.set_prop(global_id, "Infinity", Value::Number(f64::INFINITY));
         self.set_prop(global_id, "Symbol", Value::Builtin(0xD0));
 
+        let console_id = self.alloc_object();
+        self.set_prop(console_id, "log", Value::Builtin(0x00));
+        self.set_prop(global_id, "console", Value::Object(console_id));
+
         self.set_prop(global_id, "print", Value::Builtin(0x00));
+    }
+
+    /// Add $262 host object for test262 harness. Match V8/Bun/Deno: $262 only exists when running via test262.
+    pub fn init_test262_globals(&mut self) {
+        let global_id = self.global_object_id;
+        let dollar262_id = self.alloc_object();
+        self.set_prop(dollar262_id, "global", Value::Object(global_id));
+        self.set_prop(dollar262_id, "createRealm", Value::Builtin(0xD5));
+        self.set_prop(dollar262_id, "evalScript", Value::Builtin(0xD6));
+        self.set_prop(dollar262_id, "gc", Value::Builtin(0xD7));
+        self.set_prop(dollar262_id, "detachArrayBuffer", Value::Builtin(0xD8));
+        self.set_prop(global_id, "$262", Value::Object(dollar262_id));
     }
 
     pub fn get_global(&self, name: &str) -> Value {

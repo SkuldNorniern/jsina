@@ -135,6 +135,10 @@ pub enum BuiltinId {
     Date3 = 0xC3,
     Date4 = 0xC4,
     Symbol0 = 0xD0,
+    RefErr0 = 0xD1,
+    TypeErr0 = 0xD2,
+    RangeErr0 = 0xD3,
+    SyntaxErr0 = 0xD4,
 }
 
 #[derive(Debug, Clone)]

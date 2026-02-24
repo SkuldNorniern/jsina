@@ -166,6 +166,7 @@ impl Driver {
             trace,
             step_limit,
             cancel,
+            step_limit.is_some(),
         )?;
         let value = match completion {
             Completion::Return(v) => v,
