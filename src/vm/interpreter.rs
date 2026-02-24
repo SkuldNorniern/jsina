@@ -96,7 +96,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
         }
 
         match op {
-            x if x == Opcode::PushConst as u8 => {
+            0x01 => {
                 let idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 1;
                 let val = constants
@@ -105,26 +105,26 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     .to_value();
                 stack.push(val);
             }
-            x if x == Opcode::Pop as u8 => {
+            0x02 => {
                 stack.pop().ok_or(VmError::StackUnderflow)?;
             }
-            x if x == Opcode::Dup as u8 => {
+            0x06 => {
                 let top = stack.last().cloned().ok_or(VmError::StackUnderflow)?;
                 stack.push(top);
             }
-            x if x == Opcode::Swap as u8 => {
+            0x07 => {
                 let b = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let a = stack.pop().ok_or(VmError::StackUnderflow)?;
                 stack.push(b);
                 stack.push(a);
             }
-            x if x == Opcode::LoadLocal as u8 => {
+            0x03 => {
                 let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 1;
                 let val = locals.get(slot).cloned().unwrap_or(Value::Undefined);
                 stack.push(val);
             }
-            x if x == Opcode::StoreLocal as u8 => {
+            0x04 => {
                 let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 1;
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
@@ -132,10 +132,10 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     locals[slot] = val;
                 }
             }
-            x if x == Opcode::LoadThis as u8 => {
+            0x05 => {
                 stack.push(frame.this_value.clone());
             }
-            x if x == Opcode::Return as u8 => {
+            0x20 => {
                 let val = stack.pop().unwrap_or(Value::Undefined);
                 let popped = frames.pop();
                 let result = if let Some(ref f) = popped {
@@ -156,7 +156,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 }
                 stack.push(result);
             }
-            x if x == Opcode::Throw as u8 => {
+            0x21 => {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let throw_pc = *pc - 1;
                 let handler = chunk.handlers.iter().find(|h| {
@@ -172,7 +172,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     return Ok(Completion::Throw(val));
                 }
             }
-            x if x == Opcode::Rethrow as u8 => {
+            0x22 => {
                 let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 1;
                 if frame.rethrow_after_finally {
@@ -181,7 +181,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     return Ok(Completion::Throw(val));
                 }
             }
-            x if x == Opcode::Call as u8 => {
+            0x40 => {
                 let (func_idx, callee_locals) = {
                     let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                     let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
@@ -211,7 +211,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     new_object: None,
                 });
             }
-            x if x == Opcode::CallBuiltin as u8 => {
+            0x41 => {
                 let builtin_id = *code.get(*pc).ok_or(VmError::StackUnderflow)?;
                 let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 2;
@@ -227,7 +227,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     Err(crate::runtime::builtins::BuiltinError::Throw(v)) => return Ok(Completion::Throw(v)),
                 }
             }
-            x if x == Opcode::CallMethod as u8 => {
+            0x42 => {
                 let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 1;
                 let mut args: Vec<Value> = (0..argc)
@@ -263,7 +263,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     new_object: None,
                 });
             }
-            x if x == Opcode::New as u8 => {
+            0x43 => {
                 let (func_idx, callee_locals, obj_id) = {
                     let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                     let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
@@ -294,84 +294,84 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     new_object: Some(obj_id),
                 });
             }
-            x if x == Opcode::Add as u8 => {
+            0x10 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = add_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::Sub as u8 => {
+            0x11 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = sub_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::Mul as u8 => {
+            0x12 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = mul_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::Div as u8 => {
+            0x13 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = div_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::Mod as u8 => {
+            0x15 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = mod_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::Pow as u8 => {
+            0x16 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = pow_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::Lt as u8 => {
+            0x14 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = lt_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::Lte as u8 => {
+            0x19 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = lte_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::Gt as u8 => {
+            0x1a => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = gt_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::Gte as u8 => {
+            0x1b => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = gte_values(&lhs, &rhs)?;
                 stack.push(result);
             }
-            x if x == Opcode::StrictEq as u8 => {
+            0x17 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let result = strict_eq_values(&lhs, &rhs);
                 stack.push(result);
             }
-            x if x == Opcode::StrictNotEq as u8 => {
+            0x1c => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let eq = strict_eq_values(&lhs, &rhs);
                 let result = Value::Bool(!matches!(eq, Value::Bool(true)));
                 stack.push(result);
             }
-            x if x == Opcode::Not as u8 => {
+            0x18 => {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 stack.push(Value::Bool(!is_truthy(&val)));
             }
-            x if x == Opcode::Typeof as u8 => {
+            0x1d => {
                 let val = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let s = match &val {
                     Value::Undefined => "undefined",
@@ -384,11 +384,11 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 };
                 stack.push(Value::String(s.to_string()));
             }
-            x if x == Opcode::NewObject as u8 => {
+            0x50 => {
                 let id = heap.alloc_object();
                 stack.push(Value::Object(id));
             }
-            x if x == Opcode::NewObjectWithProto as u8 => {
+            0x56 => {
                 let proto = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let prototype = match &proto {
                     Value::Null | Value::Undefined => None,
@@ -398,11 +398,11 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 let id = heap.alloc_object_with_prototype(prototype);
                 stack.push(Value::Object(id));
             }
-            x if x == Opcode::NewArray as u8 => {
+            0x51 => {
                 let id = heap.alloc_array();
                 stack.push(Value::Array(id));
             }
-            x if x == Opcode::GetProp as u8 => {
+            0x52 => {
                 let key_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 1;
                 let key = constants
@@ -430,7 +430,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 };
                 stack.push(result);
             }
-            x if x == Opcode::SetProp as u8 => {
+            0x53 => {
                 let key_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
                 *pc += 1;
                 let key = constants
@@ -451,7 +451,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 }
                 stack.push(value);
             }
-            x if x == Opcode::GetPropDyn as u8 => {
+            0x54 => {
                 let key = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let obj = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let key_str = value_to_prop_key(&key);
@@ -470,7 +470,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 };
                 stack.push(result);
             }
-            x if x == Opcode::SetPropDyn as u8 => {
+            0x55 => {
                 let value = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let key = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let obj = stack.pop().ok_or(VmError::StackUnderflow)?;
@@ -482,7 +482,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 }
                 stack.push(value);
             }
-            x if x == Opcode::JumpIfFalse as u8 => {
+            0x30 => {
                 let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
                 *pc += 2;
                 let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
@@ -491,7 +491,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     *pc = (*pc as isize + offset) as usize;
                 }
             }
-            x if x == Opcode::JumpIfNullish as u8 => {
+            0x32 => {
                 let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
                 *pc += 2;
                 let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
@@ -500,7 +500,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     *pc = (*pc as isize + offset) as usize;
                 }
             }
-            x if x == Opcode::Jump as u8 => {
+            0x31 => {
                 let offset_bytes = code.get(*pc..*pc + 2).ok_or(VmError::StackUnderflow)?;
                 *pc += 2;
                 let offset = i16::from_le_bytes([offset_bytes[0], offset_bytes[1]]) as isize;
