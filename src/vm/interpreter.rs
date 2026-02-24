@@ -322,9 +322,25 @@ fn interpret_program_with_trace_and_limit(
                         .collect::<Result<Vec<_>, _>>()?;
                     args.reverse();
                     let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
-                    for (i, v) in args.into_iter().enumerate() {
-                        if i < callee_locals.len() {
-                            callee_locals[i] = v;
+                    if let Some(r) = callee.rest_param_index {
+                        let r = r as usize;
+                        for (i, v) in args.iter().take(r).cloned().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
+                        }
+                        if r < callee_locals.len() {
+                            let rest_id = heap.alloc_array();
+                            if r < args.len() {
+                                heap.array_push_values(rest_id, &args[r..]);
+                            }
+                            callee_locals[r] = Value::Array(rest_id);
+                        }
+                    } else {
+                        for (i, v) in args.into_iter().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
                         }
                     }
                     (func_idx, callee_locals)
@@ -380,9 +396,25 @@ fn interpret_program_with_trace_and_limit(
                     let func_idx = i;
                     let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
                     let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
-                    for (i, v) in args.into_iter().enumerate() {
-                        if i < callee_locals.len() {
-                            callee_locals[i] = v;
+                    if let Some(r) = callee_chunk.rest_param_index {
+                        let r = r as usize;
+                        for (i, v) in args.iter().take(r).cloned().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
+                        }
+                        if r < callee_locals.len() {
+                            let rest_id = heap.alloc_array();
+                            if r < args.len() {
+                                heap.array_push_values(rest_id, &args[r..]);
+                            }
+                            callee_locals[r] = Value::Array(rest_id);
+                        }
+                    } else {
+                        for (i, v) in args.into_iter().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
                         }
                     }
                     if frames.len() >= MAX_CALL_DEPTH {
@@ -414,9 +446,25 @@ fn interpret_program_with_trace_and_limit(
                     let obj_id = heap.alloc_object();
                     let callee = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
                     let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
-                    for (i, v) in args.into_iter().enumerate() {
-                        if i < callee_locals.len() {
-                            callee_locals[i] = v;
+                    if let Some(r) = callee.rest_param_index {
+                        let r = r as usize;
+                        for (i, v) in args.iter().take(r).cloned().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
+                        }
+                        if r < callee_locals.len() {
+                            let rest_id = heap.alloc_array();
+                            if r < args.len() {
+                                heap.array_push_values(rest_id, &args[r..]);
+                            }
+                            callee_locals[r] = Value::Array(rest_id);
+                        }
+                    } else {
+                        for (i, v) in args.into_iter().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
                         }
                     }
                     (func_idx, callee_locals, obj_id)
@@ -571,6 +619,7 @@ fn interpret_program_with_trace_and_limit(
                     Value::Bool(_) => "boolean",
                     Value::Int(_) | Value::Number(_) => "number",
                     Value::String(_) => "string",
+                    Value::Symbol(_) => "symbol",
                     Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "object",
                     Value::Function(_) | Value::Builtin(_) => "function",
                 };
@@ -745,7 +794,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => true,
+        Value::String(_) | Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => true,
     }
 }
 
@@ -757,6 +806,7 @@ fn value_to_prop_key(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
+        Value::Symbol(_) => "Symbol()".to_string(),
         Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "[object Object]".to_string(),
         Value::Function(_) | Value::Builtin(_) => "function".to_string(),
     }
@@ -878,11 +928,14 @@ fn strict_eq_values(a: &Value, b: &Value) -> Value {
         (Value::Int(x), Value::Int(y)) => x == y,
         (Value::Number(x), Value::Number(y)) => !x.is_nan() && !y.is_nan() && x == y,
         (Value::String(x), Value::String(y)) => x == y,
+        (Value::Symbol(x), Value::Symbol(y)) => x == y,
         (Value::Object(x), Value::Object(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => x == y,
         (Value::Map(x), Value::Map(y)) => x == y,
         (Value::Set(x), Value::Set(y)) => x == y,
+        (Value::Date(x), Value::Date(y)) => x == y,
         (Value::Function(x), Value::Function(y)) => x == y,
+        (Value::Builtin(x), Value::Builtin(y)) => x == y,
         _ => false,
     };
     Value::Bool(result)
@@ -912,6 +965,7 @@ mod tests {
             code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
             num_locals: 0,
+            rest_param_index: None,
             handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");
@@ -932,6 +986,7 @@ mod tests {
             ],
             constants: vec![ConstEntry::Int(1), ConstEntry::Int(2)],
             num_locals: 0,
+            rest_param_index: None,
             handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");
@@ -957,6 +1012,7 @@ mod tests {
             ],
             constants: vec![ConstEntry::Int(42), ConstEntry::String("x".to_string())],
             num_locals: 0,
+            rest_param_index: None,
             handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");
@@ -987,6 +1043,7 @@ mod tests {
                 ConstEntry::String("x".to_string()),
             ],
             num_locals: 1,
+            rest_param_index: None,
             handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");
@@ -1023,6 +1080,7 @@ mod tests {
                 ConstEntry::String("length".to_string()),
             ],
             num_locals: 0,
+            rest_param_index: None,
             handlers: vec![],
         };
         let result = interpret(&chunk).expect("interpret");

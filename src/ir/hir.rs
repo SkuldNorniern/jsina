@@ -13,6 +13,7 @@ pub struct HirFunction {
     pub name: Option<String>,
     pub params: Vec<String>,
     pub num_locals: u32,
+    pub rest_param_index: Option<u32>,
     pub entry_block: HirBlockId,
     pub blocks: Vec<HirBlock>,
     pub exception_regions: Vec<ExceptionRegion>,
@@ -133,6 +134,7 @@ pub enum BuiltinId {
     Date2 = 0xC2,
     Date3 = 0xC3,
     Date4 = 0xC4,
+    Symbol0 = 0xD0,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +169,7 @@ mod tests {
             name: Some("main".to_string()),
             params: vec![],
             num_locals: 0,
+            rest_param_index: None,
             entry_block: 0,
             blocks: vec![HirBlock {
                 id: 0,

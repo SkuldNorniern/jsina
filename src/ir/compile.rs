@@ -221,6 +221,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
             code,
             constants,
             num_locals: func.num_locals,
+            rest_param_index: func.rest_param_index,
             handlers,
         },
     }
@@ -239,6 +240,7 @@ mod tests {
             name: Some("main".to_string()),
             params: vec![],
             num_locals: 0,
+            rest_param_index: None,
             entry_block: 0,
             blocks: vec![HirBlock {
                 id: 0,

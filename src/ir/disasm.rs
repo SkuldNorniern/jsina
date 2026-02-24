@@ -193,6 +193,7 @@ mod tests {
             code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
             num_locals: 0,
+            rest_param_index: None,
             handlers: vec![],
         };
         let s = disassemble(&chunk);

@@ -418,8 +418,15 @@ impl Lexer<'_> {
                 Token::new(TokenType::Comma, ",".to_string(), Span::from_text(start_pos, ","))
             }
             '.' => {
-                self.advance();
-                Token::new(TokenType::Dot, ".".to_string(), Span::from_text(start_pos, "."))
+                if self.peek() == Some('.') && self.source.get(self.position.byte_offset + 2..).and_then(|s| s.chars().next()) == Some('.') {
+                    self.advance();
+                    self.advance();
+                    self.advance();
+                    Token::new(TokenType::Spread, "...".to_string(), Span::from_text(start_pos, "..."))
+                } else {
+                    self.advance();
+                    Token::new(TokenType::Dot, ".".to_string(), Span::from_text(start_pos, "."))
+                }
             }
             '~' => {
                 self.advance();

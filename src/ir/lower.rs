@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 const GLOBAL_NAMES: &[&str] = &[
     "Object", "Array", "String", "Number", "Boolean", "Error", "Math", "JSON",
-    "Date", "RegExp", "Map", "Set", "NaN", "Infinity", "print",
+    "Date", "RegExp", "Map", "Set", "Symbol", "NaN", "Infinity", "print",
     "ReferenceError", "TypeError", "RangeError", "SyntaxError",
 ];
 
@@ -339,6 +339,7 @@ fn compile_function(
     };
 
     let param_names: Vec<String> = f.params.iter().map(|p| p.name().to_string()).collect();
+    let rest_param_index = f.params.iter().position(|p| p.is_rest()).map(|i| i as u32);
     for name in &param_names {
         ctx.locals.insert(name.clone(), ctx.next_slot);
         ctx.next_slot += 1;
@@ -402,6 +403,7 @@ fn compile_function(
         name: Some(f.name.clone()),
         params: param_names,
         num_locals: ctx.next_slot,
+        rest_param_index,
         entry_block: 0,
         blocks: ctx.blocks,
         exception_regions: ctx.exception_regions,
@@ -1289,6 +1291,7 @@ fn compile_function_expr_to_hir(
         exception_regions: Vec::new(),
     };
     let param_names: Vec<String> = fe.params.iter().map(|p| p.name().to_string()).collect();
+    let rest_param_index = fe.params.iter().position(|p| p.is_rest()).map(|i| i as u32);
     for name in &param_names {
         ctx.locals.insert(name.clone(), ctx.next_slot);
         ctx.next_slot += 1;
@@ -1348,6 +1351,7 @@ fn compile_function_expr_to_hir(
         name: fe.name.clone(),
         params: param_names,
         num_locals: ctx.next_slot,
+        rest_param_index,
         entry_block: 0,
         blocks: ctx.blocks,
         exception_regions: ctx.exception_regions,
@@ -2282,6 +2286,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
+                Expression::Identifier(id) if id.name == "Symbol" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Symbol0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
                 Expression::Identifier(id) if id.name == "print" => {
                     for arg in &e.args {
                         compile_expression(arg, ctx)?;
@@ -2361,6 +2375,12 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         argc: n.args.len() as u32,
                         span: n.span,
                     });
+                }
+                Expression::Identifier(id) if id.name == "Symbol" => {
+                    return Err(LowerError::Unsupported(
+                        "Symbol is not a constructor".to_string(),
+                        Some(n.span),
+                    ));
                 }
                 Expression::Identifier(id) => {
                     let idx = *ctx.func_index.get(&id.name).ok_or_else(|| {
@@ -2696,6 +2716,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 99, "a[1] = 99 should mutate and read back");
+    }
+
+    #[test]
+    fn lower_rest_param() {
+        let result = crate::driver::Driver::run(
+            "function sum(a, b, ...rest) { var s = a + b; for (var i = 0; i < rest.length; i++) { s = s + rest[i]; } return s; } function main() { return sum(1, 2, 3, 4); }",
+        )
+        .expect("run");
+        assert_eq!(result, 10, "rest params should collect remaining args");
     }
 
     #[test]

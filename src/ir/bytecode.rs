@@ -12,6 +12,7 @@ pub struct BytecodeChunk {
     pub code: Vec<u8>,
     pub constants: Vec<ConstEntry>,
     pub num_locals: u32,
+    pub rest_param_index: Option<u32>,
     pub handlers: Vec<ExceptionHandler>,
 }
 
@@ -86,6 +87,7 @@ mod tests {
             code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
             num_locals: 0,
+            rest_param_index: None,
             handlers: vec![],
         };
         assert_eq!(chunk.constants.len(), 1);

@@ -222,13 +222,18 @@ pub struct FunctionDeclStmt {
 pub enum Param {
     Ident(String),
     Default(String, Box<Expression>),
+    Rest(String),
 }
 
 impl Param {
     pub fn name(&self) -> &str {
         match self {
-            Param::Ident(n) | Param::Default(n, _) => n,
+            Param::Ident(n) | Param::Default(n, _) | Param::Rest(n) => n,
         }
+    }
+
+    pub fn is_rest(&self) -> bool {
+        matches!(self, Param::Rest(_))
     }
 }
 

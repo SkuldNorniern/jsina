@@ -215,6 +215,12 @@ impl Parser {
     fn parse_params(&mut self) -> Result<Vec<crate::frontend::ast::Param>, ParseError> {
         let mut params = Vec::new();
         loop {
+            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Spread)) {
+                self.advance();
+                let token = self.expect(TokenType::Identifier)?;
+                params.push(crate::frontend::ast::Param::Rest(token.lexeme));
+                break;
+            }
             if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
                 let token = self.expect(TokenType::Identifier)?;
                 let name = token.lexeme;
@@ -1326,6 +1332,17 @@ mod tests {
             assert_eq!(f.params.len(), 2);
             assert!(matches!(&f.params[0], crate::frontend::ast::Param::Ident(n) if n == "x"));
             assert!(matches!(&f.params[1], crate::frontend::ast::Param::Default(n, _) if n == "y"));
+        }
+    }
+
+    #[test]
+    fn parse_rest_param() {
+        let script = parse_ok("function f(a, b, ...rest) { return rest.length; }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            assert_eq!(f.params.len(), 3);
+            assert!(matches!(&f.params[0], crate::frontend::ast::Param::Ident(n) if n == "a"));
+            assert!(matches!(&f.params[1], crate::frontend::ast::Param::Ident(n) if n == "b"));
+            assert!(matches!(&f.params[2], crate::frontend::ast::Param::Rest(n) if n == "rest"));
         }
     }
 
