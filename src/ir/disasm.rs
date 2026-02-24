@@ -179,6 +179,7 @@ fn format_const(c: &ConstEntry) -> String {
         ConstEntry::Null => "null".to_string(),
         ConstEntry::Undefined => "undefined".to_string(),
         ConstEntry::Function(i) => format!("fn#{}", i),
+        ConstEntry::Global(s) => format!("global:{}", s),
     }
 }
 

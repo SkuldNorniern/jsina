@@ -33,7 +33,7 @@ pub(crate) fn to_number(v: &Value) -> f64 {
         Value::Null => 0.0,
         Value::Undefined => f64::NAN,
         Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
-        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) => f64::NAN,
+        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => f64::NAN,
     }
 }
 
@@ -43,7 +43,7 @@ pub(crate) fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => true,
     }
 }
 
@@ -56,7 +56,7 @@ pub(crate) fn to_prop_key(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
         Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "[object Object]".to_string(),
-        Value::Function(_) => "function".to_string(),
+        Value::Function(_) | Value::Builtin(_) => "function".to_string(),
     }
 }
 
@@ -74,6 +74,7 @@ pub(crate) fn strict_eq(a: &Value, b: &Value) -> bool {
         (Value::Set(x), Value::Set(y)) => x == y,
         (Value::Date(x), Value::Date(y)) => x == y,
         (Value::Function(x), Value::Function(y)) => x == y,
+        (Value::Builtin(x), Value::Builtin(y)) => x == y,
         _ => false,
     }
 }

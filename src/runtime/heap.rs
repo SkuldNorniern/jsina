@@ -9,7 +9,7 @@ struct HeapObject {
     prototype: Option<usize>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Heap {
     objects: Vec<HeapObject>,
     arrays: Vec<Vec<Value>>,
@@ -18,11 +18,138 @@ pub struct Heap {
     sets: Vec<std::collections::HashSet<String>>,
     dates: Vec<f64>,
     error_object_ids: HashSet<usize>,
+    global_object_id: usize,
+}
+
+impl Default for Heap {
+    fn default() -> Self {
+        let mut heap = Self {
+            objects: Vec::new(),
+            arrays: Vec::new(),
+            array_props: Vec::new(),
+            maps: Vec::new(),
+            sets: Vec::new(),
+            dates: Vec::new(),
+            error_object_ids: HashSet::new(),
+            global_object_id: 0,
+        };
+        heap.init_globals();
+        heap
+    }
 }
 
 impl Heap {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn init_globals(&mut self) {
+        let global_id = self.alloc_object();
+        self.global_object_id = global_id;
+
+        let obj_id = self.alloc_object();
+        self.set_prop(obj_id, "create", Value::Builtin(0x40));
+        self.set_prop(obj_id, "keys", Value::Builtin(0x41));
+        self.set_prop(obj_id, "assign", Value::Builtin(0x42));
+        self.set_prop(obj_id, "hasOwnProperty", Value::Builtin(0x43));
+        self.set_prop(global_id, "Object", Value::Object(obj_id));
+
+        let arr_id = self.alloc_object();
+        self.set_prop(arr_id, "push", Value::Builtin(0x10));
+        self.set_prop(arr_id, "pop", Value::Builtin(0x11));
+        self.set_prop(arr_id, "isArray", Value::Builtin(0x12));
+        self.set_prop(arr_id, "slice", Value::Builtin(0x13));
+        self.set_prop(arr_id, "concat", Value::Builtin(0x14));
+        self.set_prop(arr_id, "indexOf", Value::Builtin(0x15));
+        self.set_prop(arr_id, "join", Value::Builtin(0x16));
+        self.set_prop(arr_id, "shift", Value::Builtin(0x17));
+        self.set_prop(arr_id, "unshift", Value::Builtin(0x18));
+        self.set_prop(arr_id, "reverse", Value::Builtin(0x19));
+        self.set_prop(arr_id, "includes", Value::Builtin(0x1A));
+        self.set_prop(arr_id, "fill", Value::Builtin(0x1B));
+        self.set_prop(global_id, "Array", Value::Object(arr_id));
+
+        let math_id = self.alloc_object();
+        self.set_prop(math_id, "floor", Value::Builtin(0x20));
+        self.set_prop(math_id, "abs", Value::Builtin(0x21));
+        self.set_prop(math_id, "min", Value::Builtin(0x22));
+        self.set_prop(math_id, "max", Value::Builtin(0x23));
+        self.set_prop(math_id, "pow", Value::Builtin(0x24));
+        self.set_prop(math_id, "ceil", Value::Builtin(0x25));
+        self.set_prop(math_id, "round", Value::Builtin(0x26));
+        self.set_prop(math_id, "sqrt", Value::Builtin(0x27));
+        self.set_prop(math_id, "random", Value::Builtin(0x28));
+        self.set_prop(global_id, "Math", Value::Object(math_id));
+
+        let json_id = self.alloc_object();
+        self.set_prop(json_id, "parse", Value::Builtin(0x30));
+        self.set_prop(json_id, "stringify", Value::Builtin(0x31));
+        self.set_prop(global_id, "JSON", Value::Object(json_id));
+
+        let str_id = self.alloc_object();
+        self.set_prop(str_id, "split", Value::Builtin(0x60));
+        self.set_prop(str_id, "trim", Value::Builtin(0x61));
+        self.set_prop(str_id, "toLowerCase", Value::Builtin(0x62));
+        self.set_prop(str_id, "toUpperCase", Value::Builtin(0x63));
+        self.set_prop(str_id, "charAt", Value::Builtin(0x64));
+        self.set_prop(str_id, "repeat", Value::Builtin(0x65));
+        self.set_prop(global_id, "String", Value::Object(str_id));
+
+        self.set_prop(global_id, "Number", Value::Builtin(0x52));
+        self.set_prop(global_id, "Boolean", Value::Builtin(0x53));
+
+        let err_id = self.alloc_object();
+        self.set_prop(err_id, "isError", Value::Builtin(0x70));
+        self.set_prop(err_id, "__call__", Value::Builtin(0x51));
+        self.set_prop(global_id, "Error", Value::Object(err_id));
+
+        let ref_err_id = self.alloc_object();
+        self.set_prop(ref_err_id, "__call__", Value::Builtin(0x51));
+        self.set_prop(global_id, "ReferenceError", Value::Object(ref_err_id));
+
+        let type_err_id = self.alloc_object();
+        self.set_prop(type_err_id, "__call__", Value::Builtin(0x51));
+        self.set_prop(global_id, "TypeError", Value::Object(type_err_id));
+
+        let range_err_id = self.alloc_object();
+        self.set_prop(range_err_id, "__call__", Value::Builtin(0x51));
+        self.set_prop(global_id, "RangeError", Value::Object(range_err_id));
+
+        let syntax_err_id = self.alloc_object();
+        self.set_prop(syntax_err_id, "__call__", Value::Builtin(0x51));
+        self.set_prop(global_id, "SyntaxError", Value::Object(syntax_err_id));
+
+        let regexp_id = self.alloc_object();
+        self.set_prop(regexp_id, "escape", Value::Builtin(0x80));
+        self.set_prop(global_id, "RegExp", Value::Object(regexp_id));
+
+        let map_id = self.alloc_object();
+        self.set_prop(map_id, "set", Value::Builtin(0x91));
+        self.set_prop(map_id, "get", Value::Builtin(0x92));
+        self.set_prop(map_id, "has", Value::Builtin(0x93));
+        self.set_prop(global_id, "Map", Value::Object(map_id));
+
+        let set_id = self.alloc_object();
+        self.set_prop(set_id, "add", Value::Builtin(0xA1));
+        self.set_prop(set_id, "has", Value::Builtin(0xA2));
+        self.set_prop(set_id, "size", Value::Builtin(0xA3));
+        self.set_prop(global_id, "Set", Value::Object(set_id));
+
+        let date_id = self.alloc_object();
+        self.set_prop(date_id, "now", Value::Builtin(0xC1));
+        self.set_prop(date_id, "getTime", Value::Builtin(0xC2));
+        self.set_prop(date_id, "toString", Value::Builtin(0xC3));
+        self.set_prop(date_id, "toISOString", Value::Builtin(0xC4));
+        self.set_prop(global_id, "Date", Value::Object(date_id));
+
+        self.set_prop(global_id, "NaN", Value::Number(f64::NAN));
+        self.set_prop(global_id, "Infinity", Value::Number(f64::INFINITY));
+
+        self.set_prop(global_id, "print", Value::Builtin(0x00));
+    }
+
+    pub fn get_global(&self, name: &str) -> Value {
+        self.get_prop(self.global_object_id, name)
     }
 
     pub fn alloc_object(&mut self) -> usize {

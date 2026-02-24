@@ -141,6 +141,7 @@ pub enum HirConst {
     Undefined,
     String(String),
     Function(u32),
+    Global(String),
 }
 
 #[derive(Debug, Clone)]

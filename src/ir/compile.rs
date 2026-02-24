@@ -58,6 +58,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                         HirConst::Undefined => ConstEntry::Undefined,
                         HirConst::String(s) => ConstEntry::String(s.clone()),
                         HirConst::Function(i) => ConstEntry::Function(*i as usize),
+                        HirConst::Global(s) => ConstEntry::Global(s.clone()),
                     });
                     code.push(Opcode::PushConst as u8);
                     code.push(idx);

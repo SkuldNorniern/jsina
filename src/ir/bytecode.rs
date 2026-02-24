@@ -23,6 +23,7 @@ pub enum ConstEntry {
     Null,
     Undefined,
     Function(usize),
+    Global(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

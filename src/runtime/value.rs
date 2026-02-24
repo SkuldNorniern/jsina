@@ -12,6 +12,7 @@ pub enum Value {
     Set(usize),
     Date(usize),
     Function(usize),
+    Builtin(u8),
 }
 
 impl Value {
@@ -99,7 +100,7 @@ impl std::fmt::Display for Value {
             Value::Map(_) => write!(f, "[object Map]"),
             Value::Set(_) => write!(f, "[object Set]"),
             Value::Date(_) => write!(f, "[object Date]"),
-            Value::Function(_) => write!(f, "[object Function]"),
+            Value::Function(_) | Value::Builtin(_) => write!(f, "[object Function]"),
         }
     }
 }

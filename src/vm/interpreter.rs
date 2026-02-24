@@ -229,10 +229,10 @@ fn interpret_program_with_trace_and_limit(
             0x01 => {
                 let idx = read_u8(code, *pc) as usize;
                 *pc += 1;
-                let val = constants
-                    .get(idx)
-                    .ok_or(VmError::InvalidConstIndex(idx))?
-                    .to_value();
+                let val = match constants.get(idx).ok_or(VmError::InvalidConstIndex(idx))? {
+                    ConstEntry::Global(name) => heap.get_global(name),
+                    c => c.to_value(),
+                };
                 stack.push(val);
             }
             0x02 => {
@@ -363,32 +363,44 @@ fn interpret_program_with_trace_and_limit(
                 args.reverse();
                 let callee = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let receiver = stack.pop().ok_or(VmError::StackUnderflow)?;
-                let func_idx = match &callee {
-                    Value::Function(i) => *i,
-                    _ => {
-                        return Ok(Completion::Throw(Value::String(
-                            "callee is not a function".to_string(),
-                        )));
+                if let Value::Builtin(builtin_id) = callee {
+                    for a in &args {
+                        stack.push(a.clone());
                     }
-                };
-                let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
-                let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
-                for (i, v) in args.into_iter().enumerate() {
-                    if i < callee_locals.len() {
-                        callee_locals[i] = v;
+                    stack.push(receiver);
+                    match execute_builtin(builtin_id, argc + 1, &mut stack, &mut heap) {
+                        Ok(BuiltinResult::Push(v)) => {
+                            getprop_cache.invalidate_all();
+                            stack.push(v);
+                        }
+                        Ok(BuiltinResult::Throw(v)) => return Ok(Completion::Throw(v)),
+                        Err(e) => return Err(e),
                     }
+                } else if let Value::Function(i) = callee {
+                    let func_idx = i;
+                    let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
+                    let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
+                    for (i, v) in args.into_iter().enumerate() {
+                        if i < callee_locals.len() {
+                            callee_locals[i] = v;
+                        }
+                    }
+                    if frames.len() >= MAX_CALL_DEPTH {
+                        return Err(VmError::CallDepthExceeded);
+                    }
+                    frames.push(Frame {
+                        chunk_index: func_idx,
+                        pc: 0,
+                        locals: callee_locals,
+                        this_value: receiver,
+                        rethrow_after_finally: false,
+                        new_object: None,
+                    });
+                } else {
+                    return Ok(Completion::Throw(Value::String(
+                        "callee is not a function".to_string(),
+                    )));
                 }
-                if frames.len() >= MAX_CALL_DEPTH {
-                    return Err(VmError::CallDepthExceeded);
-                }
-                frames.push(Frame {
-                    chunk_index: func_idx,
-                    pc: 0,
-                    locals: callee_locals,
-                    this_value: receiver,
-                    rethrow_after_finally: false,
-                    new_object: None,
-                });
             }
             0x43 => {
                 let (func_idx, callee_locals, obj_id) = {
@@ -560,7 +572,7 @@ fn interpret_program_with_trace_and_limit(
                     Value::Int(_) | Value::Number(_) => "number",
                     Value::String(_) => "string",
                     Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "object",
-                    Value::Function(_) => "function",
+                    Value::Function(_) | Value::Builtin(_) => "function",
                 };
                 stack.push(Value::String(s.to_string()));
             }
@@ -733,7 +745,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => true,
     }
 }
 
@@ -746,7 +758,7 @@ fn value_to_prop_key(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
         Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "[object Object]".to_string(),
-        Value::Function(_) => "function".to_string(),
+        Value::Function(_) | Value::Builtin(_) => "function".to_string(),
     }
 }
 
@@ -885,6 +897,7 @@ impl ConstEntry {
             ConstEntry::Null => Value::Null,
             ConstEntry::Undefined => Value::Undefined,
             ConstEntry::Function(i) => Value::Function(*i),
+            ConstEntry::Global(_) => Value::Undefined,
         }
     }
 }

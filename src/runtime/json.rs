@@ -341,7 +341,7 @@ fn escape_string(s: &str) -> String {
 
 pub fn json_stringify(v: &Value, heap: &Heap) -> Option<String> {
     match v {
-        Value::Undefined | Value::Function(_) => None,
+        Value::Undefined | Value::Function(_) | Value::Builtin(_) => None,
         Value::Null => Some("null".to_string()),
         Value::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
         Value::Int(n) => Some(n.to_string()),

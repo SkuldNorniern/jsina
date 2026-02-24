@@ -3,6 +3,12 @@ use crate::frontend::ast::*;
 use crate::ir::hir::*;
 use std::collections::HashMap;
 
+const GLOBAL_NAMES: &[&str] = &[
+    "Object", "Array", "String", "Number", "Boolean", "Error", "Math", "JSON",
+    "Date", "RegExp", "Map", "Set", "NaN", "Infinity", "print",
+    "ReferenceError", "TypeError", "RangeError", "SyntaxError",
+];
+
 #[derive(Debug)]
 pub enum LowerError {
     Unsupported(String, Option<Span>),
@@ -838,6 +844,11 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
             } else if let Some(&idx) = ctx.func_index.get(&e.name) {
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                     value: HirConst::Function(idx),
+                    span: e.span,
+                });
+            } else if GLOBAL_NAMES.contains(&e.name.as_str()) {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                    value: HirConst::Global(e.name.clone()),
                     span: e.span,
                 });
             } else {
@@ -1676,7 +1687,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
-                Expression::Identifier(id) if id.name == "Error" => {
+                Expression::Identifier(id) if id.name == "Error" || id.name == "ReferenceError" || id.name == "TypeError" || id.name == "RangeError" || id.name == "SyntaxError" => {
                     for arg in &e.args {
                         compile_expression(arg, ctx)?;
                     }
@@ -1772,6 +1783,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::Date0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "Error" || id.name == "ReferenceError" || id.name == "TypeError" || id.name == "RangeError" || id.name == "SyntaxError" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Type1,
                         argc: n.args.len() as u32,
                         span: n.span,
                     });
