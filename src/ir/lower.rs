@@ -7,7 +7,7 @@ const GLOBAL_NAMES: &[&str] = &[
     "Object", "Array", "String", "Number", "Boolean", "Error", "Math", "JSON",
     "Date", "RegExp", "Map", "Set", "Symbol", "NaN", "Infinity", "$262", "console", "print",
     "ReferenceError", "TypeError", "RangeError", "SyntaxError", "globalThis",
-    "eval", "encodeURI", "encodeURIComponent",
+    "eval", "encodeURI", "encodeURIComponent", "parseInt", "parseFloat",
 ];
 
 #[derive(Debug)]
@@ -2454,6 +2454,26 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::EncodeUriComponent0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "parseInt" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::ParseInt0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "parseFloat" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::ParseFloat0,
                         argc: e.args.len() as u32,
                         span: e.span,
                     });

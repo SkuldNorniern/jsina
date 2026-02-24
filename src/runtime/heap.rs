@@ -157,6 +157,8 @@ impl Heap {
         self.set_prop(global_id, "eval", Value::Builtin(0xD9));
         self.set_prop(global_id, "encodeURI", Value::Builtin(0xDA));
         self.set_prop(global_id, "encodeURIComponent", Value::Builtin(0xDB));
+        self.set_prop(global_id, "parseInt", Value::Builtin(0xDC));
+        self.set_prop(global_id, "parseFloat", Value::Builtin(0xDD));
     }
 
     /// Add $262 host object for test262 harness. Match V8/Bun/Deno: $262 only exists when running via test262.

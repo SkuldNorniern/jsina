@@ -144,6 +144,8 @@ pub enum BuiltinId {
     Eval0 = 0xD9,
     EncodeUri0 = 0xDA,
     EncodeUriComponent0 = 0xDB,
+    ParseInt0 = 0xDC,
+    ParseFloat0 = 0xDD,
 }
 
 #[derive(Debug, Clone)]
