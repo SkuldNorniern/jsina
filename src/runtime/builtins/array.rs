@@ -44,6 +44,39 @@ pub fn is_array(args: &[Value]) -> Value {
     Value::Bool(matches!(args.first(), Some(Value::Array(_))))
 }
 
+pub fn fill(args: &[Value], heap: &mut Heap) -> Value {
+    let arr = match args.first() {
+        Some(Value::Array(id)) => *id,
+        _ => return Value::Undefined,
+    };
+    let value = args.get(1).cloned().unwrap_or(Value::Undefined);
+    let len = heap.array_elements(arr).map(|e| e.len()).unwrap_or(0);
+    let start = args
+        .get(2)
+        .map(super::to_number)
+        .map(|n| {
+            if n.is_nan() || n < 0.0 {
+                0
+            } else {
+                (n as usize).min(len)
+            }
+        })
+        .unwrap_or(0);
+    let end = args
+        .get(3)
+        .map(super::to_number)
+        .map(|n| {
+            if n.is_nan() || n < 0.0 {
+                len
+            } else {
+                (n as usize).min(len)
+            }
+        })
+        .unwrap_or(len);
+    heap.array_fill(arr, value, start, end);
+    Value::Array(arr)
+}
+
 pub fn reverse(args: &[Value], heap: &mut Heap) -> Value {
     if let Some(Value::Array(id)) = args.first() {
         heap.array_reverse(*id);

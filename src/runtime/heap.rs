@@ -148,6 +148,16 @@ impl Heap {
         }
     }
 
+    pub fn array_fill(&mut self, arr_id: usize, value: Value, start: usize, end: usize) {
+        if let Some(elements) = self.arrays.get_mut(arr_id) {
+            let len = elements.len();
+            let end = end.min(len);
+            for i in start..end {
+                elements[i] = value.clone();
+            }
+        }
+    }
+
     pub fn object_has_own_property(&self, obj_id: usize, key: &str) -> bool {
         self.objects
             .get(obj_id)

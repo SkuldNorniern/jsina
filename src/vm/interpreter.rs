@@ -219,7 +219,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
                     .collect::<Result<Vec<_>, _>>()?;
                 args.reverse();
-                if builtin_id > 38 {
+                if builtin_id > 39 {
                     return Err(VmError::InvalidOpcode(builtin_id));
                 }
                 match crate::runtime::builtins::dispatch(builtin_id, &args, &mut heap) {

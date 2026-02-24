@@ -156,6 +156,7 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                     36 => "regExpEscape",
                     37 => "includes",
                     38 => "stringRepeat",
+                    39 => "arrayFill",
                     _ => "?",
                 };
                 format!("  {:04}  CallBuiltin  {}  {}  ; {}", line_start, builtin_id, argc, name)

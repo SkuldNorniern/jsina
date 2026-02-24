@@ -1447,6 +1447,40 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
+                    } else if prop == "fill" {
+                        compile_expression(&m.object, ctx)?;
+                        let value = e.args.first();
+                        if let Some(v) = value {
+                            compile_expression(v, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        let start = e.args.get(1);
+                        if let Some(s) = start {
+                            compile_expression(s, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        let end = e.args.get(2);
+                        if let Some(ed) = end {
+                            compile_expression(ed, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayFill,
+                            argc: 4,
+                            span: e.span,
+                        });
                     } else if prop == "split" {
                         compile_expression(&m.object, ctx)?;
                         let sep = e.args.first();
@@ -2318,6 +2352,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "Array.reverse mutates and returns self");
+    }
+
+    #[test]
+    fn lower_array_fill() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [1, 2, 3, 4, 5]; a.fill(0, 1, 4); if (a[0] !== 1 || a[1] !== 0 || a[2] !== 0 || a[3] !== 0 || a[4] !== 5) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Array.fill");
     }
 
     #[test]

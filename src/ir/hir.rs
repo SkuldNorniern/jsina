@@ -105,6 +105,7 @@ pub enum BuiltinId {
     RegExpEscape = 36,
     Includes = 37,
     StringRepeat = 38,
+    ArrayFill = 39,
 }
 
 

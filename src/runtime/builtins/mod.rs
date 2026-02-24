@@ -145,6 +145,7 @@ pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, Builti
         36 => regexp::escape(args),
         37 => array::includes(args, heap),
         38 => string::repeat(args),
+        39 => array::fill(args, heap),
         _ => unreachable!("invalid builtin id checked by caller"),
     };
     Ok(result)
