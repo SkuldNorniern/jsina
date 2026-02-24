@@ -1092,6 +1092,26 @@ impl Parser {
                         right: Box::new(add_right),
                     }));
                 }
+                Some(TokenType::UnsignedRightShiftAssign) => {
+                    self.end_recursion();
+                    let left_span = left.span();
+                    self.advance();
+                    let right = self.parse_expression_prec(0)?;
+                    let span = left_span.merge(right.span());
+                    let op_right = Expression::Binary(BinaryExpr {
+                        id: self.next_id(),
+                        span,
+                        op: BinaryOp::UnsignedRightShift,
+                        left: Box::new(left.clone()),
+                        right: Box::new(right),
+                    });
+                    return Ok(Expression::Assign(AssignExpr {
+                        id: self.next_id(),
+                        span,
+                        left: Box::new(left),
+                        right: Box::new(op_right),
+                    }));
+                }
                 _ => break,
             };
 

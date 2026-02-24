@@ -49,3 +49,34 @@ pub fn has_own_property(args: &[Value], heap: &mut Heap) -> Value {
     };
     Value::Bool(result)
 }
+
+pub fn prevent_extensions(args: &[Value], _heap: &mut Heap) -> Value {
+    args.first().cloned().unwrap_or(Value::Undefined)
+}
+
+pub fn seal(args: &[Value], _heap: &mut Heap) -> Value {
+    args.first().cloned().unwrap_or(Value::Undefined)
+}
+
+pub fn set_prototype_of(args: &[Value], heap: &mut Heap) -> Value {
+    let target = match args.first() {
+        Some(Value::Object(id)) => *id,
+        _ => return Value::Bool(false),
+    };
+    let proto = match args.get(1) {
+        Some(Value::Object(id)) => Some(*id),
+        Some(Value::Null) => None,
+        _ => return Value::Bool(false),
+    };
+    heap.set_prototype(target, proto);
+    args.first().cloned().unwrap_or(Value::Undefined)
+}
+
+pub fn property_is_enumerable(args: &[Value], heap: &mut Heap) -> Value {
+    let key = args.get(1).map(to_prop_key).unwrap_or_default();
+    let result = match args.first() {
+        Some(Value::Object(id)) => heap.object_has_own_property(*id, &key),
+        _ => false,
+    };
+    Value::Bool(result)
+}

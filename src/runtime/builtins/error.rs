@@ -35,6 +35,11 @@ pub fn syntax_error(args: &[Value], heap: &mut Heap) -> Value {
     make_error(heap, msg, "SyntaxError")
 }
 
+pub fn uri_error(args: &[Value], heap: &mut Heap) -> Value {
+    let msg = args.first().map(|v| v.to_string()).unwrap_or_default();
+    make_error(heap, msg, "URIError")
+}
+
 pub fn is_error(args: &[Value], heap: &mut Heap) -> Value {
     let result = match args.first() {
         Some(Value::Object(id)) => heap.is_error_object(*id),

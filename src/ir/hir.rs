@@ -108,6 +108,10 @@ pub enum BuiltinId {
     Object1 = 0x41,
     Object2 = 0x42,
     Object3 = 0x43,
+    Object4 = 0x44,
+    Object5 = 0x45,
+    Object6 = 0x46,
+    Object7 = 0x47,
     Type0 = 0x50,
     Type1 = 0x51,
     Type2 = 0x52,
@@ -118,6 +122,7 @@ pub enum BuiltinId {
     String3 = 0x63,
     String4 = 0x64,
     String5 = 0x65,
+    String6 = 0x66,
     Error0 = 0x70,
     RegExp0 = 0x80,
     RegExp1 = 0x81,
@@ -146,6 +151,12 @@ pub enum BuiltinId {
     EncodeUriComponent0 = 0xDB,
     ParseInt0 = 0xDC,
     ParseFloat0 = 0xDD,
+    DecodeUri0 = 0xDE,
+    DecodeUriComponent0 = 0xDF,
+    Int32Array0 = 0xE0,
+    Uint8Array0 = 0xE1,
+    Uint8ClampedArray0 = 0xE2,
+    ArrayBuffer0 = 0xE3,
 }
 
 #[derive(Debug, Clone)]

@@ -52,6 +52,22 @@ pub fn repeat(args: &[Value], _heap: &mut Heap) -> Value {
     Value::String(s.repeat(n))
 }
 
+pub fn from_char_code(args: &[Value], _heap: &mut Heap) -> Value {
+    let mut s = String::new();
+    for v in args {
+        let n = super::to_number(v);
+        let code = if n.is_nan() || n.is_infinite() {
+            0
+        } else {
+            n as i32
+        };
+        if let Some(c) = char::from_u32(code as u32 & 0xFFFF) {
+            s.push(c);
+        }
+    }
+    Value::String(s)
+}
+
 pub fn char_at(args: &[Value], _heap: &mut Heap) -> Value {
     let s = match args.first() {
         Some(Value::String(x)) => x.clone(),

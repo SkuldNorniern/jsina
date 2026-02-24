@@ -6,8 +6,9 @@ use std::collections::HashMap;
 const GLOBAL_NAMES: &[&str] = &[
     "Object", "Array", "String", "Number", "Boolean", "Error", "Math", "JSON",
     "Date", "RegExp", "Map", "Set", "Symbol", "NaN", "Infinity", "$262", "console", "print",
-    "ReferenceError", "TypeError", "RangeError", "SyntaxError", "globalThis",
-    "eval", "encodeURI", "encodeURIComponent", "parseInt", "parseFloat",
+    "ReferenceError", "TypeError", "RangeError", "SyntaxError", "URIError", "globalThis",
+    "Int32Array", "Uint8Array", "Uint8ClampedArray", "ArrayBuffer",
+    "eval", "encodeURI", "encodeURIComponent", "decodeURI", "decodeURIComponent", "parseInt", "parseFloat",
 ];
 
 #[derive(Debug)]
@@ -1936,6 +1937,45 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "preventExtensions" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object4,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "seal" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object5,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "setPrototypeOf" && e.args.len() == 2 {
+                        compile_expression(&e.args[0], ctx)?;
+                        compile_expression(&e.args[1], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object6,
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "propertyIsEnumerable" && e.args.len() == 2 {
+                        compile_expression(&e.args[0], ctx)?;
+                        compile_expression(&e.args[1], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object7,
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "String") && prop == "fromCharCode" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::String6,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
                     } else if matches!(obj_name.as_deref(), Some(s) if s == "Array") && prop == "isArray" && e.args.len() == 1 {
                         compile_expression(&e.args[0], ctx)?;
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
@@ -2278,6 +2318,14 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 2,
                             span: e.span,
                         });
+                    } else if prop == "propertyIsEnumerable" && e.args.len() == 1 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object7,
+                            argc: 2,
+                            span: e.span,
+                        });
                     } else {
                         compile_expression(&m.object, ctx)?;
                         ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: e.span });
@@ -2458,6 +2506,26 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
+                Expression::Identifier(id) if id.name == "decodeURI" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::DecodeUri0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "decodeURIComponent" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::DecodeUriComponent0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
                 Expression::Identifier(id) if id.name == "parseInt" => {
                     for arg in &e.args {
                         compile_expression(arg, ctx)?;
@@ -2610,6 +2678,46 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         "Symbol is not a constructor".to_string(),
                         Some(n.span),
                     ));
+                }
+                Expression::Identifier(id) if id.name == "Int32Array" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Int32Array0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "Uint8Array" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Uint8Array0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "Uint8ClampedArray" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Uint8ClampedArray0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "ArrayBuffer" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::ArrayBuffer0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
                 }
                 Expression::Identifier(id) => {
                     let idx = *ctx.func_index.get(&id.name).ok_or_else(|| {
@@ -3615,5 +3723,73 @@ function main() {
         )
         .expect("run");
         assert_eq!(result, 10, "obj.method() should bind this to obj");
+    }
+
+    #[test]
+    fn wrapped_decode_uri_component_try_catch_handlers() {
+        let prelude = r#"
+function Test262Error(message) { this.message = message || ""; }
+function assert(mustBeTrue, message) { if (!mustBeTrue) throw new Test262Error(message || "fail"); }
+function $DONOTEVALUATE() { throw "Test262: should not evaluate"; }
+"#;
+        let body = r#"
+var result = true;
+try {
+  decodeURIComponent("%");
+  result = false;
+} catch (e) {
+  if ((e instanceof URIError) !== true) { result = false; }
+}
+if (result !== true) { throw new Test262Error("fail"); }
+"#;
+        let wrapped = format!(
+            "{}function __test__() {{\n{}\n}}\nfunction main() {{\n  __test__();\n  return 0;\n}}\n",
+            prelude, body
+        );
+        let script = crate::driver::Driver::ast(&wrapped).expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let test_fn = funcs
+            .iter()
+            .find(|f| f.name.as_deref() == Some("__test__"))
+            .expect("__test__ exists");
+        assert!(
+            !test_fn.exception_regions.is_empty(),
+            "__test__ should have exception regions for try/catch"
+        );
+        let cf = crate::ir::hir_to_bytecode(test_fn);
+        assert!(
+            !cf.chunk.handlers.is_empty(),
+            "__test__ chunk should have handlers"
+        );
+        let code = &cf.chunk.code;
+        let mut call_builtin_pcs: Vec<(usize, u8)> = Vec::new();
+        let mut pc = 0;
+        while pc + 2 < code.len() {
+            if code[pc] == 0x41 {
+                call_builtin_pcs.push((pc, code[pc + 1]));
+            }
+            pc += 1;
+        }
+        let decode_builtin_id = 0xDF;
+        let mut found_decode_call = false;
+        for (call_pc, builtin_id) in &call_builtin_pcs {
+            if *builtin_id == decode_builtin_id {
+                found_decode_call = true;
+                let in_range = cf.chunk.handlers.iter().any(|h| {
+                    (*call_pc as u32) >= h.try_start && (*call_pc as u32) < h.try_end
+                });
+                assert!(
+                    in_range,
+                    "decodeURIComponent call at pc {} should be in handler range; handlers: {:?}",
+                    call_pc,
+                    cf.chunk.handlers
+                        .iter()
+                        .map(|h| (h.try_start, h.try_end))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+        assert!(found_decode_call, "should find decodeURIComponent CallBuiltin");
+
     }
 }
