@@ -1,12 +1,13 @@
 //! Builtin function dispatch.
 //!
-//! IDs 0-34 map to BuiltinId in src/ir/hir.rs.
-//! See submodules: host, object, array, string, number, boolean, error, math, json.
+//! IDs 0..=MAX_BUILTIN_ID map to BuiltinId in src/ir/hir.rs.
+//! See submodules: host, object, array, string, number, boolean, error, math, json, map, set.
 
 mod array;
 mod boolean;
 mod error;
 mod map;
+mod set;
 mod host;
 mod json;
 mod math;
@@ -31,7 +32,7 @@ pub(crate) fn to_number(v: &Value) -> f64 {
         Value::Null => 0.0,
         Value::Undefined => f64::NAN,
         Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
-        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Function(_) => f64::NAN,
+        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Function(_) => f64::NAN,
     }
 }
 
@@ -41,7 +42,7 @@ pub(crate) fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Function(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Function(_) => true,
     }
 }
 
@@ -53,7 +54,7 @@ pub(crate) fn to_prop_key(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
-        Value::Object(_) | Value::Array(_) | Value::Map(_) => "[object Object]".to_string(),
+        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) => "[object Object]".to_string(),
         Value::Function(_) => "function".to_string(),
     }
 }
@@ -69,6 +70,7 @@ pub(crate) fn strict_eq(a: &Value, b: &Value) -> bool {
         (Value::Object(x), Value::Object(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => x == y,
         (Value::Map(x), Value::Map(y)) => x == y,
+        (Value::Set(x), Value::Set(y)) => x == y,
         (Value::Function(x), Value::Function(y)) => x == y,
         _ => false,
     }
@@ -102,11 +104,33 @@ pub(crate) fn random_f64() -> f64 {
     (state as f64) / (u64::MAX as f64)
 }
 
+fn collection_has(args: &[Value], heap: &Heap) -> Value {
+    let (receiver, value) = match args {
+        [r, v] => (r, v),
+        _ => return Value::Bool(false),
+    };
+    let key = to_prop_key(value);
+    if let Some(id) = receiver.as_map_id() {
+        return Value::Bool(heap.map_has(id, &key));
+    }
+    if let Some(id) = receiver.as_set_id() {
+        return Value::Bool(heap.set_has(id, &key));
+    }
+    Value::Bool(false)
+}
+
 pub fn seed_random(seed: u64) {
     RNG_STATE.store(if seed == 0 { 1 } else { seed }, Ordering::Relaxed);
 }
 
+pub const MAX_BUILTIN_ID: u8 = 48;
+
 pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, BuiltinError> {
+    if id > MAX_BUILTIN_ID {
+        return Err(BuiltinError::Throw(Value::String(
+            "invalid builtin id".to_string(),
+        )));
+    }
     let result = match id {
         0 => host::print(args),
         1 => array::push(args, heap),
@@ -152,6 +176,11 @@ pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, Builti
         41 => map::set(args, heap),
         42 => map::get(args, heap),
         43 => map::has(args, heap),
+        44 => set::create(heap),
+        45 => set::add(args, heap),
+        46 => set::has(args, heap),
+        47 => set::size(args, heap),
+        48 => collection_has(args, heap),
         _ => unreachable!("invalid builtin id checked by caller"),
     };
     Ok(result)

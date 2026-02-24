@@ -117,6 +117,11 @@ pub enum BuiltinId {
     MapSet = 41,
     MapGet = 42,
     MapHas = 43,
+    SetCreate = 44,
+    SetAdd = 45,
+    SetHas = 46,
+    SetSize = 47,
+    CollectionHas = 48,
 }
 
 

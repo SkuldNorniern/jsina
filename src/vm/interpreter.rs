@@ -1,9 +1,34 @@
 use crate::ir::bytecode::{BytecodeChunk, ConstEntry};
 #[cfg(test)]
 use crate::ir::bytecode::Opcode;
+use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
 
 const MAX_CALL_DEPTH: usize = 1000;
+
+enum BuiltinResult {
+    Push(Value),
+    Throw(Value),
+}
+
+fn execute_builtin(
+    builtin_id: u8,
+    argc: usize,
+    stack: &mut Vec<Value>,
+    heap: &mut Heap,
+) -> Result<BuiltinResult, VmError> {
+    if builtin_id > builtins::MAX_BUILTIN_ID {
+        return Err(VmError::InvalidOpcode(builtin_id));
+    }
+    let mut args: Vec<Value> = (0..argc)
+        .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+        .collect::<Result<Vec<_>, _>>()?;
+    args.reverse();
+    match builtins::dispatch(builtin_id, &args, heap) {
+        Ok(v) => Ok(BuiltinResult::Push(v)),
+        Err(builtins::BuiltinError::Throw(v)) => Ok(BuiltinResult::Throw(v)),
+    }
+}
 
 #[inline(always)]
 fn read_u8(code: &[u8], pc: usize) -> u8 {
@@ -273,22 +298,16 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                 });
             }
             0x41 => {
-                let builtin_id = *code.get(*pc).ok_or(VmError::StackUnderflow)?;
-                let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
+                let builtin_id = read_u8(code, *pc);
+                let argc = read_u8(code, *pc + 1) as usize;
                 *pc += 2;
-                let mut args: Vec<Value> = (0..argc)
-                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
-                    .collect::<Result<Vec<_>, _>>()?;
-                args.reverse();
-                if builtin_id > 43 {
-                    return Err(VmError::InvalidOpcode(builtin_id));
-                }
-                match crate::runtime::builtins::dispatch(builtin_id, &args, &mut heap) {
-                    Ok(v) => {
+                match execute_builtin(builtin_id, argc, &mut stack, &mut heap) {
+                    Ok(BuiltinResult::Push(v)) => {
                         getprop_cache.invalidate_all();
                         stack.push(v);
                     }
-                    Err(crate::runtime::builtins::BuiltinError::Throw(v)) => return Ok(Completion::Throw(v)),
+                    Ok(BuiltinResult::Throw(v)) => return Ok(Completion::Throw(v)),
+                    Err(e) => return Err(e),
                 }
             }
             0x42 => {
@@ -496,7 +515,7 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     Value::Bool(_) => "boolean",
                     Value::Int(_) | Value::Number(_) => "number",
                     Value::String(_) => "string",
-                    Value::Object(_) | Value::Array(_) | Value::Map(_) => "object",
+                    Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) => "object",
                     Value::Function(_) => "function",
                 };
                 stack.push(Value::String(s.to_string()));
@@ -537,6 +556,8 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     Value::Array(id) => getprop_cache.get(*id, true, &key_str, &heap),
                     Value::Map(id) if key_str == "size" => Value::Int(heap.map_size(*id) as i32),
                     Value::Map(_) => Value::Undefined,
+                    Value::Set(id) if key_str == "size" => Value::Int(heap.set_size(*id) as i32),
+                    Value::Set(_) => Value::Undefined,
                     Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
                     Value::String(s) => {
                         if let Ok(idx) = key_str.parse::<usize>() {
@@ -586,6 +607,8 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
                     Value::Array(id) => heap.get_array_prop(*id, &key_str),
                     Value::Map(id) if key_str == "size" => Value::Int(heap.map_size(*id) as i32),
                     Value::Map(_) => Value::Undefined,
+                    Value::Set(id) if key_str == "size" => Value::Int(heap.set_size(*id) as i32),
+                    Value::Set(_) => Value::Undefined,
                     Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
                     Value::String(s) => {
                         if let Ok(idx) = key_str.parse::<usize>() {
@@ -666,7 +689,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Function(_) => true,
+        Value::String(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Function(_) => true,
     }
 }
 
@@ -678,7 +701,7 @@ fn value_to_prop_key(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
-        Value::Object(_) | Value::Array(_) | Value::Map(_) => "[object Object]".to_string(),
+        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) => "[object Object]".to_string(),
         Value::Function(_) => "function".to_string(),
     }
 }
@@ -802,6 +825,7 @@ fn strict_eq_values(a: &Value, b: &Value) -> Value {
         (Value::Object(x), Value::Object(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => x == y,
         (Value::Map(x), Value::Map(y)) => x == y,
+        (Value::Set(x), Value::Set(y)) => x == y,
         (Value::Function(x), Value::Function(y)) => x == y,
         _ => false,
     };

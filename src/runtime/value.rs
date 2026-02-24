@@ -9,6 +9,7 @@ pub enum Value {
     Object(usize),
     Array(usize),
     Map(usize),
+    Set(usize),
     Function(usize),
 }
 
@@ -38,6 +39,10 @@ impl Value {
         matches!(self, Value::Map(_))
     }
 
+    pub fn is_set(&self) -> bool {
+        matches!(self, Value::Set(_))
+    }
+
     pub fn as_object_id(&self) -> Option<usize> {
         match self {
             Value::Object(id) => Some(*id),
@@ -58,6 +63,13 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn as_set_id(&self) -> Option<usize> {
+        match self {
+            Value::Set(id) => Some(*id),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for Value {
@@ -72,6 +84,7 @@ impl std::fmt::Display for Value {
             Value::Object(_) => write!(f, "[object Object]"),
             Value::Array(_) => write!(f, "[object Array]"),
             Value::Map(_) => write!(f, "[object Map]"),
+            Value::Set(_) => write!(f, "[object Set]"),
             Value::Function(_) => write!(f, "[object Function]"),
         }
     }

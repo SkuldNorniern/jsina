@@ -1353,7 +1353,15 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         compile_expression(&m.object, ctx)?;
                         compile_expression(&e.args[0], ctx)?;
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                            builtin: crate::ir::hir::BuiltinId::MapHas,
+                            builtin: crate::ir::hir::BuiltinId::CollectionHas,
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "add" && e.args.len() == 1 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::SetAdd,
                             argc: 2,
                             span: e.span,
                         });
@@ -1720,6 +1728,13 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 Expression::Identifier(id) if id.name == "Map" && n.args.is_empty() => {
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::MapCreate,
+                        argc: 0,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "Set" && n.args.is_empty() => {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::SetCreate,
                         argc: 0,
                         span: n.span,
                     });
@@ -2493,6 +2508,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "Map set, get, has, size");
+    }
+
+    #[test]
+    fn lower_set() {
+        let result = crate::driver::Driver::run(
+            "function main() { let s = new Set(); s.add(\"a\"); if (!s.has(\"a\")) return 0; if (s.size !== 1) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Set add, has, size");
     }
 
     #[test]

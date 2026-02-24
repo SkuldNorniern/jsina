@@ -12,6 +12,7 @@ pub struct Heap {
     objects: Vec<HeapObject>,
     arrays: Vec<Vec<Value>>,
     maps: Vec<std::collections::HashMap<String, Value>>,
+    sets: Vec<std::collections::HashSet<String>>,
     error_object_ids: HashSet<usize>,
 }
 
@@ -67,6 +68,29 @@ impl Heap {
 
     pub fn map_size(&self, map_id: usize) -> usize {
         self.maps.get(map_id).map(|m| m.len()).unwrap_or(0)
+    }
+
+    pub fn alloc_set(&mut self) -> usize {
+        let id = self.sets.len();
+        self.sets.push(std::collections::HashSet::new());
+        id
+    }
+
+    pub fn set_add(&mut self, set_id: usize, key: &str) {
+        if let Some(s) = self.sets.get_mut(set_id) {
+            s.insert(key.to_string());
+        }
+    }
+
+    pub fn set_has(&self, set_id: usize, key: &str) -> bool {
+        self.sets
+            .get(set_id)
+            .map(|s| s.contains(key))
+            .unwrap_or(false)
+    }
+
+    pub fn set_size(&self, set_id: usize) -> usize {
+        self.sets.get(set_id).map(|s| s.len()).unwrap_or(0)
     }
 
     pub fn get_prop(&self, obj_id: usize, key: &str) -> Value {
