@@ -33,6 +33,25 @@ pub fn to_upper_case(args: &[Value]) -> Value {
     Value::String(s.to_uppercase())
 }
 
+pub fn repeat(args: &[Value]) -> Value {
+    let s = match args.first() {
+        Some(Value::String(x)) => x.clone(),
+        Some(v) => v.to_string(),
+        None => String::new(),
+    };
+    let count = match args.get(1) {
+        Some(v) => super::to_number(v),
+        None => 0.0,
+    };
+    let n = if count.is_nan() || count < 0.0 || count.is_infinite() {
+        0
+    } else {
+        count as i32
+    };
+    let n = n.max(0) as usize;
+    Value::String(s.repeat(n))
+}
+
 pub fn char_at(args: &[Value]) -> Value {
     let s = match args.first() {
         Some(Value::String(x)) => x.clone(),

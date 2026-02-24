@@ -1500,6 +1500,22 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 2,
                             span: e.span,
                         });
+                    } else if prop == "repeat" {
+                        compile_expression(&m.object, ctx)?;
+                        let cnt = e.args.first();
+                        if let Some(a) = cnt {
+                            compile_expression(a, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::StringRepeat,
+                            argc: 2,
+                            span: e.span,
+                        });
                     } else if prop == "hasOwnProperty" {
                         compile_expression(&m.object, ctx)?;
                         let key = e.args.first();
@@ -2347,6 +2363,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "String.charAt");
+    }
+
+    #[test]
+    fn lower_string_repeat() {
+        let result = crate::driver::Driver::run(
+            "function main() { if (\"ab\".repeat(3) !== \"ababab\") return 0; if (\"x\".repeat(0) !== \"\") return 0; if (\"hi\".repeat(1) !== \"hi\") return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "String.repeat");
     }
 
     #[test]

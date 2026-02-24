@@ -2,7 +2,7 @@ use crate::backend::translate_to_lamina_ir;
 use crate::diagnostics::Diagnostic;
 use crate::frontend::{check_early_errors, Lexer, Parser};
 use crate::ir::{hir_to_bytecode, script_to_hir};
-use crate::vm::{interpret_program_with_trace, Completion, Program};
+use crate::vm::{Completion, Program};
 
 #[derive(Debug)]
 pub enum DriverError {
