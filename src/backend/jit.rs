@@ -3,7 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use lamina::{compile_lamina_ir_to_assembly, error::LaminaError};
+use lamina::ir::{builder::i64, IRBuilder, PrimitiveType, Type};
+use lamina::mir::codegen::from_ir;
+use lamina::mir_codegen::generate_mir_to_target;
+use lamina::target::Target;
+use lamina::LaminaError;
 
 use crate::frontend::Lexer;
 use crate::frontend::TokenType;
@@ -41,7 +45,7 @@ impl From<LaminaError> for BackendError {
     }
 }
 
-pub fn translate_to_lamina_ir(js_source: &str) -> Result<String, BackendError> {
+pub fn extract_constant_return(js_source: &str) -> Result<i64, BackendError> {
     let mut lexer = Lexer::new(js_source.to_string());
     let tokens = lexer.tokenize();
 
@@ -77,10 +81,38 @@ pub fn translate_to_lamina_ir(js_source: &str) -> Result<String, BackendError> {
         }
     }
 
-    let value = return_value.ok_or_else(|| BackendError::Parse(
+    return_value.ok_or_else(|| BackendError::Parse(
         "Could not find main function with numeric return".to_string(),
-    ))?;
+    ))
+}
 
+fn build_constant_main_module(value: i64) -> lamina::ir::Module<'static> {
+    let mut builder = IRBuilder::new();
+    builder
+        .function("main", Type::Primitive(PrimitiveType::I64))
+        .export()
+        .ret(Type::Primitive(PrimitiveType::I64), i64(value));
+    builder.build()
+}
+
+fn compile_module_to_assembly<W: std::io::Write>(
+    module: &lamina::ir::Module<'static>,
+    output: &mut W,
+) -> Result<(), BackendError> {
+    let mir_module = from_ir(module, "jit").map_err(|e| BackendError::Lamina(e.into()))?;
+    let target = Target::detect_host();
+    generate_mir_to_target(
+        &mir_module,
+        output,
+        target.architecture,
+        target.operating_system,
+    )
+    .map_err(BackendError::Lamina)?;
+    Ok(())
+}
+
+pub fn translate_to_lamina_ir(js_source: &str) -> Result<String, BackendError> {
+    let value = extract_constant_return(js_source)?;
     let ir = format!(
         concat!(
             "@export\n",
@@ -220,10 +252,11 @@ pub fn run_via_jit(js_source: &str) -> Result<i64, BackendError> {
         p
     };
 
-    let lamina_ir = translate_to_lamina_ir(js_source)?;
+    let value = extract_constant_return(js_source)?;
+    let module = build_constant_main_module(value);
 
     let mut asm_buf: Vec<u8> = Vec::new();
-    compile_lamina_ir_to_assembly(&lamina_ir, &mut asm_buf)?;
+    compile_module_to_assembly(&module, &mut asm_buf)?;
     fs::write(&asm_path, &asm_buf)?;
 
     assemble_object(&asm_path, &obj_path)?;
