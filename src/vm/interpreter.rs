@@ -2,6 +2,8 @@ use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
 use crate::runtime::{Heap, Value};
 use std::io::Write;
 
+const MAX_CALL_DEPTH: usize = 1000;
+
 #[derive(Debug, Clone)]
 pub enum Completion {
     Normal(Value),
@@ -14,6 +16,7 @@ pub enum VmError {
     StackUnderflow,
     InvalidOpcode(u8),
     InvalidConstIndex(usize),
+    CallDepthExceeded,
 }
 
 impl std::fmt::Display for VmError {
@@ -22,6 +25,7 @@ impl std::fmt::Display for VmError {
             VmError::StackUnderflow => write!(f, "stack underflow"),
             VmError::InvalidOpcode(b) => write!(f, "invalid opcode: 0x{:02x}", b),
             VmError::InvalidConstIndex(i) => write!(f, "invalid constant index: {}", i),
+            VmError::CallDepthExceeded => write!(f, "maximum call depth exceeded"),
         }
     }
 }
@@ -169,19 +173,25 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 }
             }
             x if x == Opcode::Call as u8 => {
-                let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
-                let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
-                *pc += 2;
-                let callee = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
-                let mut args: Vec<Value> = (0..argc)
-                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
-                    .collect::<Result<Vec<_>, _>>()?;
-                args.reverse();
-                let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
-                for (i, v) in args.into_iter().enumerate() {
-                    if i < callee_locals.len() {
-                        callee_locals[i] = v;
+                let (func_idx, callee_locals) = {
+                    let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                    let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
+                    *pc += 2;
+                    let callee = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
+                    let mut args: Vec<Value> = (0..argc)
+                        .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    args.reverse();
+                    let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
+                    for (i, v) in args.into_iter().enumerate() {
+                        if i < callee_locals.len() {
+                            callee_locals[i] = v;
+                        }
                     }
+                    (func_idx, callee_locals)
+                };
+                if frames.len() >= MAX_CALL_DEPTH {
+                    return Err(VmError::CallDepthExceeded);
                 }
                 frames.push(Frame {
                     chunk_index: func_idx,
@@ -350,32 +360,120 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         heap.set_prop(obj_id, "message", Value::String(msg));
                         stack.push(Value::Object(obj_id));
                     }
+                    14 => {
+                        let arg = args.first();
+                        let n = arg.map(value_to_number).unwrap_or(f64::NAN);
+                        if n.fract() == 0.0 && n >= i32::MIN as f64 && n <= i32::MAX as f64 {
+                            stack.push(Value::Int(n as i32));
+                        } else {
+                            stack.push(Value::Number(n));
+                        }
+                    }
+                    15 => {
+                        let arg = args.first();
+                        let b = arg.map(|v| is_truthy(v)).unwrap_or(false);
+                        stack.push(Value::Bool(b));
+                    }
+                    16 => {
+                        let arr = args.first().ok_or(VmError::StackUnderflow)?;
+                        let arr_id = match arr {
+                            Value::Array(id) => *id,
+                            _ => {
+                                stack.push(Value::Undefined);
+                                continue;
+                            }
+                        };
+                        let elements: Vec<Value> = heap
+                            .array_elements(arr_id)
+                            .map(|s| s.to_vec())
+                            .unwrap_or_default();
+                        let len = elements.len() as i32;
+                        let start_val = args.get(1);
+                        let end_val = args.get(2);
+                        let start = start_val.map(|v| value_to_number(v) as i32).unwrap_or(0);
+                        let end = end_val
+                            .map(|v| {
+                                let n = value_to_number(v);
+                                if n.is_nan() || n.is_infinite() {
+                                    len
+                                } else {
+                                    n as i32
+                                }
+                            })
+                            .unwrap_or(len);
+                        let start = start.max(0).min(len) as usize;
+                        let end = end.max(0).min(len as i32) as usize;
+                        let end = end.max(start);
+                        let new_id = heap.alloc_array();
+                        for i in start..end {
+                            if let Some(v) = elements.get(i) {
+                                heap.array_push(new_id, v.clone());
+                            }
+                        }
+                        stack.push(Value::Array(new_id));
+                    }
+                    17 => {
+                        let arr = args.first().ok_or(VmError::StackUnderflow)?;
+                        let arr_id = match arr {
+                            Value::Array(id) => *id,
+                            _ => {
+                                stack.push(Value::Undefined);
+                                continue;
+                            }
+                        };
+                        let mut to_push: Vec<Value> = heap
+                            .array_elements(arr_id)
+                            .map(|s| s.to_vec())
+                            .unwrap_or_default();
+                        for v in args.iter().skip(1) {
+                            if let Value::Array(id) = v {
+                                let elems: Vec<Value> = heap
+                                    .array_elements(*id)
+                                    .map(|s| s.to_vec())
+                                    .unwrap_or_default();
+                                to_push.extend(elems);
+                            } else {
+                                to_push.push(v.clone());
+                            }
+                        }
+                        let new_id = heap.alloc_array();
+                        for v in to_push {
+                            heap.array_push(new_id, v);
+                        }
+                        stack.push(Value::Array(new_id));
+                    }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
             }
             x if x == Opcode::CallMethod as u8 => {
-                let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
-                *pc += 1;
-                let mut args: Vec<Value> = (0..argc)
-                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
-                    .collect::<Result<Vec<_>, _>>()?;
-                args.reverse();
-                let callee = stack.pop().ok_or(VmError::StackUnderflow)?;
-                let receiver = stack.pop().ok_or(VmError::StackUnderflow)?;
-                let func_idx = match &callee {
-                    Value::Function(i) => *i,
-                    _ => {
-                        return Ok(Completion::Throw(Value::String(
-                            "callee is not a function".to_string(),
-                        )));
+                let (func_idx, callee_locals, receiver) = {
+                    let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                    *pc += 1;
+                    let mut args: Vec<Value> = (0..argc)
+                        .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    args.reverse();
+                    let callee = stack.pop().ok_or(VmError::StackUnderflow)?;
+                    let receiver = stack.pop().ok_or(VmError::StackUnderflow)?;
+                    let func_idx = match &callee {
+                        Value::Function(i) => *i,
+                        _ => {
+                            return Ok(Completion::Throw(Value::String(
+                                "callee is not a function".to_string(),
+                            )));
+                        }
+                    };
+                    let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
+                    let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
+                    for (i, v) in args.into_iter().enumerate() {
+                        if i < callee_locals.len() {
+                            callee_locals[i] = v;
+                        }
                     }
+                    (func_idx, callee_locals, receiver)
                 };
-                let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
-                let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
-                for (i, v) in args.into_iter().enumerate() {
-                    if i < callee_locals.len() {
-                        callee_locals[i] = v;
-                    }
+                if frames.len() >= MAX_CALL_DEPTH {
+                    return Err(VmError::CallDepthExceeded);
                 }
                 frames.push(Frame {
                     chunk_index: func_idx,
@@ -387,20 +485,26 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 });
             }
             x if x == Opcode::New as u8 => {
-                let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
-                let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
-                *pc += 2;
-                let mut args: Vec<Value> = (0..argc)
-                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
-                    .collect::<Result<Vec<_>, _>>()?;
-                args.reverse();
-                let obj_id = heap.alloc_object();
-                let callee = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
-                let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
-                for (i, v) in args.into_iter().enumerate() {
-                    if i < callee_locals.len() {
-                        callee_locals[i] = v;
+                let (func_idx, callee_locals, obj_id) = {
+                    let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                    let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
+                    *pc += 2;
+                    let mut args: Vec<Value> = (0..argc)
+                        .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    args.reverse();
+                    let obj_id = heap.alloc_object();
+                    let callee = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
+                    let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
+                    for (i, v) in args.into_iter().enumerate() {
+                        if i < callee_locals.len() {
+                            callee_locals[i] = v;
+                        }
                     }
+                    (func_idx, callee_locals, obj_id)
+                };
+                if frames.len() >= MAX_CALL_DEPTH {
+                    return Err(VmError::CallDepthExceeded);
                 }
                 frames.push(Frame {
                     chunk_index: func_idx,
@@ -535,6 +639,7 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 let result = match &obj {
                     Value::Object(id) => heap.get_prop(*id, &key_str),
                     Value::Array(id) => heap.get_array_prop(*id, &key_str),
+                    Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
                     _ => Value::Undefined,
                 };
                 stack.push(result);
@@ -567,6 +672,7 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                 let result = match &obj {
                     Value::Object(id) => heap.get_prop(*id, &key_str),
                     Value::Array(id) => heap.get_array_prop(*id, &key_str),
+                    Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
                     _ => Value::Undefined,
                 };
                 stack.push(result);

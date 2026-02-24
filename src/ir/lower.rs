@@ -1263,6 +1263,41 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
+                    } else if prop == "slice" {
+                        compile_expression(&m.object, ctx)?;
+                        let start = e.args.get(0);
+                        let end = e.args.get(1);
+                        if let Some(s) = start {
+                            compile_expression(s, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        if let Some(ed) = end {
+                            compile_expression(ed, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArraySlice,
+                            argc: 3,
+                            span: e.span,
+                        });
+                    } else if prop == "concat" {
+                        compile_expression(&m.object, ctx)?;
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayConcat,
+                            argc: (e.args.len() + 1) as u32,
+                            span: e.span,
+                        });
                     } else {
                         compile_expression(&m.object, ctx)?;
                         ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: e.span });
@@ -1309,6 +1344,26 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::Error,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "Number" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Number,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "Boolean" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::Boolean,
                         argc: e.args.len() as u32,
                         span: e.span,
                     });
@@ -1930,6 +1985,50 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 2, "Object.keys should return array of own keys");
+    }
+
+    #[test]
+    fn lower_number_boolean() {
+        let result = crate::driver::Driver::run(
+            "function main() { if (!Boolean(1)) return 0; if (Boolean(0)) return 0; if (Number(\"42\") !== 42) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Number and Boolean builtins");
+    }
+
+    #[test]
+    fn lower_array_slice_concat() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [1, 2, 3, 4]; let s = a.slice(1, 3); if (s.length !== 2) return 0; if (s[0] !== 2 || s[1] !== 3) return 0; let c = a.concat([5, 6]); if (c.length !== 6) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Array.slice and Array.concat");
+    }
+
+    #[test]
+    fn lower_string_length() {
+        let result = crate::driver::Driver::run(
+            "function main() { let s = \"hello\"; return s.length; }",
+        )
+        .expect("run");
+        assert_eq!(result, 5, "string.length");
+    }
+
+    #[test]
+    fn lower_recursion_depth_cap() {
+        let src = r#"
+function recurse(n) {
+  if (n <= 0) return 0;
+  return recurse(n - 1) + 1;
+}
+function main() {
+  return recurse(1001);
+}
+"#;
+        let result = crate::driver::Driver::run(src);
+        assert!(result.is_err(), "deep recursion should hit call depth limit");
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("call depth"), "expected CallDepthExceeded, got: {}", err);
     }
 
     #[test]
