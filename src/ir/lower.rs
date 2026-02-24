@@ -735,11 +735,262 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
 
             ctx.current_block = exit_id as usize;
         }
-        Statement::ForIn(_) | Statement::ForOf(_) => {
-            return Err(LowerError::Unsupported(
-                "for-in and for-of not yet implemented".to_string(),
-                None,
-            ));
+        Statement::ForIn(f) => {
+            let right_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            let keys_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            let index_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+
+            let left_slot = match &f.left {
+                ForInOfLeft::VarDecl(name) | ForInOfLeft::LetDecl(name) | ForInOfLeft::ConstDecl(name) => {
+                    *ctx.locals.entry(name.clone()).or_insert_with(|| {
+                        let s = ctx.next_slot;
+                        ctx.next_slot += 1;
+                        s
+                    })
+                }
+                ForInOfLeft::Identifier(name) => *ctx.locals.get(name).ok_or_else(|| {
+                    LowerError::Unsupported(
+                        format!("for-in variable '{}' not in scope", name),
+                        Some(f.span),
+                    )
+                })?,
+            };
+
+            compile_expression(&f.right, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: right_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: right_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                builtin: crate::ir::hir::BuiltinId::Object1,
+                argc: 1,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: keys_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                value: HirConst::Int(0),
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: index_slot,
+                span: f.span,
+            });
+
+            let loop_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: loop_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let body_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: body_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let exit_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: exit_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+
+            let cond_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            ctx.current_block = loop_id as usize;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: index_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: keys_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                key: "length".to_string(),
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::Lt { span: f.span });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: cond_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: cond_slot,
+                then_block: body_id,
+                else_block: exit_id,
+            };
+
+            loop_stack_push(ctx, loop_id, exit_id);
+            ctx.current_block = body_id as usize;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: keys_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: index_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::GetPropDyn { span: f.span });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: left_slot,
+                span: f.span,
+            });
+            let body_exits = compile_statement(&f.body, ctx)?;
+            loop_stack_pop(ctx);
+            if !body_exits {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                    id: index_slot,
+                    span: f.span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                    value: HirConst::Int(1),
+                    span: f.span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Add { span: f.span });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                    id: index_slot,
+                    span: f.span,
+                });
+                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+            } else {
+                ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+            }
+
+            ctx.current_block = exit_id as usize;
+        }
+        Statement::ForOf(f) => {
+            let right_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            let index_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+
+            let left_slot = match &f.left {
+                ForInOfLeft::VarDecl(name) | ForInOfLeft::LetDecl(name) | ForInOfLeft::ConstDecl(name) => {
+                    *ctx.locals.entry(name.clone()).or_insert_with(|| {
+                        let s = ctx.next_slot;
+                        ctx.next_slot += 1;
+                        s
+                    })
+                }
+                ForInOfLeft::Identifier(name) => *ctx.locals.get(name).ok_or_else(|| {
+                    LowerError::Unsupported(
+                        format!("for-of variable '{}' not in scope", name),
+                        Some(f.span),
+                    )
+                })?,
+            };
+
+            compile_expression(&f.right, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: right_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                value: HirConst::Int(0),
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: index_slot,
+                span: f.span,
+            });
+
+            let loop_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: loop_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let body_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: body_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+            let exit_id = ctx.blocks.len() as HirBlockId;
+            ctx.blocks.push(HirBlock {
+                id: exit_id,
+                ops: Vec::new(),
+                terminator: HirTerminator::Jump { target: 0 },
+            });
+
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+
+            let cond_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            ctx.current_block = loop_id as usize;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: index_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: right_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                key: "length".to_string(),
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::Lt { span: f.span });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: cond_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: cond_slot,
+                then_block: body_id,
+                else_block: exit_id,
+            };
+
+            loop_stack_push(ctx, loop_id, exit_id);
+            ctx.current_block = body_id as usize;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: right_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: index_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::GetPropDyn { span: f.span });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: left_slot,
+                span: f.span,
+            });
+            let body_exits = compile_statement(&f.body, ctx)?;
+            loop_stack_pop(ctx);
+            if !body_exits {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                    id: index_slot,
+                    span: f.span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                    value: HirConst::Int(1),
+                    span: f.span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Add { span: f.span });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                    id: index_slot,
+                    span: f.span,
+                });
+                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
+            } else {
+                ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
+            }
+
+            ctx.current_block = exit_id as usize;
         }
         Statement::Switch(s) => {
             let disc_slot = ctx.next_slot;
@@ -2516,6 +2767,24 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 2, "Object.keys should return array of own keys");
+    }
+
+    #[test]
+    fn lower_for_in() {
+        let result = crate::driver::Driver::run(
+            "function main() { let o = { x: 10, y: 20 }; let sum = 0; for (let k in o) { sum = sum + 1; } return sum; }",
+        )
+        .expect("run");
+        assert_eq!(result, 2, "for-in should iterate over 2 keys");
+    }
+
+    #[test]
+    fn lower_for_of() {
+        let result = crate::driver::Driver::run(
+            "function main() { let arr = [3, 7, 11]; let sum = 0; for (let v of arr) { sum = sum + v; } return sum; }",
+        )
+        .expect("run");
+        assert_eq!(result, 21, "for-of should sum array elements");
     }
 
     #[test]
