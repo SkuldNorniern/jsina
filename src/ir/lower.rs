@@ -229,6 +229,91 @@ fn terminator_for_exit(ctx: &LowerCtx<'_>) -> HirTerminator {
     }
 }
 
+fn compile_declarator(decl: &crate::frontend::ast::VarDeclarator, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
+    match &decl.binding {
+        crate::frontend::ast::Binding::Ident(name) => {
+            let slot = *ctx.locals.entry(name.clone()).or_insert_with(|| {
+                let s = ctx.next_slot;
+                ctx.next_slot += 1;
+                s
+            });
+            if let Some(ref init) = decl.init {
+                compile_expression(init, ctx)?;
+                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                    id: slot,
+                    span: decl.span,
+                });
+            }
+        }
+        crate::frontend::ast::Binding::ObjectPattern(props) => {
+            let init = decl.init.as_ref().ok_or_else(|| {
+                LowerError::Unsupported("object destructuring requires initializer".to_string(), Some(decl.span))
+            })?;
+            compile_expression(init, ctx)?;
+            let src_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: src_slot,
+                span: decl.span,
+            });
+            for prop in props {
+                let slot = *ctx.locals.entry(prop.binding.clone()).or_insert_with(|| {
+                    let s = ctx.next_slot;
+                    ctx.next_slot += 1;
+                    s
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                    id: src_slot,
+                    span: decl.span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                    key: prop.key.clone(),
+                    span: decl.span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                    id: slot,
+                    span: decl.span,
+                });
+            }
+        }
+        crate::frontend::ast::Binding::ArrayPattern(elems) => {
+            let init = decl.init.as_ref().ok_or_else(|| {
+                LowerError::Unsupported("array destructuring requires initializer".to_string(), Some(decl.span))
+            })?;
+            compile_expression(init, ctx)?;
+            let src_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: src_slot,
+                span: decl.span,
+            });
+            for (i, elem) in elems.iter().enumerate() {
+                if let Some(ref name) = elem.binding {
+                    let slot = *ctx.locals.entry(name.clone()).or_insert_with(|| {
+                        let s = ctx.next_slot;
+                        ctx.next_slot += 1;
+                        s
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: src_slot,
+                        span: decl.span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Int(i as i64),
+                        span: decl.span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::GetPropDyn { span: decl.span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: slot,
+                        span: decl.span,
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn compile_function(
     f: &FunctionDeclStmt,
     func_index: &HashMap<String, u32>,
@@ -643,52 +728,19 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
         }
         Statement::VarDecl(d) => {
             for decl in &d.declarations {
-                let slot = *ctx.locals.entry(decl.name.clone()).or_insert_with(|| {
-                    let s = ctx.next_slot;
-                    ctx.next_slot += 1;
-                    s
-                });
-                if let Some(ref init) = decl.init {
-                    compile_expression(init, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                        id: slot,
-                        span: decl.span,
-                    });
-                }
+                compile_declarator(decl, ctx)?;
             }
             return Ok(false);
         }
         Statement::LetDecl(d) => {
             for decl in &d.declarations {
-                let slot = *ctx.locals.entry(decl.name.clone()).or_insert_with(|| {
-                    let s = ctx.next_slot;
-                    ctx.next_slot += 1;
-                    s
-                });
-                if let Some(ref init) = decl.init {
-                    compile_expression(init, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                        id: slot,
-                        span: decl.span,
-                    });
-                }
+                compile_declarator(decl, ctx)?;
             }
             return Ok(false);
         }
         Statement::ConstDecl(d) => {
             for decl in &d.declarations {
-                let slot = *ctx.locals.entry(decl.name.clone()).or_insert_with(|| {
-                    let s = ctx.next_slot;
-                    ctx.next_slot += 1;
-                    s
-                });
-                if let Some(ref init) = decl.init {
-                    compile_expression(init, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                        id: slot,
-                        span: decl.span,
-                    });
-                }
+                compile_declarator(decl, ctx)?;
             }
             return Ok(false);
         }
@@ -2644,6 +2696,21 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 99, "a[1] = 99 should mutate and read back");
+    }
+
+    #[test]
+    fn lower_destructuring() {
+        let result = crate::driver::Driver::run(
+            "function main() { let obj = { x: 1, y: 2 }; let { x, y } = obj; return x + y; }",
+        )
+        .expect("run");
+        assert_eq!(result, 3, "object destructuring");
+
+        let result = crate::driver::Driver::run(
+            "function main() { let arr = [10, 20]; let [a, b] = arr; return a + b; }",
+        )
+        .expect("run");
+        assert_eq!(result, 30, "array destructuring");
     }
 
     #[test]

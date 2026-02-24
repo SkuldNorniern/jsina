@@ -176,8 +176,37 @@ pub struct ConstDeclStmt {
 pub struct VarDeclarator {
     pub id: NodeId,
     pub span: Span,
-    pub name: String,
+    pub binding: Binding,
     pub init: Option<Box<Expression>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Binding {
+    Ident(String),
+    ObjectPattern(Vec<ObjectPatternProp>),
+    ArrayPattern(Vec<ArrayPatternElem>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ObjectPatternProp {
+    pub key: String,
+    pub binding: String,
+    pub shorthand: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrayPatternElem {
+    pub binding: Option<String>,
+}
+
+impl Binding {
+    pub fn names(&self) -> Vec<&str> {
+        match self {
+            Binding::Ident(n) => vec![n.as_str()],
+            Binding::ObjectPattern(props) => props.iter().map(|p| p.binding.as_str()).collect(),
+            Binding::ArrayPattern(elems) => elems.iter().filter_map(|e| e.binding.as_deref()).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

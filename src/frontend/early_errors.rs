@@ -162,50 +162,56 @@ fn check_statement(
         }
         Statement::LetDecl(d) => {
             for decl in &d.declarations {
-                if ctx.strict && is_strict_reserved(&decl.name) {
-                    errors.push(EarlyError {
-                        code: "JSINA-EARLY-008".to_string(),
-                        message: format!("'{}' may not be used as binding in strict mode", decl.name),
-                        span: decl.span,
-                    });
-                }
-                if let Some(prev) = scope.add_lexical(&decl.name, decl.span) {
-                    errors.push(EarlyError {
-                        code: "JSINA-EARLY-003".to_string(),
-                        message: format!("duplicate lexical declaration '{}'", decl.name),
-                        span: prev,
-                    });
+                for name in decl.binding.names() {
+                    if ctx.strict && is_strict_reserved(name) {
+                        errors.push(EarlyError {
+                            code: "JSINA-EARLY-008".to_string(),
+                            message: format!("'{}' may not be used as binding in strict mode", name),
+                            span: decl.span,
+                        });
+                    }
+                    if let Some(prev) = scope.add_lexical(name, decl.span) {
+                        errors.push(EarlyError {
+                            code: "JSINA-EARLY-003".to_string(),
+                            message: format!("duplicate lexical declaration '{}'", name),
+                            span: prev,
+                        });
+                    }
                 }
             }
         }
         Statement::ConstDecl(d) => {
             for decl in &d.declarations {
-                if ctx.strict && is_strict_reserved(&decl.name) {
-                    errors.push(EarlyError {
-                        code: "JSINA-EARLY-008".to_string(),
-                        message: format!("'{}' may not be used as binding in strict mode", decl.name),
-                        span: decl.span,
-                    });
-                }
-                if let Some(prev) = scope.add_lexical(&decl.name, decl.span) {
-                    errors.push(EarlyError {
-                        code: "JSINA-EARLY-003".to_string(),
-                        message: format!("duplicate lexical declaration '{}'", decl.name),
-                        span: prev,
-                    });
+                for name in decl.binding.names() {
+                    if ctx.strict && is_strict_reserved(name) {
+                        errors.push(EarlyError {
+                            code: "JSINA-EARLY-008".to_string(),
+                            message: format!("'{}' may not be used as binding in strict mode", name),
+                            span: decl.span,
+                        });
+                    }
+                    if let Some(prev) = scope.add_lexical(name, decl.span) {
+                        errors.push(EarlyError {
+                            code: "JSINA-EARLY-003".to_string(),
+                            message: format!("duplicate lexical declaration '{}'", name),
+                            span: prev,
+                        });
+                    }
                 }
             }
         }
         Statement::VarDecl(d) => {
             for decl in &d.declarations {
-                if ctx.strict && is_strict_reserved(&decl.name) {
-                    errors.push(EarlyError {
-                        code: "JSINA-EARLY-008".to_string(),
-                        message: format!("'{}' may not be used as binding in strict mode", decl.name),
-                        span: decl.span,
-                    });
+                for name in decl.binding.names() {
+                    if ctx.strict && is_strict_reserved(name) {
+                        errors.push(EarlyError {
+                            code: "JSINA-EARLY-008".to_string(),
+                            message: format!("'{}' may not be used as binding in strict mode", name),
+                            span: decl.span,
+                        });
+                    }
+                    scope.add_var(name);
                 }
-                scope.add_var(&decl.name);
             }
         }
         Statement::If(i) => {

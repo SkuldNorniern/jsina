@@ -577,33 +577,51 @@ impl Parser {
     ) -> Result<Statement, ParseError> {
         let left = match &decl_stmt {
             Statement::VarDecl(v) => {
-                let name = v.declarations.first().map(|d| d.name.clone()).ok_or_else(|| {
-                    ParseError {
-                        code: "JSINA-PARSE-009".to_string(),
-                        message: "for-in/for-of requires a variable name".to_string(),
-                        span: Some(start_span),
-                    }
+                let d = v.declarations.first().ok_or_else(|| ParseError {
+                    code: "JSINA-PARSE-009".to_string(),
+                    message: "for-in/for-of requires declaration".to_string(),
+                    span: Some(start_span),
                 })?;
+                let name = match &d.binding {
+                    crate::frontend::ast::Binding::Ident(n) => n.clone(),
+                    _ => return Err(ParseError {
+                        code: "JSINA-PARSE-009".to_string(),
+                        message: "for-in/for-of requires single identifier".to_string(),
+                        span: Some(start_span),
+                    }),
+                };
                 crate::frontend::ast::ForInOfLeft::VarDecl(name)
             }
             Statement::LetDecl(l) => {
-                let name = l.declarations.first().map(|d| d.name.clone()).ok_or_else(|| {
-                    ParseError {
-                        code: "JSINA-PARSE-009".to_string(),
-                        message: "for-in/for-of requires a variable name".to_string(),
-                        span: Some(start_span),
-                    }
+                let d = l.declarations.first().ok_or_else(|| ParseError {
+                    code: "JSINA-PARSE-009".to_string(),
+                    message: "for-in/for-of requires declaration".to_string(),
+                    span: Some(start_span),
                 })?;
+                let name = match &d.binding {
+                    crate::frontend::ast::Binding::Ident(n) => n.clone(),
+                    _ => return Err(ParseError {
+                        code: "JSINA-PARSE-009".to_string(),
+                        message: "for-in/for-of requires single identifier".to_string(),
+                        span: Some(start_span),
+                    }),
+                };
                 crate::frontend::ast::ForInOfLeft::LetDecl(name)
             }
             Statement::ConstDecl(c) => {
-                let name = c.declarations.first().map(|d| d.name.clone()).ok_or_else(|| {
-                    ParseError {
-                        code: "JSINA-PARSE-009".to_string(),
-                        message: "for-in/for-of requires a variable name".to_string(),
-                        span: Some(start_span),
-                    }
+                let d = c.declarations.first().ok_or_else(|| ParseError {
+                    code: "JSINA-PARSE-009".to_string(),
+                    message: "for-in/for-of requires declaration".to_string(),
+                    span: Some(start_span),
                 })?;
+                let name = match &d.binding {
+                    crate::frontend::ast::Binding::Ident(n) => n.clone(),
+                    _ => return Err(ParseError {
+                        code: "JSINA-PARSE-009".to_string(),
+                        message: "for-in/for-of requires single identifier".to_string(),
+                        span: Some(start_span),
+                    }),
+                };
                 crate::frontend::ast::ForInOfLeft::ConstDecl(name)
             }
             _ => {
@@ -709,9 +727,7 @@ impl Parser {
     fn parse_declarators(&mut self) -> Result<Vec<VarDeclarator>, ParseError> {
         let mut decls = Vec::new();
         loop {
-            let name_tok = self.expect(TokenType::Identifier)?;
-            let name = name_tok.lexeme.clone();
-            let decl_span = name_tok.span;
+            let (binding, start_span) = self.parse_binding()?;
 
             let init = if self.optional(TokenType::Assign) {
                 Some(Box::new(self.parse_expression()?))
@@ -719,12 +735,19 @@ impl Parser {
                 None
             };
 
-            let decl_span = init.as_ref().map(|e| decl_span.merge(e.span())).unwrap_or(decl_span);
+            let decl_span = init.as_ref().map(|e| start_span.merge(e.span())).unwrap_or(start_span);
+            if matches!(&binding, Binding::ObjectPattern(_) | Binding::ArrayPattern(_)) && init.is_none() {
+                return Err(ParseError {
+                    code: "JSINA-PARSE-009".to_string(),
+                    message: "destructuring declaration requires an initializer".to_string(),
+                    span: Some(decl_span),
+                });
+            }
 
             decls.push(VarDeclarator {
                 id: self.next_id(),
                 span: decl_span,
-                name,
+                binding,
                 init,
             });
 
@@ -733,6 +756,75 @@ impl Parser {
             }
         }
         Ok(decls)
+    }
+
+    fn parse_binding(&mut self) -> Result<(Binding, Span), ParseError> {
+        let start_span = self.current().map(|t| t.span).unwrap_or_else(|| Span::point(crate::diagnostics::Position::start()));
+        if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftBrace)) {
+            self.advance();
+            let mut props = Vec::new();
+            loop {
+                if matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightBrace)) {
+                    self.advance();
+                    break;
+                }
+                let key_tok = self.expect(TokenType::Identifier)?;
+                let key = key_tok.lexeme.clone();
+                let (binding, shorthand) = if self.optional(TokenType::Colon) {
+                    let (nested, _) = self.parse_binding()?;
+                    let name = nested.names().into_iter().next().unwrap_or("").to_string();
+                    if matches!(&nested, Binding::ObjectPattern(_) | Binding::ArrayPattern(_)) {
+                        return Err(ParseError {
+                            code: "JSINA-PARSE-010".to_string(),
+                            message: "nested destructuring not yet supported".to_string(),
+                            span: Some(key_tok.span),
+                        });
+                    }
+                    (name, false)
+                } else {
+                    (key.clone(), true)
+                };
+                props.push(ObjectPatternProp { key, binding, shorthand });
+                if !self.optional(TokenType::Comma) {
+                    self.expect(TokenType::RightBrace)?;
+                    break;
+                }
+            }
+            let end_span = self.current().map(|t| t.span).unwrap_or(start_span);
+            Ok((Binding::ObjectPattern(props), start_span.merge(end_span)))
+        } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftBracket)) {
+            self.advance();
+            let mut elems = Vec::new();
+            loop {
+                if matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightBracket)) {
+                    self.advance();
+                    break;
+                }
+                let binding = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Comma)) {
+                    self.advance();
+                    None
+                } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
+                    let tok = self.expect(TokenType::Identifier)?;
+                    Some(tok.lexeme)
+                } else {
+                    return Err(ParseError {
+                        code: "JSINA-PARSE-011".to_string(),
+                        message: "expected identifier or comma in array pattern".to_string(),
+                        span: self.current().map(|t| t.span),
+                    });
+                };
+                elems.push(ArrayPatternElem { binding });
+                if !self.optional(TokenType::Comma) {
+                    self.expect(TokenType::RightBracket)?;
+                    break;
+                }
+            }
+            let end_span = self.current().map(|t| t.span).unwrap_or(start_span);
+            Ok((Binding::ArrayPattern(elems), start_span.merge(end_span)))
+        } else {
+            let name_tok = self.expect(TokenType::Identifier)?;
+            Ok((Binding::Ident(name_tok.lexeme.clone()), name_tok.span))
+        }
     }
 
     fn parse_expression_statement(&mut self) -> Result<Statement, ParseError> {
@@ -2159,6 +2251,48 @@ mod tests {
         }
         panic!("expected throw 42 in block");
     }
+
+    #[test]
+    fn parse_destructuring_object() {
+        let script = parse_ok("function f() { let { x, y } = obj; return x + y; }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::LetDecl(l) = &b.body[0] {
+                    let d = &l.declarations[0];
+                    if let crate::frontend::ast::Binding::ObjectPattern(props) = &d.binding {
+                        assert_eq!(props.len(), 2);
+                        assert_eq!(props[0].key, "x");
+                        assert_eq!(props[0].binding, "x");
+                        assert!(props[0].shorthand);
+                        assert_eq!(props[1].key, "y");
+                        assert_eq!(props[1].binding, "y");
+                        return;
+                    }
+                }
+            }
+        }
+        panic!("expected object destructuring");
+    }
+
+    #[test]
+    fn parse_destructuring_array() {
+        let script = parse_ok("function f() { let [a, b] = arr; return a + b; }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::LetDecl(l) = &b.body[0] {
+                    let d = &l.declarations[0];
+                    if let crate::frontend::ast::Binding::ArrayPattern(elems) = &d.binding {
+                        assert_eq!(elems.len(), 2);
+                        assert_eq!(elems[0].binding.as_deref(), Some("a"));
+                        assert_eq!(elems[1].binding.as_deref(), Some("b"));
+                        return;
+                    }
+                }
+            }
+        }
+        panic!("expected array destructuring");
+    }
+
     #[test]
     fn parse_script_var() { let _ = parse_ok("var x = 1;"); }
     #[test]
