@@ -1,8 +1,29 @@
 use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
 use crate::runtime::{Heap, Value};
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const MAX_CALL_DEPTH: usize = 1000;
+
+static RNG_STATE: AtomicU64 = AtomicU64::new(0);
+
+fn simple_random() -> f64 {
+    let mut state = RNG_STATE.load(Ordering::Relaxed);
+    if state == 0 {
+        state = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1);
+        if state == 0 {
+            state = 1;
+        }
+    }
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    RNG_STATE.store(state, Ordering::Relaxed);
+    (state as f64) / (u64::MAX as f64)
+}
 
 #[derive(Debug, Clone)]
 pub enum Completion {
@@ -439,34 +460,37 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                         }
                     }
                     17 => {
-                        let arr = args.first().ok_or(VmError::StackUnderflow)?;
-                        let arr_id = match arr {
-                            Value::Array(id) => *id,
-                            _ => {
-                                stack.push(Value::Undefined);
-                                continue;
+                        let receiver = args.first().ok_or(VmError::StackUnderflow)?;
+                        if let Value::String(s) = receiver {
+                            let mut out = s.clone();
+                            for v in args.iter().skip(1) {
+                                out.push_str(&v.to_string());
                             }
-                        };
-                        let mut to_push: Vec<Value> = heap
-                            .array_elements(arr_id)
-                            .map(|s| s.to_vec())
-                            .unwrap_or_default();
-                        for v in args.iter().skip(1) {
-                            if let Value::Array(id) = v {
-                                let elems: Vec<Value> = heap
-                                    .array_elements(*id)
-                                    .map(|s| s.to_vec())
-                                    .unwrap_or_default();
-                                to_push.extend(elems);
-                            } else {
-                                to_push.push(v.clone());
+                            stack.push(Value::String(out));
+                        } else if let Value::Array(arr_id) = receiver {
+                            let mut to_push: Vec<Value> = heap
+                                .array_elements(*arr_id)
+                                .map(|s| s.to_vec())
+                                .unwrap_or_default();
+                            for v in args.iter().skip(1) {
+                                if let Value::Array(id) = v {
+                                    let elems: Vec<Value> = heap
+                                        .array_elements(*id)
+                                        .map(|s| s.to_vec())
+                                        .unwrap_or_default();
+                                    to_push.extend(elems);
+                                } else {
+                                    to_push.push(v.clone());
+                                }
                             }
+                            let new_id = heap.alloc_array();
+                            for v in to_push {
+                                heap.array_push(new_id, v);
+                            }
+                            stack.push(Value::Array(new_id));
+                        } else {
+                            stack.push(Value::Undefined);
                         }
-                        let new_id = heap.alloc_array();
-                        for v in to_push {
-                            heap.array_push(new_id, v);
-                        }
-                        stack.push(Value::Array(new_id));
                     }
                     18 => {
                         let target = args.first().ok_or(VmError::StackUnderflow)?;
@@ -532,6 +556,140 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                             -1
                         };
                         stack.push(Value::Int(idx));
+                    }
+                    20 => {
+                        let arr = args.first().ok_or(VmError::StackUnderflow)?;
+                        let sep = args.get(1).map(|v| v.to_string()).unwrap_or_else(|| ",".to_string());
+                        let elements: Vec<Value> = match arr {
+                            Value::Array(id) => heap
+                                .array_elements(*id)
+                                .map(|s| s.to_vec())
+                                .unwrap_or_default(),
+                            _ => {
+                                stack.push(Value::Undefined);
+                                continue;
+                            }
+                        };
+                        let parts: Vec<String> = elements.iter().map(|v| v.to_string()).collect();
+                        stack.push(Value::String(parts.join(&sep)));
+                    }
+                    21 => {
+                        let base = args.get(0).map(value_to_number).unwrap_or(f64::NAN);
+                        let exp = args.get(1).map(value_to_number).unwrap_or(f64::NAN);
+                        let result = base.powf(exp);
+                        if result.is_finite() && result.fract() == 0.0 && result >= i32::MIN as f64 && result <= i32::MAX as f64 {
+                            stack.push(Value::Int(result as i32));
+                        } else {
+                            stack.push(Value::Number(result));
+                        }
+                    }
+                    22 => {
+                        let arr = args.first().ok_or(VmError::StackUnderflow)?;
+                        let val = match arr {
+                            Value::Array(id) => heap.array_shift(*id),
+                            _ => Value::Undefined,
+                        };
+                        stack.push(val);
+                    }
+                    23 => {
+                        let arr = args.first().ok_or(VmError::StackUnderflow)?;
+                        let new_len = match arr {
+                            Value::Array(id) => heap.array_unshift(*id, &args[1..]),
+                            _ => 0,
+                        };
+                        stack.push(Value::Int(new_len));
+                    }
+                    24 => {
+                        let receiver = args.first().ok_or(VmError::StackUnderflow)?;
+                        let sep_val = args.get(1);
+                        let s = match receiver {
+                            Value::String(x) => x.clone(),
+                            _ => receiver.to_string(),
+                        };
+                        let parts: Vec<Value> = match sep_val {
+                            None | Some(Value::Undefined) => vec![Value::String(s.clone())],
+                            Some(v) => {
+                                let sep = v.to_string();
+                                if sep.is_empty() {
+                                    s.chars().map(|c| Value::String(c.to_string())).collect()
+                                } else {
+                                    s.split(&sep).map(|p| Value::String(p.to_string())).collect()
+                                }
+                            }
+                        };
+                        let new_id = heap.alloc_array();
+                        for p in parts {
+                            heap.array_push(new_id, p);
+                        }
+                        stack.push(Value::Array(new_id));
+                    }
+                    25 => {
+                        let receiver = args.first().ok_or(VmError::StackUnderflow)?;
+                        let s = match receiver {
+                            Value::String(x) => x.clone(),
+                            _ => receiver.to_string(),
+                        };
+                        let trimmed = s.trim();
+                        stack.push(Value::String(trimmed.to_string()));
+                    }
+                    26 => {
+                        let receiver = args.first().ok_or(VmError::StackUnderflow)?;
+                        let s = match receiver {
+                            Value::String(x) => x.clone(),
+                            _ => receiver.to_string(),
+                        };
+                        stack.push(Value::String(s.to_lowercase()));
+                    }
+                    27 => {
+                        let receiver = args.first().ok_or(VmError::StackUnderflow)?;
+                        let s = match receiver {
+                            Value::String(x) => x.clone(),
+                            _ => receiver.to_string(),
+                        };
+                        stack.push(Value::String(s.to_uppercase()));
+                    }
+                    28 => {
+                        let x = args.first().ok_or(VmError::StackUnderflow)?;
+                        let n = value_to_number(x);
+                        let result = n.ceil();
+                        if result.is_finite() && result.fract() == 0.0 && result >= i32::MIN as f64 && result <= i32::MAX as f64 {
+                            stack.push(Value::Int(result as i32));
+                        } else {
+                            stack.push(Value::Number(result));
+                        }
+                    }
+                    29 => {
+                        let x = args.first().ok_or(VmError::StackUnderflow)?;
+                        let n = value_to_number(x);
+                        let result = n.round();
+                        if result.is_finite() && result.fract() == 0.0 && result >= i32::MIN as f64 && result <= i32::MAX as f64 {
+                            stack.push(Value::Int(result as i32));
+                        } else {
+                            stack.push(Value::Number(result));
+                        }
+                    }
+                    30 => {
+                        let x = args.first().ok_or(VmError::StackUnderflow)?;
+                        let n = value_to_number(x);
+                        let result = n.sqrt();
+                        if result.is_finite() && result.fract() == 0.0 && result >= i32::MIN as f64 && result <= i32::MAX as f64 {
+                            stack.push(Value::Int(result as i32));
+                        } else {
+                            stack.push(Value::Number(result));
+                        }
+                    }
+                    31 => {
+                        let r = simple_random();
+                        stack.push(Value::Number(r));
+                    }
+                    32 => {
+                        let obj = args.first().ok_or(VmError::StackUnderflow)?;
+                        let key = args.get(1).map(|v| value_to_prop_key(v)).unwrap_or_default();
+                        let result = match obj {
+                            Value::Object(id) => heap.object_has_own_property(*id, &key),
+                            _ => false,
+                        };
+                        stack.push(Value::Bool(result));
                     }
                     _ => return Err(VmError::InvalidOpcode(builtin_id)),
                 }
@@ -728,6 +886,13 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     Value::Object(id) => heap.get_prop(*id, &key_str),
                     Value::Array(id) => heap.get_array_prop(*id, &key_str),
                     Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
+                    Value::String(s) => {
+                        if let Ok(idx) = key_str.parse::<usize>() {
+                            s.chars().nth(idx).map(|c| Value::String(c.to_string())).unwrap_or(Value::Undefined)
+                        } else {
+                            Value::Undefined
+                        }
+                    }
                     _ => Value::Undefined,
                 };
                 stack.push(result);
@@ -761,6 +926,13 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
                     Value::Object(id) => heap.get_prop(*id, &key_str),
                     Value::Array(id) => heap.get_array_prop(*id, &key_str),
                     Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
+                    Value::String(s) => {
+                        if let Ok(idx) = key_str.parse::<usize>() {
+                            s.chars().nth(idx).map(|c| Value::String(c.to_string())).unwrap_or(Value::Undefined)
+                        } else {
+                            Value::Undefined
+                        }
+                    }
                     _ => Value::Undefined,
                 };
                 stack.push(result);

@@ -118,6 +118,36 @@ impl Heap {
         }
     }
 
+    pub fn array_shift(&mut self, arr_id: usize) -> Value {
+        if let Some(elements) = self.arrays.get_mut(arr_id) {
+            if elements.is_empty() {
+                Value::Undefined
+            } else {
+                elements.remove(0)
+            }
+        } else {
+            Value::Undefined
+        }
+    }
+
+    pub fn array_unshift(&mut self, arr_id: usize, values: &[Value]) -> i32 {
+        if let Some(elements) = self.arrays.get_mut(arr_id) {
+            for v in values.iter().rev() {
+                elements.insert(0, v.clone());
+            }
+            elements.len() as i32
+        } else {
+            0
+        }
+    }
+
+    pub fn object_has_own_property(&self, obj_id: usize, key: &str) -> bool {
+        self.objects
+            .get(obj_id)
+            .map(|o| o.props.contains_key(key))
+            .unwrap_or(false)
+    }
+
     pub fn object_keys(&self, obj_id: usize) -> Vec<String> {
         self.objects
             .get(obj_id)

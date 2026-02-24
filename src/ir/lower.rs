@@ -1177,6 +1177,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 Expression::Member(m) => {
                     let (obj_name, prop) = match (&m.object.as_ref(), &m.property) {
                         (Expression::Identifier(obj), MemberProperty::Identifier(p)) => (Some(&obj.name), p.as_str()),
+                        (_, MemberProperty::Identifier(p)) => (None, p.as_str()),
                         _ => (None, ""),
                     };
                     if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "floor" && e.args.len() == 1 {
@@ -1209,6 +1210,41 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: crate::ir::hir::BuiltinId::MathMax,
                             argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "pow" && e.args.len() == 2 {
+                        compile_expression(&e.args[0], ctx)?;
+                        compile_expression(&e.args[1], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MathPow,
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "ceil" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MathCeil,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "round" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MathRound,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "sqrt" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MathSqrt,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "random" && e.args.len() == 0 {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::MathRandom,
+                            argc: 0,
                             span: e.span,
                         });
                     } else if matches!(obj_name.as_deref(), Some(s) if s == "JSON") && prop == "parse" && e.args.len() == 1 {
@@ -1330,6 +1366,92 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: crate::ir::hir::BuiltinId::ArrayIndexOf,
                             argc: 3,
+                            span: e.span,
+                        });
+                    } else if prop == "join" {
+                        compile_expression(&m.object, ctx)?;
+                        let sep = e.args.first();
+                        if let Some(s) = sep {
+                            compile_expression(s, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::String(",".to_string()),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayJoin,
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "shift" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayShift,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "unshift" {
+                        compile_expression(&m.object, ctx)?;
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ArrayUnshift,
+                            argc: (1 + e.args.len()) as u32,
+                            span: e.span,
+                        });
+                    } else if prop == "split" {
+                        compile_expression(&m.object, ctx)?;
+                        let sep = e.args.first();
+                        if let Some(s) = sep {
+                            compile_expression(s, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::StringSplit,
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "trim" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::StringTrim,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "toLowerCase" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::StringToLowerCase,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "toUpperCase" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::StringToUpperCase,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "hasOwnProperty" {
+                        compile_expression(&m.object, ctx)?;
+                        let key = e.args.first();
+                        if let Some(k) = key {
+                            compile_expression(k, ctx)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ObjectHasOwnProperty,
+                            argc: 2,
                             span: e.span,
                         });
                     } else {
@@ -2073,6 +2195,87 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "String.indexOf and String.slice");
+    }
+
+    #[test]
+    fn lower_array_join() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [1, 2, 3]; if (a.join() !== \"1,2,3\") return 0; if (a.join(\"-\") !== \"1-2-3\") return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Array.join");
+    }
+
+    #[test]
+    fn lower_math_pow() {
+        let result = crate::driver::Driver::run(
+            "function main() { if (Math.pow(2, 3) !== 8) return 0; if (Math.pow(10, 2) !== 100) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Math.pow");
+    }
+
+    #[test]
+    fn lower_string_indexed_access() {
+        let result = crate::driver::Driver::run(
+            "function main() { let s = \"hello\"; if (s[0] !== \"h\") return 0; if (s[4] !== \"o\") return 0; if (s[99] !== undefined) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "str[i] indexed access");
+    }
+
+    #[test]
+    fn lower_array_shift_unshift() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = [1, 2, 3]; let x = a.shift(); if (x !== 1) return 0; if (a.length !== 2) return 0; a.unshift(0); if (a[0] !== 0 || a.length !== 3) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Array.shift and Array.unshift");
+    }
+
+    #[test]
+    fn lower_string_concat_split_trim() {
+        let result = crate::driver::Driver::run(
+            "function main() { let s = \"a\".concat(\"b\", \"c\"); if (s !== \"abc\") return 0; let parts = \"x-y-z\".split(\"-\"); if (parts.length !== 3 || parts[0] !== \"x\") return 0; let t = \"  hi  \".trim(); if (t !== \"hi\") return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "String.concat, split, trim");
+    }
+
+    #[test]
+    fn lower_string_to_lower_upper() {
+        let result = crate::driver::Driver::run(
+            "function main() { if (\"ABC\".toLowerCase() !== \"abc\") return 0; if (\"abc\".toUpperCase() !== \"ABC\") return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "String.toLowerCase, toUpperCase");
+    }
+
+    #[test]
+    fn lower_math_ceil_round_sqrt() {
+        let result = crate::driver::Driver::run(
+            "function main() { if (Math.ceil(1.2) !== 2) return 0; if (Math.round(1.5) !== 2) return 0; if (Math.sqrt(9) !== 3) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Math.ceil, round, sqrt");
+    }
+
+    #[test]
+    fn lower_math_random() {
+        let result = crate::driver::Driver::run(
+            "function main() { let r = Math.random(); if (r < 0 || r >= 1) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Math.random returns [0,1)");
+    }
+
+    #[test]
+    fn lower_object_has_own_property() {
+        let result = crate::driver::Driver::run(
+            "function main() { let o = { x: 1 }; if (!o.hasOwnProperty(\"x\")) return 0; if (o.hasOwnProperty(\"y\")) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Object.hasOwnProperty");
     }
 
     #[test]

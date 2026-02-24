@@ -86,6 +86,19 @@ pub enum BuiltinId {
     ArrayConcat = 17,
     ObjectAssign = 18,
     ArrayIndexOf = 19,
+    ArrayJoin = 20,
+    MathPow = 21,
+    ArrayShift = 22,
+    ArrayUnshift = 23,
+    StringSplit = 24,
+    StringTrim = 25,
+    StringToLowerCase = 26,
+    StringToUpperCase = 27,
+    MathCeil = 28,
+    MathRound = 29,
+    MathSqrt = 30,
+    MathRandom = 31,
+    ObjectHasOwnProperty = 32,
 }
 
 
