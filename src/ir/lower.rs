@@ -1291,6 +1291,13 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Error") && prop == "isError" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ErrorIsError,
+                            argc: 1,
+                            span: e.span,
+                        });
                     } else if prop == "push" {
                         compile_expression(&m.object, ctx)?;
                         for arg in &e.args {
@@ -2343,6 +2350,15 @@ function main() {
         )
         .expect("run");
         assert_eq!(result, 42, "IIFE should return 42");
+    }
+
+    #[test]
+    fn lower_error_is_error() {
+        let result = crate::driver::Driver::run(
+            "function main() { let e = new Error(\"x\"); if (!Error.isError(e)) return 0; if (Error.isError(42)) return 0; if (Error.isError({})) return 0; return 1; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "Error.isError");
     }
 
     #[test]

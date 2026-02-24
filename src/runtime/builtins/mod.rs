@@ -135,6 +135,7 @@ pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, Builti
         32 => object::has_own_property(args, heap),
         33 => array::reverse(args, heap),
         34 => string::char_at(args),
+        35 => error::is_error(args, heap),
         _ => unreachable!("invalid builtin id checked by caller"),
     };
     Ok(result)

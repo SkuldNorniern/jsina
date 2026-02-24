@@ -101,6 +101,7 @@ pub enum BuiltinId {
     ObjectHasOwnProperty = 32,
     ArrayReverse = 33,
     StringCharAt = 34,
+    ErrorIsError = 35,
 }
 
 

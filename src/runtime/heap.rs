@@ -1,5 +1,5 @@
 use super::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 struct HeapObject {
@@ -11,6 +11,7 @@ struct HeapObject {
 pub struct Heap {
     objects: Vec<HeapObject>,
     arrays: Vec<Vec<Value>>,
+    error_object_ids: HashSet<usize>,
 }
 
 impl Heap {
@@ -152,6 +153,14 @@ impl Heap {
             .get(obj_id)
             .map(|o| o.props.contains_key(key))
             .unwrap_or(false)
+    }
+
+    pub fn record_error_object(&mut self, obj_id: usize) {
+        self.error_object_ids.insert(obj_id);
+    }
+
+    pub fn is_error_object(&self, obj_id: usize) -> bool {
+        self.error_object_ids.contains(&obj_id)
     }
 
     pub fn object_keys(&self, obj_id: usize) -> Vec<String> {
