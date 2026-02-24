@@ -59,6 +59,7 @@ pub enum TokenType {
     False,
     Number,
     String,
+    RegExpLiteral { pattern: String, flags: String },
     TemplateLiteral,
     Identifier,
     Assign,
@@ -143,7 +144,8 @@ impl TokenType {
         matches!(
             self,
             TokenType::Null | TokenType::True | TokenType::False
-                | TokenType::Number | TokenType::String | TokenType::TemplateLiteral
+                | TokenType::Number | TokenType::String | TokenType::RegExpLiteral { .. }
+                | TokenType::TemplateLiteral
         )
     }
 

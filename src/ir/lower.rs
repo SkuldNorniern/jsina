@@ -1204,18 +1204,38 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
     let func_index = &ctx.func_index;
     match expr {
         Expression::Literal(e) => {
-            let value = match &e.value {
-                LiteralValue::Int(n) => HirConst::Int(*n),
-                LiteralValue::Number(n) => HirConst::Float(*n),
-                LiteralValue::True => HirConst::Int(1),
-                LiteralValue::False => HirConst::Int(0),
-                LiteralValue::Null => HirConst::Null,
-                LiteralValue::String(s) => HirConst::String(s.clone()),
-            };
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                value,
-                span: e.span,
-            });
+            match &e.value {
+                LiteralValue::RegExp { pattern, flags } => {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::String(pattern.clone()),
+                        span: e.span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::String(flags.clone()),
+                        span: e.span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::RegExp1,
+                        argc: 2,
+                        span: e.span,
+                    });
+                }
+                _ => {
+                    let value = match &e.value {
+                        LiteralValue::Int(n) => HirConst::Int(*n),
+                        LiteralValue::Number(n) => HirConst::Float(*n),
+                        LiteralValue::True => HirConst::Int(1),
+                        LiteralValue::False => HirConst::Int(0),
+                        LiteralValue::Null => HirConst::Null,
+                        LiteralValue::String(s) => HirConst::String(s.clone()),
+                        LiteralValue::RegExp { .. } => unreachable!(),
+                    };
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value,
+                        span: e.span,
+                    });
+                }
+            }
         }
         Expression::This(e) => {
             ctx.blocks[ctx.current_block].ops.push(HirOp::LoadThis { span: e.span });
@@ -2911,6 +2931,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 1, "String.toLowerCase, toUpperCase");
+    }
+
+    #[test]
+    fn lower_regex_literal() {
+        let result = crate::driver::Driver::run(
+            r#"function main() { let r = /a/; return r ? 1 : 0; }"#,
+        )
+        .expect("run");
+        assert_eq!(result, 1, "RegExp literal should create object");
     }
 
     #[test]

@@ -1076,6 +1076,18 @@ impl Parser {
                 self.advance();
                 (Expression::Literal(LiteralExpr { id: self.next_id(), span, value: LiteralValue::Null }), span)
             }
+            TokenType::RegExpLiteral { pattern, flags } => {
+                let span = token.span;
+                self.advance();
+                (Expression::Literal(LiteralExpr {
+                    id: self.next_id(),
+                    span,
+                    value: LiteralValue::RegExp {
+                        pattern: pattern.clone(),
+                        flags: flags.clone(),
+                    },
+                }), span)
+            }
             TokenType::This => {
                 let span = token.span;
                 self.advance();

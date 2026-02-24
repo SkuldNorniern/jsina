@@ -201,8 +201,10 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "String", name: "repeat", entry: BuiltinEntry::Normal(string::repeat) },
     // Error 0 (isError)
     BuiltinDef { category: "Error", name: "isError", entry: BuiltinEntry::Normal(error::is_error) },
-    // RegExp 0
+    // RegExp 0..1
     BuiltinDef { category: "RegExp", name: "escape", entry: BuiltinEntry::Normal(regexp::escape) },
+    BuiltinDef { category: "RegExp", name: "create", entry: BuiltinEntry::Normal(regexp::create) },
+    BuiltinDef { category: "RegExp", name: "test", entry: BuiltinEntry::Normal(regexp::test) },
     // Map 0..3
     BuiltinDef { category: "Map", name: "create", entry: BuiltinEntry::Normal(map::create) },
     BuiltinDef { category: "Map", name: "set", entry: BuiltinEntry::Normal(map::set) },
@@ -267,20 +269,22 @@ static ENCODED_TO_INDEX: [u8; 256] = {
     t[0x65] = 37;
     t[0x70] = 38;
     t[0x80] = 39;
-    t[0x90] = 40;
-    t[0x91] = 41;
-    t[0x92] = 42;
-    t[0x93] = 43;
-    t[0xA0] = 44;
-    t[0xA1] = 45;
-    t[0xA2] = 46;
-    t[0xA3] = 47;
-    t[0xB0] = 48;
-    t[0xC0] = 49;
-    t[0xC1] = 50;
-    t[0xC2] = 51;
-    t[0xC3] = 52;
-    t[0xC4] = 53;
+    t[0x81] = 40;
+    t[0x82] = 41;
+    t[0x90] = 42;
+    t[0x91] = 43;
+    t[0x92] = 44;
+    t[0x93] = 45;
+    t[0xA0] = 46;
+    t[0xA1] = 47;
+    t[0xA2] = 48;
+    t[0xA3] = 49;
+    t[0xB0] = 50;
+    t[0xC0] = 51;
+    t[0xC1] = 52;
+    t[0xC2] = 53;
+    t[0xC3] = 54;
+    t[0xC4] = 55;
     t
 };
 

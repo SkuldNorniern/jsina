@@ -7,6 +7,7 @@ pub struct Lexer<'a> {
     position: Position,
     current_char: Option<char>,
     keywords_trie: &'a Trie,
+    prev_token_type: Option<TokenType>,
 }
 
 impl Lexer<'_> {
@@ -19,6 +20,7 @@ impl Lexer<'_> {
             position,
             current_char: first_char,
             keywords_trie: Trie::js_trie(),
+            prev_token_type: None,
         }
     }
 
@@ -276,6 +278,67 @@ impl Lexer<'_> {
         Token::new(TokenType::TemplateLiteral, lexeme, span)
     }
 
+    fn prev_could_end_expression(&self) -> bool {
+        use TokenType::*;
+        matches!(
+            self.prev_token_type.as_ref(),
+            Some(RightParen) | Some(RightBracket) | Some(RightBrace)
+                | Some(Identifier) | Some(Number) | Some(String)
+                | Some(RegExpLiteral { .. }) | Some(True) | Some(False)
+                | Some(Null) | Some(This) | Some(TemplateLiteral)
+        )
+    }
+
+    fn scan_regex_literal(&mut self) -> Token {
+        let start_pos = self.position;
+        self.advance();
+        let mut pattern = String::new();
+        let mut in_class = false;
+        while let Some(ch) = self.current_char {
+            if ch == '\\' {
+                pattern.push(ch);
+                self.advance();
+                if let Some(esc) = self.current_char {
+                    pattern.push(esc);
+                    self.advance();
+                }
+            } else if ch == '[' {
+                in_class = true;
+                pattern.push(ch);
+                self.advance();
+            } else if ch == ']' {
+                in_class = false;
+                pattern.push(ch);
+                self.advance();
+            } else if ch == '/' && !in_class {
+                self.advance();
+                break;
+            } else {
+                pattern.push(ch);
+                self.advance();
+            }
+        }
+        let mut flags = String::new();
+        while let Some(ch) = self.current_char {
+            if matches!(ch, 'g' | 'i' | 'm' | 's' | 'u' | 'y') {
+                flags.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let lexeme = format!("/{}/{}", pattern, flags);
+        let span = Span::from_text(start_pos, &lexeme);
+        Token::new(
+            TokenType::RegExpLiteral {
+                pattern,
+                flags,
+            },
+            lexeme,
+            span,
+        )
+    }
+
     fn scan_comment(&mut self) -> bool {
         if self.current_char != Some('/') { return false; }
         let start_pos = self.position;
@@ -365,6 +428,30 @@ impl Lexer<'_> {
             '"' | '\'' => self.scan_string(),
             '`' => self.scan_template_literal(),
             '0'..='9' => self.scan_number(),
+            '/' => {
+                if let Some((token_type, length)) = self.keywords_trie.find_longest_match(&self.source, self.position.byte_offset) {
+                    if matches!(token_type, TokenType::DivideAssign) {
+                        let lexeme = self.source[self.position.byte_offset..self.position.byte_offset + length].to_string();
+                        let mut end_pos = start_pos;
+                        end_pos.advance_by(&lexeme);
+                        let span = Span::new(start_pos, end_pos);
+                        for _ in 0..length {
+                            self.advance();
+                        }
+                        Token::new(token_type, lexeme, span)
+                    } else if self.prev_could_end_expression() {
+                        self.advance();
+                        Token::new(TokenType::Divide, "/".to_string(), Span::from_text(start_pos, "/"))
+                    } else {
+                        self.scan_regex_literal()
+                    }
+                } else if self.prev_could_end_expression() {
+                    self.advance();
+                    Token::new(TokenType::Divide, "/".to_string(), Span::from_text(start_pos, "/"))
+                } else {
+                    self.scan_regex_literal()
+                }
+            }
             'a'..='z' | 'A'..='Z' | '_' | '$' => self.scan_identifier(),
             _ => {
                 if let Some((token_type, length)) = self.keywords_trie.find_longest_match(&self.source, self.position.byte_offset) {
@@ -399,6 +486,7 @@ impl Lexer<'_> {
         loop {
             let token = self.next_token();
             if token.token_type == TokenType::Eof { break; }
+            self.prev_token_type = Some(token.token_type.clone());
             tokens.push(token);
         }
         tokens

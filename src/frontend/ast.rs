@@ -281,6 +281,7 @@ pub enum LiteralValue {
     Number(f64),
     Int(i64),
     String(String),
+    RegExp { pattern: String, flags: String },
 }
 
 #[derive(Debug, Clone)]

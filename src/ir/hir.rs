@@ -117,6 +117,8 @@ pub enum BuiltinId {
     String5 = 0x65,
     Error0 = 0x70,
     RegExp0 = 0x80,
+    RegExp1 = 0x81,
+    RegExp2 = 0x82,
     Map0 = 0x90,
     Map1 = 0x91,
     Map2 = 0x92,
