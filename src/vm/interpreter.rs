@@ -102,7 +102,7 @@ pub fn interpret_program_with_limit(
     trace: bool,
     step_limit: Option<u64>,
 ) -> Result<Completion, VmError> {
-    interpret_program_with_trace_and_limit(program, trace, step_limit, None)
+    interpret_program_with_trace_and_limit(program, trace, step_limit, None, false)
 }
 
 pub fn interpret_program_with_limit_and_cancel(
@@ -110,8 +110,9 @@ pub fn interpret_program_with_limit_and_cancel(
     trace: bool,
     step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
+    test262_mode: bool,
 ) -> Result<Completion, VmError> {
-    interpret_program_with_trace_and_limit(program, trace, step_limit, cancel)
+    interpret_program_with_trace_and_limit(program, trace, step_limit, cancel, test262_mode)
 }
 
 #[cold]
@@ -162,7 +163,7 @@ impl GetPropCache {
 }
 
 pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Completion, VmError> {
-    interpret_program_with_trace_and_limit(program, trace, None, None)
+    interpret_program_with_trace_and_limit(program, trace, None, None, false)
 }
 
 fn interpret_program_with_trace_and_limit(
@@ -170,8 +171,12 @@ fn interpret_program_with_trace_and_limit(
     trace: bool,
     step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
+    test262_mode: bool,
 ) -> Result<Completion, VmError> {
     let mut heap = Heap::new();
+    if test262_mode {
+        heap.init_test262_globals();
+    }
     let mut steps_remaining = step_limit;
     let mut stack: Vec<Value> = Vec::new();
     let mut getprop_cache = GetPropCache {

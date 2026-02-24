@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 const GLOBAL_NAMES: &[&str] = &[
     "Object", "Array", "String", "Number", "Boolean", "Error", "Math", "JSON",
-    "Date", "RegExp", "Map", "Set", "Symbol", "NaN", "Infinity", "print",
+    "Date", "RegExp", "Map", "Set", "Symbol", "NaN", "Infinity", "$262", "console", "print",
     "ReferenceError", "TypeError", "RangeError", "SyntaxError",
 ];
 
@@ -1770,7 +1770,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         (_, MemberProperty::Identifier(p)) => (None, p.as_str()),
                         _ => (None, ""),
                     };
-                    if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "floor" && e.args.len() == 1 {
+                    if matches!(obj_name.as_deref(), Some(s) if s == "console") && prop == "log" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Host0,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "floor" && e.args.len() == 1 {
                         compile_expression(&e.args[0], ctx)?;
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: crate::ir::hir::BuiltinId::Math0,
@@ -2256,12 +2265,52 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
-                Expression::Identifier(id) if id.name == "Error" || id.name == "ReferenceError" || id.name == "TypeError" || id.name == "RangeError" || id.name == "SyntaxError" => {
+                Expression::Identifier(id) if id.name == "Error" => {
                     for arg in &e.args {
                         compile_expression(arg, ctx)?;
                     }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::Type1,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "ReferenceError" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::RefErr0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "TypeError" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::TypeErr0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "RangeError" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::RangeErr0,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "SyntaxError" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::SyntaxErr0,
                         argc: e.args.len() as u32,
                         span: e.span,
                     });
@@ -2366,12 +2415,52 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: n.span,
                     });
                 }
-                Expression::Identifier(id) if id.name == "Error" || id.name == "ReferenceError" || id.name == "TypeError" || id.name == "RangeError" || id.name == "SyntaxError" => {
+                Expression::Identifier(id) if id.name == "Error" => {
                     for arg in &n.args {
                         compile_expression(arg, ctx)?;
                     }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::Type1,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "ReferenceError" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::RefErr0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "TypeError" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::TypeErr0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "RangeError" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::RangeErr0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "SyntaxError" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::SyntaxErr0,
                         argc: n.args.len() as u32,
                         span: n.span,
                     });

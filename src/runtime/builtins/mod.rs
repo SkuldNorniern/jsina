@@ -17,6 +17,7 @@ mod object;
 mod regexp;
 mod string;
 mod symbol;
+mod dollar262;
 
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -227,6 +228,14 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "Date", name: "toString", entry: BuiltinEntry::Normal(date::to_string) },
     BuiltinDef { category: "Date", name: "toISOString", entry: BuiltinEntry::Normal(date::to_iso_string) },
     BuiltinDef { category: "Symbol", name: "create", entry: BuiltinEntry::Normal(symbol::symbol) },
+    BuiltinDef { category: "Error", name: "ReferenceError", entry: BuiltinEntry::Normal(error::reference_error) },
+    BuiltinDef { category: "Error", name: "TypeError", entry: BuiltinEntry::Normal(error::type_error) },
+    BuiltinDef { category: "Error", name: "RangeError", entry: BuiltinEntry::Normal(error::range_error) },
+    BuiltinDef { category: "Error", name: "SyntaxError", entry: BuiltinEntry::Normal(error::syntax_error) },
+    BuiltinDef { category: "$262", name: "createRealm", entry: BuiltinEntry::Throwing(dollar262::create_realm) },
+    BuiltinDef { category: "$262", name: "evalScript", entry: BuiltinEntry::Throwing(dollar262::eval_script) },
+    BuiltinDef { category: "$262", name: "gc", entry: BuiltinEntry::Throwing(dollar262::gc) },
+    BuiltinDef { category: "$262", name: "detachArrayBuffer", entry: BuiltinEntry::Throwing(dollar262::detach_array_buffer) },
 ];
 
 const INVALID: u8 = 0xFF;
@@ -290,10 +299,18 @@ static ENCODED_TO_INDEX: [u8; 256] = {
     t[0xC3] = 54;
     t[0xC4] = 55;
     t[0xD0] = 56;
+    t[0xD1] = 57;
+    t[0xD2] = 58;
+    t[0xD3] = 59;
+    t[0xD4] = 60;
+    t[0xD5] = 61;
+    t[0xD6] = 62;
+    t[0xD7] = 63;
+    t[0xD8] = 64;
     t
 };
 
-pub const MAX_BUILTIN_ID: u8 = 0xD0;
+pub const MAX_BUILTIN_ID: u8 = 0xD8;
 
 fn index_for(id: u8) -> Option<usize> {
     let idx = ENCODED_TO_INDEX[id as usize];
@@ -326,7 +343,7 @@ pub fn all() -> &'static [BuiltinDef] {
     BUILTINS
 }
 
-const INDEX_TO_ENCODED: [u8; 57] = [
+const INDEX_TO_ENCODED: [u8; 65] = [
     0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
     0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
     0x30, 0x31,
@@ -339,7 +356,8 @@ const INDEX_TO_ENCODED: [u8; 57] = [
     0xA0, 0xA1, 0xA2, 0xA3,
     0xB0,
     0xC0, 0xC1, 0xC2, 0xC3, 0xC4,
-    0xD0,
+    0xD0, 0xD1, 0xD2, 0xD3, 0xD4,
+    0xD5, 0xD6, 0xD7, 0xD8,
 ];
 
 pub fn by_category(cat: &str) -> impl Iterator<Item = (u8, &'static BuiltinDef)> {
