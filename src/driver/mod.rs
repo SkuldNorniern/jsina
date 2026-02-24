@@ -1,6 +1,7 @@
 use crate::backend::translate_to_lamina_ir;
 use crate::diagnostics::Diagnostic;
 use crate::frontend::{check_early_errors, Lexer, Parser};
+use crate::host::{with_host, CliHost, HostHooks};
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::vm::{Completion, Program};
 
@@ -104,6 +105,20 @@ impl Driver {
     }
 
     pub fn run_with_trace(source: &str, trace: bool) -> Result<i64, DriverError> {
+        let host = CliHost;
+        Self::run_with_host(&host, source, trace)
+    }
+
+    /// Run with custom host. Use for browser embedding (provide HostHooks impl).
+    pub fn run_with_host<H: HostHooks + 'static>(
+        host: &H,
+        source: &str,
+        trace: bool,
+    ) -> Result<i64, DriverError> {
+        with_host(host, || Self::run_with_host_inner(source, trace))
+    }
+
+    fn run_with_host_inner(source: &str, trace: bool) -> Result<i64, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
         let entry = funcs

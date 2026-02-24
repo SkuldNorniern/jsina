@@ -339,6 +339,15 @@ pub fn by_category(cat: &str) -> impl Iterator<Item = (u8, &'static BuiltinDef)>
         .filter_map(|(i, b)| INDEX_TO_ENCODED.get(i).map(|&id| (id, b)))
 }
 
+/// Resolve (category, name) to builtin id. For lower/compile consistency.
+pub fn resolve(category: &str, name: &str) -> Option<u8> {
+    BUILTINS
+        .iter()
+        .enumerate()
+        .find(|(_, b)| b.category == category && b.name == name)
+        .and_then(|(i, _)| INDEX_TO_ENCODED.get(i).copied())
+}
+
 pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, BuiltinError> {
     let idx = match index_for(id) {
         Some(i) => i,
@@ -349,4 +358,19 @@ pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, Builti
         }
     };
     BUILTINS[idx].entry.call(args, heap)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_known_builtins() {
+        assert_eq!(resolve("Host", "print"), Some(0x00));
+        assert_eq!(resolve("Array", "push"), Some(0x10));
+        assert_eq!(resolve("Math", "floor"), Some(0x20));
+        assert_eq!(resolve("Json", "parse"), Some(0x30));
+        assert_eq!(resolve("Date", "now"), Some(0xC1));
+        assert_eq!(resolve("Unknown", "foo"), None);
+    }
 }
