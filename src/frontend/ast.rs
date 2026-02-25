@@ -138,6 +138,10 @@ pub enum ForInOfLeft {
     LetDecl(String),
     ConstDecl(String),
     Identifier(String),
+    VarBinding(Binding),
+    LetBinding(Binding),
+    ConstBinding(Binding),
+    Pattern(Binding),
 }
 
 #[derive(Debug, Clone)]
@@ -209,11 +213,13 @@ pub struct ObjectPatternProp {
     pub key: String,
     pub binding: String,
     pub shorthand: bool,
+    pub default_init: Option<Box<Expression>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ArrayPatternElem {
     pub binding: Option<String>,
+    pub default_init: Option<Box<Expression>>,
 }
 
 impl Binding {

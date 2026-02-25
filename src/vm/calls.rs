@@ -104,5 +104,18 @@ pub(crate) fn setup_callee_locals(
             }
         }
     }
+    if let Some(arguments_slot) = chunk
+        .named_locals
+        .iter()
+        .find_map(|(name, slot)| (name == "arguments").then_some(*slot as usize))
+    {
+        if arguments_slot < locals.len() {
+            let arguments_array_id = heap.alloc_array();
+            if !args.is_empty() {
+                heap.array_push_values(arguments_array_id, args);
+            }
+            locals[arguments_slot] = Value::Array(arguments_array_id);
+        }
+    }
     locals
 }

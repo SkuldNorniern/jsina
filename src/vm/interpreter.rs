@@ -218,12 +218,14 @@ pub fn interpret_program_with_heap_and_entry(
                                 let outer_slot = chunk
                                     .named_locals
                                     .iter()
-                                    .find_map(|(name, slot)| (name == capture_name).then_some(*slot))
+                                    .find_map(|(name, slot)| {
+                                        (name == capture_name).then_some(*slot)
+                                    })
                                     .map(|slot| slot as usize);
-                                let inner_slot = callee_chunk
-                                    .named_locals
-                                    .iter()
-                                    .find_map(|(name, slot)| (name == capture_name).then_some(*slot));
+                                let inner_slot =
+                                    callee_chunk.named_locals.iter().find_map(|(name, slot)| {
+                                        (name == capture_name).then_some(*slot)
+                                    });
                                 if let Some(inner_slot) = inner_slot {
                                     let captured_value = outer_slot
                                         .and_then(|slot| locals.get(slot))

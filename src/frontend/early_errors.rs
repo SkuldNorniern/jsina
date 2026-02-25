@@ -302,24 +302,53 @@ fn check_statement(
             check_statement(&f.body, scope, &iter_ctx, errors);
         }
         Statement::ForIn(f) => {
-            if let ForInOfLeft::LetDecl(ref n) | ForInOfLeft::ConstDecl(ref n) = f.left {
-                if ctx.strict && is_strict_reserved(n) {
-                    errors.push(EarlyError {
-                        code: ErrorCode::EarlyStrictReserved,
-                        message: format!("'{}' may not be used as binding in strict mode", n),
-                        span: f.span,
-                    });
+            match &f.left {
+                ForInOfLeft::LetDecl(n) | ForInOfLeft::ConstDecl(n) => {
+                    if ctx.strict && is_strict_reserved(n) {
+                        errors.push(EarlyError {
+                            code: ErrorCode::EarlyStrictReserved,
+                            message: format!("'{}' may not be used as binding in strict mode", n),
+                            span: f.span,
+                        });
+                    }
+                    if let Some(prev) = scope.add_lexical(n, f.span) {
+                        errors.push(EarlyError {
+                            code: ErrorCode::EarlyDuplicateLexical,
+                            message: format!("duplicate lexical declaration '{}'", n),
+                            span: prev,
+                        });
+                    }
                 }
-                if let Some(prev) = scope.add_lexical(n, f.span) {
-                    errors.push(EarlyError {
-                        code: ErrorCode::EarlyDuplicateLexical,
-                        message: format!("duplicate lexical declaration '{}'", n),
-                        span: prev,
-                    });
+                ForInOfLeft::LetBinding(binding) | ForInOfLeft::ConstBinding(binding) => {
+                    for name in binding.names() {
+                        if ctx.strict && is_strict_reserved(name) {
+                            errors.push(EarlyError {
+                                code: ErrorCode::EarlyStrictReserved,
+                                message: format!(
+                                    "'{}' may not be used as binding in strict mode",
+                                    name
+                                ),
+                                span: f.span,
+                            });
+                        }
+                        if let Some(prev) = scope.add_lexical(name, f.span) {
+                            errors.push(EarlyError {
+                                code: ErrorCode::EarlyDuplicateLexical,
+                                message: format!("duplicate lexical declaration '{}'", name),
+                                span: prev,
+                            });
+                        }
+                    }
                 }
-            }
-            if let ForInOfLeft::VarDecl(ref n) = f.left {
-                scope.add_var(n);
+                ForInOfLeft::VarDecl(n) => {
+                    scope.add_var(n);
+                }
+                ForInOfLeft::VarBinding(binding) => {
+                    for name in binding.names() {
+                        scope.add_var(name);
+                    }
+                }
+                ForInOfLeft::Identifier(_) | ForInOfLeft::Pattern(_) => {}
             }
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,
@@ -332,24 +361,53 @@ fn check_statement(
             check_statement(&f.body, scope, &iter_ctx, errors);
         }
         Statement::ForOf(f) => {
-            if let ForInOfLeft::LetDecl(ref n) | ForInOfLeft::ConstDecl(ref n) = f.left {
-                if ctx.strict && is_strict_reserved(n) {
-                    errors.push(EarlyError {
-                        code: ErrorCode::EarlyStrictReserved,
-                        message: format!("'{}' may not be used as binding in strict mode", n),
-                        span: f.span,
-                    });
+            match &f.left {
+                ForInOfLeft::LetDecl(n) | ForInOfLeft::ConstDecl(n) => {
+                    if ctx.strict && is_strict_reserved(n) {
+                        errors.push(EarlyError {
+                            code: ErrorCode::EarlyStrictReserved,
+                            message: format!("'{}' may not be used as binding in strict mode", n),
+                            span: f.span,
+                        });
+                    }
+                    if let Some(prev) = scope.add_lexical(n, f.span) {
+                        errors.push(EarlyError {
+                            code: ErrorCode::EarlyDuplicateLexical,
+                            message: format!("duplicate lexical declaration '{}'", n),
+                            span: prev,
+                        });
+                    }
                 }
-                if let Some(prev) = scope.add_lexical(n, f.span) {
-                    errors.push(EarlyError {
-                        code: ErrorCode::EarlyDuplicateLexical,
-                        message: format!("duplicate lexical declaration '{}'", n),
-                        span: prev,
-                    });
+                ForInOfLeft::LetBinding(binding) | ForInOfLeft::ConstBinding(binding) => {
+                    for name in binding.names() {
+                        if ctx.strict && is_strict_reserved(name) {
+                            errors.push(EarlyError {
+                                code: ErrorCode::EarlyStrictReserved,
+                                message: format!(
+                                    "'{}' may not be used as binding in strict mode",
+                                    name
+                                ),
+                                span: f.span,
+                            });
+                        }
+                        if let Some(prev) = scope.add_lexical(name, f.span) {
+                            errors.push(EarlyError {
+                                code: ErrorCode::EarlyDuplicateLexical,
+                                message: format!("duplicate lexical declaration '{}'", name),
+                                span: prev,
+                            });
+                        }
+                    }
                 }
-            }
-            if let ForInOfLeft::VarDecl(ref n) = f.left {
-                scope.add_var(n);
+                ForInOfLeft::VarDecl(n) => {
+                    scope.add_var(n);
+                }
+                ForInOfLeft::VarBinding(binding) => {
+                    for name in binding.names() {
+                        scope.add_var(name);
+                    }
+                }
+                ForInOfLeft::Identifier(_) | ForInOfLeft::Pattern(_) => {}
             }
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,

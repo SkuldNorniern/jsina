@@ -307,6 +307,7 @@ impl Parser {
     fn parse_function_decl(&mut self) -> Result<Statement, ParseError> {
         let start_span = self.expect(TokenType::Function)?.span;
         let id = self.next_id();
+        self.optional(TokenType::Multiply);
 
         let name_tok = self.expect(TokenType::Identifier)?;
         let name = name_tok.lexeme.clone();
@@ -388,6 +389,7 @@ impl Parser {
     ) -> Result<crate::frontend::ast::FunctionExprData, ParseError> {
         let start_span = self.expect(TokenType::Function)?.span;
         let id = self.next_id();
+        self.optional(TokenType::Multiply);
         let name = if matches!(
             self.current().map(|t| &t.token_type),
             Some(TokenType::Identifier)
@@ -980,7 +982,7 @@ impl Parser {
             });
         }
         self.advance();
-        let declarations = self.parse_declarators()?;
+        let declarations = self.parse_declarators_with_options(false)?;
         let span = declarations
             .last()
             .map(|d| start_span.merge(d.span))
@@ -1015,58 +1017,85 @@ impl Parser {
     ) -> Result<Statement, ParseError> {
         let left = match &decl_stmt {
             Statement::VarDecl(v) => {
+                if v.declarations.len() != 1 {
+                    return Err(ParseError {
+                        code: ErrorCode::ParseForInOfDecl,
+                        message: "for-in/for-of requires single declaration".to_string(),
+                        span: Some(start_span),
+                    });
+                }
                 let d = v.declarations.first().ok_or_else(|| ParseError {
                     code: ErrorCode::ParseForInOfDecl,
                     message: "for-in/for-of requires declaration".to_string(),
                     span: Some(start_span),
                 })?;
-                let name = match &d.binding {
-                    crate::frontend::ast::Binding::Ident(n) => n.clone(),
-                    _ => {
-                        return Err(ParseError {
-                            code: ErrorCode::ParseForInOfDecl,
-                            message: "for-in/for-of requires single identifier".to_string(),
-                            span: Some(start_span),
-                        });
+                if d.init.is_some() {
+                    return Err(ParseError {
+                        code: ErrorCode::ParseForInOfDecl,
+                        message: "for-in/for-of declaration cannot have initializer".to_string(),
+                        span: Some(d.span),
+                    });
+                }
+                match &d.binding {
+                    crate::frontend::ast::Binding::Ident(n) => {
+                        crate::frontend::ast::ForInOfLeft::VarDecl(n.clone())
                     }
-                };
-                crate::frontend::ast::ForInOfLeft::VarDecl(name)
+                    _ => crate::frontend::ast::ForInOfLeft::VarBinding(d.binding.clone()),
+                }
             }
             Statement::LetDecl(l) => {
+                if l.declarations.len() != 1 {
+                    return Err(ParseError {
+                        code: ErrorCode::ParseForInOfDecl,
+                        message: "for-in/for-of requires single declaration".to_string(),
+                        span: Some(start_span),
+                    });
+                }
                 let d = l.declarations.first().ok_or_else(|| ParseError {
                     code: ErrorCode::ParseForInOfDecl,
                     message: "for-in/for-of requires declaration".to_string(),
                     span: Some(start_span),
                 })?;
-                let name = match &d.binding {
-                    crate::frontend::ast::Binding::Ident(n) => n.clone(),
-                    _ => {
-                        return Err(ParseError {
-                            code: ErrorCode::ParseForInOfDecl,
-                            message: "for-in/for-of requires single identifier".to_string(),
-                            span: Some(start_span),
-                        });
+                if d.init.is_some() {
+                    return Err(ParseError {
+                        code: ErrorCode::ParseForInOfDecl,
+                        message: "for-in/for-of declaration cannot have initializer".to_string(),
+                        span: Some(d.span),
+                    });
+                }
+                match &d.binding {
+                    crate::frontend::ast::Binding::Ident(n) => {
+                        crate::frontend::ast::ForInOfLeft::LetDecl(n.clone())
                     }
-                };
-                crate::frontend::ast::ForInOfLeft::LetDecl(name)
+                    _ => crate::frontend::ast::ForInOfLeft::LetBinding(d.binding.clone()),
+                }
             }
             Statement::ConstDecl(c) => {
+                if c.declarations.len() != 1 {
+                    return Err(ParseError {
+                        code: ErrorCode::ParseForInOfDecl,
+                        message: "for-in/for-of requires single declaration".to_string(),
+                        span: Some(start_span),
+                    });
+                }
                 let d = c.declarations.first().ok_or_else(|| ParseError {
                     code: ErrorCode::ParseForInOfDecl,
                     message: "for-in/for-of requires declaration".to_string(),
                     span: Some(start_span),
                 })?;
-                let name = match &d.binding {
-                    crate::frontend::ast::Binding::Ident(n) => n.clone(),
-                    _ => {
-                        return Err(ParseError {
-                            code: ErrorCode::ParseForInOfDecl,
-                            message: "for-in/for-of requires single identifier".to_string(),
-                            span: Some(start_span),
-                        });
+                if d.init.is_some() {
+                    return Err(ParseError {
+                        code: ErrorCode::ParseForInOfDecl,
+                        message: "for-in/for-of declaration cannot have initializer".to_string(),
+                        span: Some(d.span),
+                    });
+                }
+                match &d.binding {
+                    crate::frontend::ast::Binding::Ident(n) => {
+                        crate::frontend::ast::ForInOfLeft::ConstDecl(n.clone())
                     }
-                };
-                crate::frontend::ast::ForInOfLeft::ConstDecl(name)
+                    _ => crate::frontend::ast::ForInOfLeft::ConstBinding(d.binding.clone()),
+                }
             }
             _ => {
                 return Err(ParseError {
@@ -1112,11 +1141,16 @@ impl Parser {
                 crate::frontend::ast::ForInOfLeft::Identifier(e.name.clone())
             }
             _ => {
-                return Err(ParseError {
-                    code: ErrorCode::ParseForInOfDecl,
-                    message: "for-in/for-of left must be identifier or var/let/const".to_string(),
-                    span: Some(expr.span()),
-                });
+                if let Some(binding) = self.expression_to_for_in_of_pattern(&expr) {
+                    crate::frontend::ast::ForInOfLeft::Pattern(binding)
+                } else {
+                    return Err(ParseError {
+                        code: ErrorCode::ParseForInOfDecl,
+                        message: "for-in/for-of left must be identifier, pattern, or var/let/const"
+                            .to_string(),
+                        span: Some(expr.span()),
+                    });
+                }
             }
         };
         self.expect(if is_in { TokenType::In } else { TokenType::Of })?;
@@ -1143,10 +1177,66 @@ impl Parser {
         }
     }
 
+    fn expression_to_for_in_of_pattern(&self, expr: &Expression) -> Option<Binding> {
+        match expr {
+            Expression::ObjectLiteral(obj) => {
+                let mut props = Vec::new();
+                for prop in &obj.properties {
+                    let key = match &prop.key {
+                        ObjectPropertyKey::Static(k) => k.clone(),
+                        ObjectPropertyKey::Computed(_) => return None,
+                    };
+                    let (binding, default_init, shorthand) = match &prop.value {
+                        Expression::Identifier(ident) => {
+                            (ident.name.clone(), None, key == ident.name)
+                        }
+                        Expression::Assign(assign) => {
+                            if let Expression::Identifier(ident) = assign.left.as_ref() {
+                                (ident.name.clone(), Some(assign.right.clone()), false)
+                            } else {
+                                return None;
+                            }
+                        }
+                        _ => return None,
+                    };
+                    props.push(ObjectPatternProp {
+                        key,
+                        binding,
+                        shorthand,
+                        default_init,
+                    });
+                }
+                Some(Binding::ObjectPattern(props))
+            }
+            Expression::ArrayLiteral(arr) => {
+                let mut elems = Vec::new();
+                for elem in &arr.elements {
+                    let (binding, default_init) = match elem {
+                        Expression::Identifier(ident) => (Some(ident.name.clone()), None),
+                        Expression::Assign(assign) => {
+                            if let Expression::Identifier(ident) = assign.left.as_ref() {
+                                (Some(ident.name.clone()), Some(assign.right.clone()))
+                            } else {
+                                return None;
+                            }
+                        }
+                        _ => return None,
+                    };
+                    elems.push(ArrayPatternElem {
+                        binding,
+                        default_init,
+                    });
+                }
+                Some(Binding::ArrayPattern(elems))
+            }
+            _ => None,
+        }
+    }
+
     fn parse_var_decl(&mut self) -> Result<Statement, ParseError> {
         let start_span = self.expect(TokenType::Var)?.span;
         let id = self.next_id();
-        let declarations = self.parse_declarators()?;
+        let declarations = self.parse_declarators_with_options(true)?;
         self.optional(TokenType::Semicolon);
         let span = declarations
             .last()
@@ -1162,7 +1252,7 @@ impl Parser {
     fn parse_let_decl(&mut self) -> Result<Statement, ParseError> {
         let start_span = self.expect(TokenType::Let)?.span;
         let id = self.next_id();
-        let declarations = self.parse_declarators()?;
+        let declarations = self.parse_declarators_with_options(true)?;
         self.optional(TokenType::Semicolon);
         let span = declarations
             .last()
@@ -1178,7 +1268,7 @@ impl Parser {
     fn parse_const_decl(&mut self) -> Result<Statement, ParseError> {
         let start_span = self.expect(TokenType::Const)?.span;
         let id = self.next_id();
-        let declarations = self.parse_declarators()?;
+        let declarations = self.parse_declarators_with_options(true)?;
         self.expect(TokenType::Semicolon)?;
         let span = declarations
             .last()
@@ -1191,7 +1281,10 @@ impl Parser {
         }))
     }
 
-    fn parse_declarators(&mut self) -> Result<Vec<VarDeclarator>, ParseError> {
+    fn parse_declarators_with_options(
+        &mut self,
+        require_pattern_initializer: bool,
+    ) -> Result<Vec<VarDeclarator>, ParseError> {
         let mut decls = Vec::new();
         loop {
             let (binding, start_span) = self.parse_binding()?;
@@ -1206,10 +1299,12 @@ impl Parser {
                 .as_ref()
                 .map(|e| start_span.merge(e.span()))
                 .unwrap_or(start_span);
-            if matches!(
-                &binding,
-                Binding::ObjectPattern(_) | Binding::ArrayPattern(_)
-            ) && init.is_none()
+            if require_pattern_initializer
+                && matches!(
+                    &binding,
+                    Binding::ObjectPattern(_) | Binding::ArrayPattern(_)
+                )
+                && init.is_none()
             {
                 return Err(ParseError {
                     code: ErrorCode::ParseForInOfDecl,
@@ -1251,11 +1346,10 @@ impl Parser {
                     self.advance();
                     break;
                 }
-                let key_tok = self.expect(TokenType::Identifier)?;
+                let key_tok = self.expect_property_name()?;
                 let key = key_tok.lexeme.clone();
-                let (binding, shorthand) = if self.optional(TokenType::Colon) {
+                let (binding, shorthand, default_init) = if self.optional(TokenType::Colon) {
                     let (nested, _) = self.parse_binding()?;
-                    let name = nested.names().into_iter().next().unwrap_or("").to_string();
                     if matches!(
                         &nested,
                         Binding::ObjectPattern(_) | Binding::ArrayPattern(_)
@@ -1266,14 +1360,41 @@ impl Parser {
                             span: Some(key_tok.span),
                         });
                     }
-                    (name, false)
+                    let name = if let Some(bound_name) = nested.names().into_iter().next() {
+                        bound_name.to_string()
+                    } else {
+                        return Err(ParseError {
+                            code: ErrorCode::ParseExpectedIdentOrComma,
+                            message: "expected identifier in binding pattern".to_string(),
+                            span: Some(key_tok.span),
+                        });
+                    };
+                    let default_init = if self.optional(TokenType::Assign) {
+                        Some(Box::new(self.parse_assignment_expression_allow_in()?))
+                    } else {
+                        None
+                    };
+                    (name, false, default_init)
                 } else {
-                    (key.clone(), true)
+                    if key_tok.token_type != TokenType::Identifier {
+                        return Err(ParseError {
+                            code: ErrorCode::ParseUnexpectedToken,
+                            message: "object binding shorthand must be an identifier".to_string(),
+                            span: Some(key_tok.span),
+                        });
+                    }
+                    let default_init = if self.optional(TokenType::Assign) {
+                        Some(Box::new(self.parse_assignment_expression_allow_in()?))
+                    } else {
+                        None
+                    };
+                    (key.clone(), true, default_init)
                 };
                 props.push(ObjectPatternProp {
                     key,
                     binding,
                     shorthand,
+                    default_init,
                 });
                 if !self.optional(TokenType::Comma) {
                     self.expect(TokenType::RightBrace)?;
@@ -1296,13 +1417,14 @@ impl Parser {
                     self.advance();
                     break;
                 }
+                if self.optional(TokenType::Comma) {
+                    elems.push(ArrayPatternElem {
+                        binding: None,
+                        default_init: None,
+                    });
+                    continue;
+                }
                 let binding = if matches!(
-                    self.current().map(|t| &t.token_type),
-                    Some(TokenType::Comma)
-                ) {
-                    self.advance();
-                    None
-                } else if matches!(
                     self.current().map(|t| &t.token_type),
                     Some(TokenType::Identifier)
                 ) {
@@ -1315,7 +1437,15 @@ impl Parser {
                         span: self.current().map(|t| t.span),
                     });
                 };
-                elems.push(ArrayPatternElem { binding });
+                let default_init = if self.optional(TokenType::Assign) {
+                    Some(Box::new(self.parse_assignment_expression_allow_in()?))
+                } else {
+                    None
+                };
+                elems.push(ArrayPatternElem {
+                    binding,
+                    default_init,
+                });
                 if !self.optional(TokenType::Comma) {
                     self.expect(TokenType::RightBracket)?;
                     break;
@@ -1343,12 +1473,49 @@ impl Parser {
         self.parse_expression_prec(0)
     }
 
+    fn parse_assignment_expression_allow_in(&mut self) -> Result<Expression, ParseError> {
+        let mut expr = self.parse_expression_prec(2)?;
+        if self.optional(TokenType::In) {
+            let in_right = self.parse_expression_prec(2)?;
+            expr = match expr {
+                Expression::Assign(assign) => {
+                    let rhs_span = assign.right.span().merge(in_right.span());
+                    let rhs_with_in = Expression::Binary(BinaryExpr {
+                        id: self.next_id(),
+                        span: rhs_span,
+                        op: BinaryOp::Instanceof,
+                        left: assign.right,
+                        right: Box::new(in_right),
+                    });
+                    let assign_span = assign.left.span().merge(rhs_with_in.span());
+                    Expression::Assign(AssignExpr {
+                        id: self.next_id(),
+                        span: assign_span,
+                        left: assign.left,
+                        right: Box::new(rhs_with_in),
+                    })
+                }
+                other => {
+                    let span = other.span().merge(in_right.span());
+                    Expression::Binary(BinaryExpr {
+                        id: self.next_id(),
+                        span,
+                        op: BinaryOp::Instanceof,
+                        left: Box::new(other),
+                        right: Box::new(in_right),
+                    })
+                }
+            };
+        }
+        Ok(expr)
+    }
+
     fn parse_expression_prec(&mut self, min_prec: u8) -> Result<Expression, ParseError> {
         self.check_recursion()?;
 
         let mut left = self.parse_unary()?;
 
-        if min_prec <= 1
+        if min_prec <= 2
             && matches!(
                 self.current().map(|t| &t.token_type),
                 Some(TokenType::Question)
@@ -1399,7 +1566,7 @@ impl Parser {
                     self.end_recursion();
                     let left_span = left.span();
                     self.advance();
-                    let right = self.parse_expression_prec(0)?;
+                    let right = self.parse_expression_prec(2)?;
                     let span = left_span.merge(right.span());
                     return Ok(Expression::Assign(AssignExpr {
                         id: self.next_id(),
@@ -1412,7 +1579,7 @@ impl Parser {
                     self.end_recursion();
                     let left_span = left.span();
                     self.advance();
-                    let right = self.parse_expression_prec(0)?;
+                    let right = self.parse_expression_prec(2)?;
                     let span = left_span.merge(right.span());
                     let add_right = Expression::Binary(BinaryExpr {
                         id: self.next_id(),
@@ -1432,7 +1599,7 @@ impl Parser {
                     self.end_recursion();
                     let left_span = left.span();
                     self.advance();
-                    let right = self.parse_expression_prec(0)?;
+                    let right = self.parse_expression_prec(2)?;
                     let span = left_span.merge(right.span());
                     let op_right = Expression::Binary(BinaryExpr {
                         id: self.next_id(),
@@ -1477,7 +1644,7 @@ impl Parser {
             });
         }
 
-        if min_prec <= 1
+        if min_prec <= 2
             && matches!(
                 self.current().map(|t| &t.token_type),
                 Some(TokenType::Question)
@@ -1909,7 +2076,7 @@ impl Parser {
                             self.parse_object_method_expression(key_span, None)?
                         } else {
                             self.expect(TokenType::Colon)?;
-                            self.parse_expression_prec(1)?
+                            self.parse_assignment_expression_allow_in()?
                         };
 
                         properties.push(ObjectProperty {
@@ -1961,7 +2128,7 @@ impl Parser {
                         ) {
                             self.parse_object_method_expression(key_span, Some(key.clone()))?
                         } else if self.optional(TokenType::Colon) {
-                            self.parse_expression_prec(1)?
+                            self.parse_assignment_expression_allow_in()?
                         } else if is_identifier_key {
                             Expression::Identifier(IdentifierExpr {
                                 id: self.next_id(),
@@ -3176,6 +3343,44 @@ mod tests {
             }
         }
         panic!("expected for-of in block");
+    }
+
+    #[test]
+    fn parse_for_of_with_destructuring_declaration() {
+        let script = parse_ok("function f() { for (let { x: y = 1 } of arr) { return y; } }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::ForOf(s) = &b.body[0] {
+                    if let ForInOfLeft::LetBinding(Binding::ObjectPattern(props)) = &s.left {
+                        assert_eq!(props.len(), 1);
+                        assert_eq!(props[0].key, "x");
+                        assert_eq!(props[0].binding, "y");
+                        assert!(props[0].default_init.is_some());
+                        return;
+                    }
+                }
+            }
+        }
+        panic!("expected for-of with object destructuring binding");
+    }
+
+    #[test]
+    fn parse_for_of_with_destructuring_assignment_pattern() {
+        let script = parse_ok("function f() { let y; for ({ x: y = 1 } of arr) { return y; } }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::ForOf(s) = &b.body[1] {
+                    if let ForInOfLeft::Pattern(Binding::ObjectPattern(props)) = &s.left {
+                        assert_eq!(props.len(), 1);
+                        assert_eq!(props[0].key, "x");
+                        assert_eq!(props[0].binding, "y");
+                        assert!(props[0].default_init.is_some());
+                        return;
+                    }
+                }
+            }
+        }
+        panic!("expected for-of with assignment pattern");
     }
 
     #[test]

@@ -430,8 +430,10 @@ fn terminator_for_exit(ctx: &LowerCtx<'_>) -> HirTerminator {
 }
 
 fn named_locals_from_map(locals: &HashMap<String, u32>) -> Vec<(String, u32)> {
-    let mut named_locals: Vec<(String, u32)> =
-        locals.iter().map(|(name, slot)| (name.clone(), *slot)).collect();
+    let mut named_locals: Vec<(String, u32)> = locals
+        .iter()
+        .map(|(name, slot)| (name.clone(), *slot))
+        .collect();
     named_locals.sort_by_key(|(_, slot)| *slot);
     named_locals
 }
@@ -450,6 +452,245 @@ fn get_or_alloc_capture_slot(ctx: &mut LowerCtx<'_>, name: &str) -> Option<u32> 
         ctx.captured_names.push(name.to_string());
     }
     Some(slot)
+}
+
+#[derive(Clone, Copy)]
+enum BindingStoreMode {
+    Declare,
+    AssignExisting,
+}
+
+fn resolve_binding_slot(
+    name: &str,
+    mode: BindingStoreMode,
+    missing_message: &str,
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<u32, LowerError> {
+    match mode {
+        BindingStoreMode::Declare => {
+            let slot = *ctx.locals.entry(name.to_string()).or_insert_with(|| {
+                let s = ctx.next_slot;
+                ctx.next_slot += 1;
+                s
+            });
+            Ok(slot)
+        }
+        BindingStoreMode::AssignExisting => ctx.locals.get(name).copied().ok_or_else(|| {
+            LowerError::Unsupported(missing_message.replace("{}", name), Some(span))
+        }),
+    }
+}
+
+fn store_binding_value(
+    target_slot: u32,
+    value_slot: u32,
+    default_init: Option<&Expression>,
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    if let Some(default_expr) = default_init {
+        let cond_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+            id: value_slot,
+            span,
+        });
+        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+            value: HirConst::Undefined,
+            span,
+        });
+        ctx.blocks[ctx.current_block]
+            .ops
+            .push(HirOp::StrictEq { span });
+        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+            id: cond_slot,
+            span,
+        });
+        let default_block_id = ctx.blocks.len() as HirBlockId;
+        ctx.blocks.push(HirBlock {
+            id: default_block_id,
+            ops: Vec::new(),
+            terminator: HirTerminator::Jump { target: 0 },
+        });
+        let continue_block_id = ctx.blocks.len() as HirBlockId;
+        ctx.blocks.push(HirBlock {
+            id: continue_block_id,
+            ops: Vec::new(),
+            terminator: HirTerminator::Jump { target: 0 },
+        });
+        ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+            cond: cond_slot,
+            then_block: default_block_id,
+            else_block: continue_block_id,
+        };
+        ctx.current_block = default_block_id as usize;
+        compile_expression(default_expr, ctx)?;
+        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+            id: target_slot,
+            span,
+        });
+        ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+            target: continue_block_id,
+        };
+        ctx.current_block = continue_block_id as usize;
+        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+            id: value_slot,
+            span,
+        });
+        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+            id: target_slot,
+            span,
+        });
+    } else {
+        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+            id: value_slot,
+            span,
+        });
+        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+            id: target_slot,
+            span,
+        });
+    }
+    Ok(())
+}
+
+fn compile_binding_from_slot(
+    binding: &Binding,
+    source_slot: u32,
+    mode: BindingStoreMode,
+    missing_message: &str,
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    match binding {
+        Binding::Ident(name) => {
+            let target_slot = resolve_binding_slot(name, mode, missing_message, span, ctx)?;
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: source_slot,
+                span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: target_slot,
+                span,
+            });
+        }
+        Binding::ObjectPattern(props) => {
+            for prop in props {
+                let value_slot = ctx.next_slot;
+                ctx.next_slot += 1;
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                    id: source_slot,
+                    span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                    key: prop.key.clone(),
+                    span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                    id: value_slot,
+                    span,
+                });
+                let target_slot =
+                    resolve_binding_slot(&prop.binding, mode, missing_message, span, ctx)?;
+                store_binding_value(
+                    target_slot,
+                    value_slot,
+                    prop.default_init.as_deref(),
+                    span,
+                    ctx,
+                )?;
+            }
+        }
+        Binding::ArrayPattern(elems) => {
+            for (index, elem) in elems.iter().enumerate() {
+                if let Some(name) = &elem.binding {
+                    let value_slot = ctx.next_slot;
+                    ctx.next_slot += 1;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: source_slot,
+                        span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Int(index as i64),
+                        span,
+                    });
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::GetPropDyn { span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: value_slot,
+                        span,
+                    });
+                    let target_slot = resolve_binding_slot(name, mode, missing_message, span, ctx)?;
+                    store_binding_value(
+                        target_slot,
+                        value_slot,
+                        elem.default_init.as_deref(),
+                        span,
+                        ctx,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn compile_for_in_of_left_from_slot(
+    left: &ForInOfLeft,
+    source_slot: u32,
+    loop_name: &str,
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    let missing_message = if loop_name == "for-in" {
+        "for-in variable '{}' not in scope"
+    } else {
+        "for-of variable '{}' not in scope"
+    };
+    match left {
+        ForInOfLeft::VarDecl(name) | ForInOfLeft::LetDecl(name) | ForInOfLeft::ConstDecl(name) => {
+            let binding = Binding::Ident(name.clone());
+            compile_binding_from_slot(
+                &binding,
+                source_slot,
+                BindingStoreMode::Declare,
+                missing_message,
+                span,
+                ctx,
+            )
+        }
+        ForInOfLeft::Identifier(name) => {
+            let binding = Binding::Ident(name.clone());
+            compile_binding_from_slot(
+                &binding,
+                source_slot,
+                BindingStoreMode::AssignExisting,
+                missing_message,
+                span,
+                ctx,
+            )
+        }
+        ForInOfLeft::VarBinding(binding)
+        | ForInOfLeft::LetBinding(binding)
+        | ForInOfLeft::ConstBinding(binding) => compile_binding_from_slot(
+            binding,
+            source_slot,
+            BindingStoreMode::Declare,
+            missing_message,
+            span,
+            ctx,
+        ),
+        ForInOfLeft::Pattern(binding) => compile_binding_from_slot(
+            binding,
+            source_slot,
+            BindingStoreMode::AssignExisting,
+            missing_message,
+            span,
+            ctx,
+        ),
+    }
 }
 
 fn compile_declarator(
@@ -485,25 +726,15 @@ fn compile_declarator(
                 id: src_slot,
                 span: decl.span,
             });
-            for prop in props {
-                let slot = *ctx.locals.entry(prop.binding.clone()).or_insert_with(|| {
-                    let s = ctx.next_slot;
-                    ctx.next_slot += 1;
-                    s
-                });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                    id: src_slot,
-                    span: decl.span,
-                });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
-                    key: prop.key.clone(),
-                    span: decl.span,
-                });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                    id: slot,
-                    span: decl.span,
-                });
-            }
+            let binding = Binding::ObjectPattern(props.clone());
+            compile_binding_from_slot(
+                &binding,
+                src_slot,
+                BindingStoreMode::Declare,
+                "variable '{}' not in scope",
+                decl.span,
+                ctx,
+            )?;
         }
         crate::frontend::ast::Binding::ArrayPattern(elems) => {
             let init = decl.init.as_ref().ok_or_else(|| {
@@ -519,30 +750,15 @@ fn compile_declarator(
                 id: src_slot,
                 span: decl.span,
             });
-            for (i, elem) in elems.iter().enumerate() {
-                if let Some(ref name) = elem.binding {
-                    let slot = *ctx.locals.entry(name.clone()).or_insert_with(|| {
-                        let s = ctx.next_slot;
-                        ctx.next_slot += 1;
-                        s
-                    });
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                        id: src_slot,
-                        span: decl.span,
-                    });
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                        value: HirConst::Int(i as i64),
-                        span: decl.span,
-                    });
-                    ctx.blocks[ctx.current_block]
-                        .ops
-                        .push(HirOp::GetPropDyn { span: decl.span });
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                        id: slot,
-                        span: decl.span,
-                    });
-                }
-            }
+            let binding = Binding::ArrayPattern(elems.clone());
+            compile_binding_from_slot(
+                &binding,
+                src_slot,
+                BindingStoreMode::Declare,
+                "variable '{}' not in scope",
+                decl.span,
+                ctx,
+            )?;
         }
     }
     Ok(())
@@ -585,6 +801,10 @@ fn compile_function(
     let rest_param_index = f.params.iter().position(|p| p.is_rest()).map(|i| i as u32);
     for name in &param_names {
         ctx.locals.insert(name.clone(), ctx.next_slot);
+        ctx.next_slot += 1;
+    }
+    if !ctx.locals.contains_key("arguments") {
+        ctx.locals.insert("arguments".to_string(), ctx.next_slot);
         ctx.next_slot += 1;
     }
 
@@ -1182,24 +1402,8 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             ctx.next_slot += 1;
             let index_slot = ctx.next_slot;
             ctx.next_slot += 1;
-
-            let left_slot = match &f.left {
-                ForInOfLeft::VarDecl(name)
-                | ForInOfLeft::LetDecl(name)
-                | ForInOfLeft::ConstDecl(name) => {
-                    *ctx.locals.entry(name.clone()).or_insert_with(|| {
-                        let s = ctx.next_slot;
-                        ctx.next_slot += 1;
-                        s
-                    })
-                }
-                ForInOfLeft::Identifier(name) => *ctx.locals.get(name).ok_or_else(|| {
-                    LowerError::Unsupported(
-                        format!("for-in variable '{}' not in scope", name),
-                        Some(f.span),
-                    )
-                })?,
-            };
+            let iter_value_slot = ctx.next_slot;
+            ctx.next_slot += 1;
 
             compile_expression(&f.right, ctx)?;
             ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
@@ -1294,9 +1498,10 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
                 .ops
                 .push(HirOp::GetPropDyn { span: f.span });
             ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                id: left_slot,
+                id: iter_value_slot,
                 span: f.span,
             });
+            compile_for_in_of_left_from_slot(&f.left, iter_value_slot, "for-in", f.span, ctx)?;
             let body_exits = compile_statement(&f.body, ctx)?;
             loop_stack_pop(ctx);
             if !body_exits {
@@ -1330,24 +1535,8 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             ctx.next_slot += 1;
             let index_slot = ctx.next_slot;
             ctx.next_slot += 1;
-
-            let left_slot = match &f.left {
-                ForInOfLeft::VarDecl(name)
-                | ForInOfLeft::LetDecl(name)
-                | ForInOfLeft::ConstDecl(name) => {
-                    *ctx.locals.entry(name.clone()).or_insert_with(|| {
-                        let s = ctx.next_slot;
-                        ctx.next_slot += 1;
-                        s
-                    })
-                }
-                ForInOfLeft::Identifier(name) => *ctx.locals.get(name).ok_or_else(|| {
-                    LowerError::Unsupported(
-                        format!("for-of variable '{}' not in scope", name),
-                        Some(f.span),
-                    )
-                })?,
-            };
+            let iter_value_slot = ctx.next_slot;
+            ctx.next_slot += 1;
 
             compile_expression(&f.right, ctx)?;
             ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
@@ -1429,9 +1618,10 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
                 .ops
                 .push(HirOp::GetPropDyn { span: f.span });
             ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                id: left_slot,
+                id: iter_value_slot,
                 span: f.span,
             });
+            compile_for_in_of_left_from_slot(&f.left, iter_value_slot, "for-of", f.span, ctx)?;
             let body_exits = compile_statement(&f.body, ctx)?;
             loop_stack_pop(ctx);
             if !body_exits {
@@ -1678,6 +1868,10 @@ fn compile_function_expr_to_hir(
     let rest_param_index = fe.params.iter().position(|p| p.is_rest()).map(|i| i as u32);
     for name in &param_names {
         ctx.locals.insert(name.clone(), ctx.next_slot);
+        ctx.next_slot += 1;
+    }
+    if !ctx.locals.contains_key("arguments") {
+        ctx.locals.insert("arguments".to_string(), ctx.next_slot);
         ctx.next_slot += 1;
     }
     for param in &fe.params {
@@ -3705,7 +3899,7 @@ mod tests {
         let script = parser.parse().expect("parse");
         let funcs = script_to_hir(&script).expect("lower");
         assert_eq!(funcs.len(), 1);
-        assert_eq!(funcs[0].num_locals, 2);
+        assert_eq!(funcs[0].num_locals, 3);
         let cf = hir_to_bytecode(&funcs[0]);
         let completion = interpret(&cf.chunk).expect("interpret");
         if let crate::vm::Completion::Return(v) = completion {
@@ -4021,7 +4215,10 @@ mod tests {
             "function main() { let base = 3; let addBase = (x) => x + base; return addBase(4); }",
         )
         .expect("run");
-        assert_eq!(result, 7, "arrow function should capture outer local variable");
+        assert_eq!(
+            result, 7,
+            "arrow function should capture outer local variable"
+        );
     }
 
     #[test]
@@ -4030,7 +4227,10 @@ mod tests {
             "function main() { let base = 5; let addBase = function(x) { return x + base; }; return addBase(6); }",
         )
         .expect("run");
-        assert_eq!(result, 11, "function expression should capture outer local variable");
+        assert_eq!(
+            result, 11,
+            "function expression should capture outer local variable"
+        );
     }
 
     #[test]
