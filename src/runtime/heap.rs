@@ -64,6 +64,7 @@ impl Heap {
         self.set_prop(obj_id, "isFrozen", Value::Builtin(0x4B));
         self.set_prop(obj_id, "isSealed", Value::Builtin(0x4C));
         self.set_prop(obj_id, "hasOwn", Value::Builtin(0x4D));
+        self.set_prop(obj_id, "is", Value::Builtin(0x4E));
         self.set_prop(global_id, "Object", Value::Object(obj_id));
 
         let arr_id = self.alloc_object();
@@ -310,6 +311,12 @@ impl Heap {
 
     pub fn date_timestamp(&self, date_id: usize) -> f64 {
         self.dates.get(date_id).copied().unwrap_or(0.0)
+    }
+
+    pub fn set_date_timestamp(&mut self, date_id: usize, ms: f64) {
+        if let Some(slot) = self.dates.get_mut(date_id) {
+            *slot = ms;
+        }
     }
 
     pub fn get_prop(&self, obj_id: usize, key: &str) -> Value {

@@ -730,9 +730,9 @@ pub fn interpret_program_with_heap(
                     Value::Object(id) => getprop_cache.get(*id, false, &key_str, &heap),
                     Value::Array(id) => getprop_cache.get(*id, true, &key_str, &heap),
                     Value::Map(id) if key_str == "size" => Value::Int(heap.map_size(*id) as i32),
-                    Value::Map(_) => Value::Undefined,
+                    Value::Map(_) => primitive_map_method(&key_str),
                     Value::Set(id) if key_str == "size" => Value::Int(heap.set_size(*id) as i32),
-                    Value::Set(_) => Value::Undefined,
+                    Value::Set(_) => primitive_set_method(&key_str),
                     Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
                     Value::String(s) => {
                         if let Ok(idx) = key_str.parse::<usize>() {
@@ -784,9 +784,9 @@ pub fn interpret_program_with_heap(
                     Value::Object(id) => heap.get_prop(*id, &key_str),
                     Value::Array(id) => heap.get_array_prop(*id, &key_str),
                     Value::Map(id) if key_str == "size" => Value::Int(heap.map_size(*id) as i32),
-                    Value::Map(_) => Value::Undefined,
+                    Value::Map(_) => primitive_map_method(&key_str),
                     Value::Set(id) if key_str == "size" => Value::Int(heap.set_size(*id) as i32),
-                    Value::Set(_) => Value::Undefined,
+                    Value::Set(_) => primitive_set_method(&key_str),
                     Value::String(s) if key_str == "length" => Value::Int(s.len() as i32),
                     Value::String(s) => {
                         if let Ok(idx) = key_str.parse::<usize>() {
@@ -939,12 +939,27 @@ fn is_truthy(v: &Value) -> bool {
 
 fn primitive_string_method(key: &str) -> Value {
     match key {
+        "includes" => Value::Builtin(0x1A),
+        "indexOf" => Value::Builtin(0x19),
         "split" => Value::Builtin(0x60),
         "trim" => Value::Builtin(0x61),
         "toLowerCase" => Value::Builtin(0x62),
         "toUpperCase" => Value::Builtin(0x63),
         "charAt" => Value::Builtin(0x64),
         "repeat" => Value::Builtin(0x65),
+        "anchor" => Value::Builtin(0x67),
+        "big" => Value::Builtin(0x68),
+        "blink" => Value::Builtin(0x69),
+        "bold" => Value::Builtin(0x6A),
+        "fixed" => Value::Builtin(0x6B),
+        "fontcolor" => Value::Builtin(0x6C),
+        "fontsize" => Value::Builtin(0x6D),
+        "italics" => Value::Builtin(0x6E),
+        "link" => Value::Builtin(0x6F),
+        "small" => Value::Builtin(0xB1),
+        "strike" => Value::Builtin(0xB2),
+        "sub" => Value::Builtin(0xB3),
+        "sup" => Value::Builtin(0xB4),
         _ => Value::Undefined,
     }
 }
@@ -954,6 +969,9 @@ fn primitive_date_method(key: &str) -> Value {
         "getTime" => Value::Builtin(0xC2),
         "toString" => Value::Builtin(0xC3),
         "toISOString" => Value::Builtin(0xC4),
+        "getYear" => Value::Builtin(0xC5),
+        "setYear" => Value::Builtin(0xC6),
+        "toGMTString" => Value::Builtin(0xC7),
         _ => Value::Undefined,
     }
 }
@@ -970,6 +988,23 @@ fn primitive_bool_method(key: &str) -> Value {
     match key {
         "toString" => Value::Builtin(0x55),
         "valueOf" => Value::Builtin(0x56),
+        _ => Value::Undefined,
+    }
+}
+
+fn primitive_map_method(key: &str) -> Value {
+    match key {
+        "set" => Value::Builtin(0x91),
+        "get" => Value::Builtin(0x92),
+        "has" => Value::Builtin(0x93),
+        _ => Value::Undefined,
+    }
+}
+
+fn primitive_set_method(key: &str) -> Value {
+    match key {
+        "add" => Value::Builtin(0xA1),
+        "has" => Value::Builtin(0xA2),
         _ => Value::Undefined,
     }
 }

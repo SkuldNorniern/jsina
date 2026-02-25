@@ -115,3 +115,27 @@ pub fn has_own(args: &[Value], heap: &mut Heap) -> Value {
     };
     Value::Bool(result)
 }
+
+pub fn is_same_value(args: &[Value], _heap: &mut Heap) -> Value {
+    let a = args.get(0).unwrap_or(&Value::Undefined);
+    let b = args.get(1).unwrap_or(&Value::Undefined);
+    Value::Bool(same_value(a, b))
+}
+
+fn same_value(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            if x.is_nan() && y.is_nan() {
+                return true;
+            }
+            if *x == 0.0 && *y == 0.0 {
+                return x.is_sign_positive() == y.is_sign_positive();
+            }
+            x == y
+        }
+        (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Int(x), Value::Number(y)) => (*x as f64) == *y && !y.is_nan(),
+        (Value::Number(x), Value::Int(y)) => *x == (*y as f64) && !x.is_nan(),
+        _ => a == b,
+    }
+}

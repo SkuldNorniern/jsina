@@ -204,6 +204,7 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "Object", name: "isFrozen", entry: BuiltinEntry::Normal(object::is_frozen) },
     BuiltinDef { category: "Object", name: "isSealed", entry: BuiltinEntry::Normal(object::is_sealed) },
     BuiltinDef { category: "Object", name: "hasOwn", entry: BuiltinEntry::Normal(object::has_own) },
+    BuiltinDef { category: "Object", name: "is", entry: BuiltinEntry::Normal(object::is_same_value) },
     // Type 0..3 (String, Error, Number, Boolean constructors)
     BuiltinDef { category: "Type", name: "String", entry: BuiltinEntry::Normal(string::string) },
     BuiltinDef { category: "Type", name: "Error", entry: BuiltinEntry::Normal(error::error) },
@@ -220,9 +221,18 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "String", name: "charAt", entry: BuiltinEntry::Normal(string::char_at) },
     BuiltinDef { category: "String", name: "repeat", entry: BuiltinEntry::Normal(string::repeat) },
     BuiltinDef { category: "String", name: "fromCharCode", entry: BuiltinEntry::Normal(string::from_char_code) },
+    BuiltinDef { category: "String", name: "anchor", entry: BuiltinEntry::Normal(string::anchor) },
+    BuiltinDef { category: "String", name: "big", entry: BuiltinEntry::Normal(string::big) },
+    BuiltinDef { category: "String", name: "blink", entry: BuiltinEntry::Normal(string::blink) },
+    BuiltinDef { category: "String", name: "bold", entry: BuiltinEntry::Normal(string::bold) },
+    BuiltinDef { category: "String", name: "fixed", entry: BuiltinEntry::Normal(string::fixed) },
+    BuiltinDef { category: "String", name: "fontcolor", entry: BuiltinEntry::Normal(string::fontcolor) },
+    BuiltinDef { category: "String", name: "fontsize", entry: BuiltinEntry::Normal(string::fontsize) },
+    BuiltinDef { category: "String", name: "italics", entry: BuiltinEntry::Normal(string::italics) },
+    BuiltinDef { category: "String", name: "link", entry: BuiltinEntry::Normal(string::link) },
     // Error 0 (isError)
     BuiltinDef { category: "Error", name: "isError", entry: BuiltinEntry::Normal(error::is_error) },
-    // RegExp 0..1
+    // RegExp 0..2
     BuiltinDef { category: "RegExp", name: "escape", entry: BuiltinEntry::Normal(regexp::escape) },
     BuiltinDef { category: "RegExp", name: "create", entry: BuiltinEntry::Normal(regexp::create) },
     BuiltinDef { category: "RegExp", name: "test", entry: BuiltinEntry::Normal(regexp::test) },
@@ -238,12 +248,20 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "Set", name: "size", entry: BuiltinEntry::Normal(set::size) },
     // Collection 0 (Map/Set .has shared)
     BuiltinDef { category: "Collection", name: "has", entry: BuiltinEntry::Normal(collection_has) },
+    // String annex B HTML (small, strike, sub, sup) 0xB1..0xB4
+    BuiltinDef { category: "String", name: "small", entry: BuiltinEntry::Normal(string::small) },
+    BuiltinDef { category: "String", name: "strike", entry: BuiltinEntry::Normal(string::strike) },
+    BuiltinDef { category: "String", name: "sub", entry: BuiltinEntry::Normal(string::sub) },
+    BuiltinDef { category: "String", name: "sup", entry: BuiltinEntry::Normal(string::sup) },
     // Date 0..4
     BuiltinDef { category: "Date", name: "create", entry: BuiltinEntry::Normal(date::create) },
     BuiltinDef { category: "Date", name: "now", entry: BuiltinEntry::Normal(date::now) },
     BuiltinDef { category: "Date", name: "getTime", entry: BuiltinEntry::Normal(date::get_time) },
     BuiltinDef { category: "Date", name: "toString", entry: BuiltinEntry::Normal(date::to_string) },
     BuiltinDef { category: "Date", name: "toISOString", entry: BuiltinEntry::Normal(date::to_iso_string) },
+    BuiltinDef { category: "Date", name: "getYear", entry: BuiltinEntry::Normal(date::get_year) },
+    BuiltinDef { category: "Date", name: "setYear", entry: BuiltinEntry::Normal(date::set_year) },
+    BuiltinDef { category: "Date", name: "toGMTString", entry: BuiltinEntry::Normal(date::to_gmt_string) },
     BuiltinDef { category: "Symbol", name: "create", entry: BuiltinEntry::Normal(symbol::symbol) },
     BuiltinDef { category: "Error", name: "ReferenceError", entry: BuiltinEntry::Normal(error::reference_error) },
     BuiltinDef { category: "Error", name: "TypeError", entry: BuiltinEntry::Normal(error::type_error) },
@@ -308,58 +326,75 @@ static ENCODED_TO_INDEX: [u8; 256] = {
     t[0x4B] = 35;
     t[0x4C] = 36;
     t[0x4D] = 37;
-    t[0x50] = 38;
-    t[0x51] = 39;
-    t[0x52] = 40;
-    t[0x53] = 41;
-    t[0x54] = 42;
-    t[0x55] = 43;
-    t[0x56] = 44;
-    t[0x60] = 45;
-    t[0x61] = 46;
-    t[0x62] = 47;
-    t[0x63] = 48;
-    t[0x64] = 49;
-    t[0x65] = 50;
-    t[0x66] = 51;
-    t[0x70] = 52;
-    t[0x80] = 53;
-    t[0x81] = 54;
-    t[0x82] = 55;
-    t[0x90] = 56;
-    t[0x91] = 57;
-    t[0x92] = 58;
-    t[0x93] = 59;
-    t[0xA0] = 60;
-    t[0xA1] = 61;
-    t[0xA2] = 62;
-    t[0xA3] = 63;
-    t[0xB0] = 64;
-    t[0xC0] = 65;
-    t[0xC1] = 66;
-    t[0xC2] = 67;
-    t[0xC3] = 68;
-    t[0xC4] = 69;
-    t[0xD0] = 70;
-    t[0xD1] = 71;
-    t[0xD2] = 72;
-    t[0xD3] = 73;
-    t[0xD4] = 74;
-    t[0xD5] = 75;
-    t[0xD6] = 76;
-    t[0xD7] = 77;
-    t[0xD8] = 78;
-    t[0xD9] = 79;
-    t[0xDA] = 80;
-    t[0xDB] = 81;
-    t[0xDC] = 82;
-    t[0xDD] = 83;
-    t[0xDE] = 84;
-    t[0xDF] = 85;
-    t[0xE0] = 86;
-    t[0xE1] = 87;
-    t[0xE2] = 88;
-    t[0xE3] = 89;
+    t[0x4E] = 38;
+    t[0x50] = 39;
+    t[0x51] = 40;
+    t[0x52] = 41;
+    t[0x53] = 42;
+    t[0x54] = 43;
+    t[0x55] = 44;
+    t[0x56] = 45;
+    t[0x60] = 46;
+    t[0x61] = 47;
+    t[0x62] = 48;
+    t[0x63] = 49;
+    t[0x64] = 50;
+    t[0x65] = 51;
+    t[0x66] = 52;
+    t[0x67] = 53;
+    t[0x68] = 54;
+    t[0x69] = 55;
+    t[0x6A] = 56;
+    t[0x6B] = 57;
+    t[0x6C] = 58;
+    t[0x6D] = 59;
+    t[0x6E] = 60;
+    t[0x6F] = 61;
+    t[0x70] = 62;
+    t[0x80] = 63;
+    t[0x81] = 64;
+    t[0x82] = 65;
+    t[0x90] = 66;
+    t[0x91] = 67;
+    t[0x92] = 68;
+    t[0x93] = 69;
+    t[0xA0] = 70;
+    t[0xA1] = 71;
+    t[0xA2] = 72;
+    t[0xA3] = 73;
+    t[0xB0] = 74;
+    t[0xB1] = 75;
+    t[0xB2] = 76;
+    t[0xB3] = 77;
+    t[0xB4] = 78;
+    t[0xC0] = 79;
+    t[0xC1] = 80;
+    t[0xC2] = 81;
+    t[0xC3] = 82;
+    t[0xC4] = 83;
+    t[0xC5] = 84;
+    t[0xC6] = 85;
+    t[0xC7] = 86;
+    t[0xD0] = 87;
+    t[0xD1] = 88;
+    t[0xD2] = 89;
+    t[0xD3] = 90;
+    t[0xD4] = 91;
+    t[0xD5] = 92;
+    t[0xD6] = 93;
+    t[0xD7] = 94;
+    t[0xD8] = 95;
+    t[0xD9] = 96;
+    t[0xDA] = 97;
+    t[0xDB] = 98;
+    t[0xDC] = 99;
+    t[0xDD] = 100;
+    t[0xDE] = 101;
+    t[0xDF] = 102;
+    t[0xE0] = 103;
+    t[0xE1] = 104;
+    t[0xE2] = 105;
+    t[0xE3] = 106;
     t
 };
 
@@ -396,20 +431,21 @@ pub fn all() -> &'static [BuiltinDef] {
     BUILTINS
 }
 
-const INDEX_TO_ENCODED: [u8; 90] = [
+const INDEX_TO_ENCODED: [u8; 107] = [
     0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
     0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
     0x30, 0x31,
     0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
-    0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D,
+    0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E,
     0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56,
     0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
+    0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
     0x70,
     0x80, 0x81, 0x82,
     0x90, 0x91, 0x92, 0x93,
     0xA0, 0xA1, 0xA2, 0xA3,
-    0xB0,
-    0xC0, 0xC1, 0xC2, 0xC3, 0xC4,
+    0xB0, 0xB1, 0xB2, 0xB3, 0xB4,
+    0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7,
     0xD0, 0xD1, 0xD2, 0xD3, 0xD4,
     0xD5, 0xD6, 0xD7, 0xD8,
     0xD9, 0xDA, 0xDB,
@@ -450,6 +486,18 @@ pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, Builti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::Heap;
+
+    #[test]
+    fn dispatch_regexp_escape() {
+        let mut heap = Heap::new();
+        let args = [crate::runtime::Value::String(".".to_string())];
+        let r = dispatch(0x80, &args, &mut heap);
+        assert!(r.is_ok(), "dispatch failed: {:?}", r);
+        let v = r.unwrap();
+        let expected = crate::runtime::Value::String("\\.".to_string());
+        assert_eq!(v, expected, "RegExp.escape(\".\") should return \"\\.\"");
+    }
 
     #[test]
     fn resolve_known_builtins() {

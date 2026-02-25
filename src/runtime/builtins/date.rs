@@ -142,3 +142,54 @@ pub fn to_iso_string(args: &[Value], heap: &mut Heap) -> Value {
         millis.abs()
     ))
 }
+
+pub fn get_year(args: &[Value], heap: &mut Heap) -> Value {
+    let id = match args.first().and_then(Value::as_date_id) {
+        Some(i) => i,
+        None => return Value::Number(f64::NAN),
+    };
+    let ms = heap.date_timestamp(id);
+    if !ms.is_finite() {
+        return Value::Number(f64::NAN);
+    }
+    let secs = (ms / 1000.0) as i64;
+    let days = secs / 86400;
+    let (y, _, _) = days_to_ymd(days);
+    Value::Number((y - 1900) as f64)
+}
+
+pub fn set_year(args: &[Value], heap: &mut Heap) -> Value {
+    let id = match args.first().and_then(Value::as_date_id) {
+        Some(i) => i,
+        None => return Value::Number(f64::NAN),
+    };
+    let year = args.get(1).map(super::to_number).unwrap_or(f64::NAN);
+    let ms = heap.date_timestamp(id);
+    if !ms.is_finite() || year.is_nan() || year.is_infinite() {
+        return Value::Number(f64::NAN);
+    }
+    let yr = year as i32;
+    let yr = if yr >= 0 && yr <= 99 { yr + 1900 } else { yr };
+    let secs = (ms / 1000.0) as i64;
+    let days = secs / 86400;
+    let (_, mo, d) = days_to_ymd(days);
+    let new_days = ymd_to_days(yr, mo, d);
+    let new_ms = (new_days * 86400) as f64 * 1000.0;
+    heap.set_date_timestamp(id, new_ms);
+    Value::Number(heap.date_timestamp(id))
+}
+
+fn ymd_to_days(y: i32, mo: i32, d: i32) -> i64 {
+    let adj = if mo <= 2 { 1 } else { 0 };
+    let y = y - adj;
+    let m = (mo + 9) % 12 + 1;
+    let era = (y as i64) / 400;
+    let yoe = (y as i64) % 400;
+    let doy = (153 * (m as i64) + 2) / 5 + (d as i64) - 1;
+    let doe = 365 * yoe + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+pub fn to_gmt_string(args: &[Value], heap: &mut Heap) -> Value {
+    to_string(args, heap)
+}

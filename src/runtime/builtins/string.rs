@@ -1,5 +1,23 @@
-use super::to_number;
+use super::{to_number, to_prop_key};
 use crate::runtime::{Heap, Value};
+
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("&quot;"),
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn string_html_receiver(args: &[Value]) -> String {
+    args.first().map(|v| to_prop_key(v)).unwrap_or_default()
+}
 
 pub fn string(args: &[Value], _heap: &mut Heap) -> Value {
     let arg = args.first().map(|v| v.to_string()).unwrap_or_default();
@@ -113,4 +131,73 @@ pub fn split(args: &[Value], heap: &mut Heap) -> Value {
         heap.array_push(new_id, p);
     }
     Value::Array(new_id)
+}
+
+pub fn anchor(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    let name = args.get(1).map(|v| html_escape(&to_prop_key(v))).unwrap_or_default();
+    Value::String(format!(r#"<a name="{}">{}</a>"#, name, s))
+}
+
+pub fn big(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    Value::String(format!("<big>{}</big>", s))
+}
+
+pub fn blink(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    Value::String(format!("<blink>{}</blink>", s))
+}
+
+pub fn bold(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    Value::String(format!("<b>{}</b>", s))
+}
+
+pub fn fixed(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    Value::String(format!("<tt>{}</tt>", s))
+}
+
+pub fn fontcolor(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    let color = args.get(1).map(|v| html_escape(&to_prop_key(v))).unwrap_or_default();
+    Value::String(format!(r#"<font color="{}">{}</font>"#, color, s))
+}
+
+pub fn fontsize(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    let size = args.get(1).map(|v| html_escape(&to_prop_key(v))).unwrap_or_default();
+    Value::String(format!(r#"<font size="{}">{}</font>"#, size, s))
+}
+
+pub fn italics(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    Value::String(format!("<i>{}</i>", s))
+}
+
+pub fn link(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    let url = args.get(1).map(|v| html_escape(&to_prop_key(v))).unwrap_or_default();
+    Value::String(format!(r#"<a href="{}">{}</a>"#, url, s))
+}
+
+pub fn small(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    Value::String(format!("<small>{}</small>", s))
+}
+
+pub fn strike(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    Value::String(format!("<strike>{}</strike>", s))
+}
+
+pub fn sub(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    Value::String(format!("<sub>{}</sub>", s))
+}
+
+pub fn sup(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    Value::String(format!("<sup>{}</sup>", s))
 }
