@@ -190,20 +190,22 @@ impl Driver {
             init_entry,
             global_funcs,
         };
-        let completion = crate::vm::interpret_program_with_limit_and_cancel(
+        let (result, heap) = crate::vm::interpret_program_with_limit_and_cancel(
             &program,
             trace,
             step_limit,
             cancel,
             step_limit.is_some(),
-        )?;
+        );
+        let completion = result?;
         let value = match completion {
             Completion::Return(v) => v,
             Completion::Normal(v) => v,
             Completion::Throw(v) => {
+                let msg = heap.format_thrown_value(&v);
                 return Err(DriverError::Diagnostic(vec![Diagnostic::error(
                     ErrorCode::RunUncaughtException,
-                    format!("uncaught exception: {}", v),
+                    format!("uncaught exception: {}", msg),
                     None,
                 )]));
             }

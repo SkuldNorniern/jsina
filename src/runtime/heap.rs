@@ -207,8 +207,7 @@ impl Heap {
         self.set_prop(global_id, "WeakMap", Value::Object(weakmap_id));
         let weakset_id = self.alloc_object();
         self.set_prop(global_id, "WeakSet", Value::Object(weakset_id));
-        let dataview_id = self.alloc_object();
-        self.set_prop(global_id, "DataView", Value::Object(dataview_id));
+        self.set_prop(global_id, "DataView", Value::Builtin(0xE9));
     }
 
     /// Add $262 host object for test262 harness. Match V8/Bun/Deno: $262 only exists when running via test262.
@@ -222,6 +221,13 @@ impl Heap {
         self.set_prop(dollar262_id, "detachArrayBuffer", Value::Builtin(0xD8));
         self.set_prop(global_id, "$262", Value::Object(dollar262_id));
         self.set_prop(global_id, "global", Value::Object(global_id));
+        self.set_prop(global_id, "timeout", Value::Builtin(0xEA));
+        let temporal_id = self.alloc_object();
+        self.set_prop(global_id, "Temporal", Value::Object(temporal_id));
+        let proxy_id = self.alloc_object();
+        self.set_prop(global_id, "Proxy", Value::Object(proxy_id));
+        let intl_id = self.alloc_object();
+        self.set_prop(global_id, "Intl", Value::Object(intl_id));
     }
 
     pub fn get_global(&self, name: &str) -> Value {
@@ -515,6 +521,27 @@ impl Heap {
 
     pub fn is_error_object(&self, obj_id: usize) -> bool {
         self.error_object_ids.contains(&obj_id)
+    }
+
+    pub fn format_thrown_value(&self, v: &crate::runtime::Value) -> String {
+        match v {
+            crate::runtime::Value::Object(id) if self.is_error_object(*id) => {
+                let name = match self.get_prop(*id, "name") {
+                    crate::runtime::Value::String(s) => s,
+                    _ => "Error".to_string(),
+                };
+                let message = match self.get_prop(*id, "message") {
+                    crate::runtime::Value::String(s) => s,
+                    _ => "".to_string(),
+                };
+                if message.is_empty() {
+                    name
+                } else {
+                    format!("{}: {}", name, message)
+                }
+            }
+            _ => v.to_string(),
+        }
     }
 
     pub fn object_keys(&self, obj_id: usize) -> Vec<String> {

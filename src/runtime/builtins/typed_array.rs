@@ -46,3 +46,27 @@ pub fn array_buffer(args: &[Value], heap: &mut Heap) -> Value {
     heap.set_prop(id, "byteLength", Value::Int(len as i32));
     Value::Object(id)
 }
+
+pub fn data_view(args: &[Value], heap: &mut Heap) -> Result<Value, super::BuiltinError> {
+    let _ = (args, heap);
+    Err(super::BuiltinError::Throw(Value::String(
+        "DataView is not implemented".to_string(),
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_view_throws_not_implemented() {
+        let mut heap = Heap::new();
+        let r = data_view(&[], &mut heap);
+        assert!(r.is_err());
+        if let Err(super::super::BuiltinError::Throw(Value::String(s))) = r {
+            assert!(s.contains("DataView"));
+        } else {
+            panic!("expected Throw with string");
+        }
+    }
+}

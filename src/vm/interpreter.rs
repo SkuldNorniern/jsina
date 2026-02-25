@@ -106,7 +106,8 @@ pub fn interpret_program_with_limit(
     trace: bool,
     step_limit: Option<u64>,
 ) -> Result<Completion, VmError> {
-    interpret_program_with_trace_and_limit(program, trace, step_limit, None, false)
+    let (result, _) = interpret_program_with_trace_and_limit(program, trace, step_limit, None, false);
+    result
 }
 
 pub fn interpret_program_with_limit_and_cancel(
@@ -115,7 +116,7 @@ pub fn interpret_program_with_limit_and_cancel(
     step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
     test262_mode: bool,
-) -> Result<Completion, VmError> {
+) -> (Result<Completion, VmError>, Heap) {
     interpret_program_with_trace_and_limit(program, trace, step_limit, cancel, test262_mode)
 }
 
@@ -167,7 +168,8 @@ impl GetPropCache {
 }
 
 pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Completion, VmError> {
-    interpret_program_with_trace_and_limit(program, trace, None, None, false)
+    let (result, _) = interpret_program_with_trace_and_limit(program, trace, None, None, false);
+    result
 }
 
 fn interpret_program_with_trace_and_limit(
@@ -176,7 +178,7 @@ fn interpret_program_with_trace_and_limit(
     step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
     test262_mode: bool,
-) -> Result<Completion, VmError> {
+) -> (Result<Completion, VmError>, Heap) {
     let mut heap = Heap::new();
     if test262_mode {
         heap.init_test262_globals();
@@ -187,7 +189,8 @@ fn interpret_program_with_trace_and_limit(
             heap.set_prop(global_id, name, Value::Function(*chunk_idx));
         }
     }
-    interpret_program_with_heap(program, &mut heap, trace, step_limit, cancel)
+    let result = interpret_program_with_heap(program, &mut heap, trace, step_limit, cancel);
+    (result, heap)
 }
 
 pub fn interpret_program_with_heap(
@@ -501,7 +504,7 @@ pub fn interpret_program_with_heap_and_entry(
                     });
                 } else {
                     return Ok(Completion::Throw(Value::String(
-                        "callee is not a function".to_string(),
+                        "TypeError: callee is not a function".to_string(),
                     )));
                 }
             }

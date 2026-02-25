@@ -23,6 +23,7 @@ mod encode;
 mod eval;
 mod function_ctor;
 mod reflect;
+mod timeout;
 
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -286,9 +287,11 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "TypedArray", name: "Uint8Array", entry: BuiltinEntry::Normal(typed_array::uint8_array) },
     BuiltinDef { category: "TypedArray", name: "Uint8ClampedArray", entry: BuiltinEntry::Normal(typed_array::uint8_clamped_array) },
     BuiltinDef { category: "TypedArray", name: "ArrayBuffer", entry: BuiltinEntry::Normal(typed_array::array_buffer) },
+    BuiltinDef { category: "TypedArray", name: "DataView", entry: BuiltinEntry::Throwing(typed_array::data_view) },
     BuiltinDef { category: "Global", name: "Function", entry: BuiltinEntry::Throwing(function_ctor::function_constructor) },
     BuiltinDef { category: "Reflect", name: "apply", entry: BuiltinEntry::Throwing(reflect::reflect_apply) },
     BuiltinDef { category: "Reflect", name: "construct", entry: BuiltinEntry::Throwing(reflect::reflect_construct) },
+    BuiltinDef { category: "Host", name: "timeout", entry: BuiltinEntry::Throwing(timeout::timeout) },
 ];
 
 const INVALID: u8 = 0xFF;
@@ -407,10 +410,12 @@ static ENCODED_TO_INDEX: [u8; 256] = {
     t[0xE6] = 109;
     t[0xE7] = 110;
     t[0xE8] = 111;
+    t[0xE9] = 112;
+    t[0xEA] = 113;
     t
 };
 
-pub const MAX_BUILTIN_ID: u8 = 0xE8;
+pub const MAX_BUILTIN_ID: u8 = 0xEA;
 
 fn index_for(id: u8) -> Option<usize> {
     let idx = ENCODED_TO_INDEX[id as usize];
@@ -443,7 +448,7 @@ pub fn all() -> &'static [BuiltinDef] {
     BUILTINS
 }
 
-const INDEX_TO_ENCODED: [u8; 112] = [
+const INDEX_TO_ENCODED: [u8; 114] = [
     0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
     0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
     0x30, 0x31,
@@ -463,7 +468,7 @@ const INDEX_TO_ENCODED: [u8; 112] = [
     0xD9, 0xDA, 0xDB,
     0xDC, 0xDD,
     0xDE, 0xDF,
-    0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8,
+    0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA,
 ];
 
 pub fn by_category(cat: &str) -> impl Iterator<Item = (u8, &'static BuiltinDef)> {

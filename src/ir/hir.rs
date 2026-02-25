@@ -168,6 +168,7 @@ pub enum BuiltinId {
     Function0 = 0xE4,
     IsNaN0 = 0xE5,
     IsFinite0 = 0xE6,
+    DataView0 = 0xE9,
 }
 
 #[derive(Debug, Clone)]
