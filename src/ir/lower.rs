@@ -615,6 +615,116 @@ fn store_binding_value(
     Ok(())
 }
 
+fn store_value_to_expression(
+    expr: &Expression,
+    value_slot: u32,
+    default_init: Option<&Expression>,
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    let effective_slot = if let Some(default_expr) = default_init {
+        let merge_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+        let cond_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+            id: value_slot,
+            span,
+        });
+        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+            value: HirConst::Undefined,
+            span,
+        });
+        ctx.blocks[ctx.current_block]
+            .ops
+            .push(HirOp::StrictEq { span });
+        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+            id: cond_slot,
+            span,
+        });
+        let default_block_id = ctx.blocks.len() as HirBlockId;
+        ctx.blocks.push(HirBlock {
+            id: default_block_id,
+            ops: Vec::new(),
+            terminator: HirTerminator::Jump { target: 0 },
+        });
+        let non_default_block_id = ctx.blocks.len() as HirBlockId;
+        ctx.blocks.push(HirBlock {
+            id: non_default_block_id,
+            ops: Vec::new(),
+            terminator: HirTerminator::Jump { target: 0 },
+        });
+        let merge_block_id = ctx.blocks.len() as HirBlockId;
+        ctx.blocks.push(HirBlock {
+            id: merge_block_id,
+            ops: Vec::new(),
+            terminator: HirTerminator::Jump { target: 0 },
+        });
+        ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+            cond: cond_slot,
+            then_block: default_block_id,
+            else_block: non_default_block_id,
+        };
+        ctx.current_block = default_block_id as usize;
+        compile_expression(default_expr, ctx)?;
+        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+            id: merge_slot,
+            span,
+        });
+        ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+            target: merge_block_id,
+        };
+        ctx.current_block = non_default_block_id as usize;
+        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+            id: value_slot,
+            span,
+        });
+        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+            id: merge_slot,
+            span,
+        });
+        ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+            target: merge_block_id,
+        };
+        ctx.current_block = merge_block_id as usize;
+        merge_slot
+    } else {
+        value_slot
+    };
+    match expr {
+        Expression::Member(m) => {
+            compile_expression(&m.object, ctx)?;
+            match &m.property {
+                MemberProperty::Identifier(key) => {
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::LoadLocal { id: effective_slot, span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
+                        key: key.clone(),
+                        span,
+                    });
+                }
+                MemberProperty::Expression(key_expr) => {
+                    compile_expression(key_expr, ctx)?;
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::LoadLocal { id: effective_slot, span });
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::SetPropDyn { span });
+                }
+            }
+        }
+        _ => {
+            return Err(LowerError::Unsupported(
+                "object pattern target must be identifier or member expression".to_string(),
+                Some(span),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn compile_binding_from_slot(
     binding: &Binding,
     source_slot: u32,
@@ -636,6 +746,7 @@ fn compile_binding_from_slot(
             });
         }
         Binding::ObjectPattern(props) => {
+            use crate::frontend::ast::ObjectPatternTarget;
             for prop in props {
                 let value_slot = ctx.next_slot;
                 ctx.next_slot += 1;
@@ -651,15 +762,28 @@ fn compile_binding_from_slot(
                     id: value_slot,
                     span,
                 });
-                let target_slot =
-                    resolve_binding_slot(&prop.binding, mode, missing_message, span, ctx)?;
-                store_binding_value(
-                    target_slot,
-                    value_slot,
-                    prop.default_init.as_deref(),
-                    span,
-                    ctx,
-                )?;
+                match &prop.target {
+                    ObjectPatternTarget::Ident(name) => {
+                        let target_slot =
+                            resolve_binding_slot(name, mode, missing_message, span, ctx)?;
+                        store_binding_value(
+                            target_slot,
+                            value_slot,
+                            prop.default_init.as_deref(),
+                            span,
+                            ctx,
+                        )?;
+                    }
+                    ObjectPatternTarget::Expr(expr) => {
+                        store_value_to_expression(
+                            expr,
+                            value_slot,
+                            prop.default_init.as_deref(),
+                            span,
+                            ctx,
+                        )?;
+                    }
+                }
             }
         }
         Binding::ArrayPattern(elems) => {

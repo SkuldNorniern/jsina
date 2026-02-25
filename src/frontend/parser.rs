@@ -1216,10 +1216,12 @@ impl Parser {
                         ObjectPropertyKey::Static(k) => k.clone(),
                         ObjectPropertyKey::Computed(_) => return None,
                     };
-                    let (binding, default_init, shorthand) = match &prop.value {
-                        Expression::Identifier(ident) => {
-                            (ident.name.clone(), None, key == ident.name)
-                        }
+                    let (target, default_init, shorthand) = match &prop.value {
+                        Expression::Identifier(ident) => (
+                            crate::frontend::ast::ObjectPatternTarget::Ident(ident.name.clone()),
+                            None,
+                            key == ident.name,
+                        ),
                         Expression::Assign(assign) => {
                             if let Expression::Identifier(ident) = assign.left.as_ref() {
                                 let mut default_init = *assign.right.clone();
@@ -1227,16 +1229,37 @@ impl Parser {
                                     &mut default_init,
                                     &ident.name,
                                 );
-                                (ident.name.clone(), Some(Box::new(default_init)), false)
+                                (
+                                    crate::frontend::ast::ObjectPatternTarget::Ident(
+                                        ident.name.clone(),
+                                    ),
+                                    Some(Box::new(default_init)),
+                                    false,
+                                )
+                            } else if let Expression::Member(m) = assign.left.as_ref() {
+                                (
+                                    crate::frontend::ast::ObjectPatternTarget::Expr(
+                                        Expression::Member(m.clone()),
+                                    ),
+                                    Some(Box::new((*assign.right).clone())),
+                                    false,
+                                )
                             } else {
                                 return None;
                             }
                         }
+                        Expression::Member(m) => (
+                            crate::frontend::ast::ObjectPatternTarget::Expr(Expression::Member(
+                                m.clone(),
+                            )),
+                            None,
+                            false,
+                        ),
                         _ => return None,
                     };
                     props.push(ObjectPatternProp {
                         key,
-                        binding,
+                        target,
                         shorthand,
                         default_init,
                     });
@@ -1439,7 +1462,7 @@ impl Parser {
                 };
                 props.push(ObjectPatternProp {
                     key,
-                    binding,
+                    target: crate::frontend::ast::ObjectPatternTarget::Ident(binding),
                     shorthand,
                     default_init,
                 });
@@ -2098,6 +2121,18 @@ impl Parser {
                         id: self.next_id(),
                         span,
                         name,
+                    }),
+                    span,
+                )
+            }
+            TokenType::Yield => {
+                let span = token.span;
+                self.advance();
+                (
+                    Expression::Identifier(IdentifierExpr {
+                        id: self.next_id(),
+                        span,
+                        name: "yield".to_string(),
                     }),
                     span,
                 )
@@ -3421,7 +3456,11 @@ mod tests {
                     if let ForInOfLeft::LetBinding(Binding::ObjectPattern(props)) = &s.left {
                         assert_eq!(props.len(), 1);
                         assert_eq!(props[0].key, "x");
-                        assert_eq!(props[0].binding, "y");
+                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) = &props[0].target {
+                            assert_eq!(n, "y");
+                        } else {
+                            panic!("expected Ident target");
+                        }
                         assert!(props[0].default_init.is_some());
                         return;
                     }
@@ -3440,7 +3479,11 @@ mod tests {
                     if let ForInOfLeft::Pattern(Binding::ObjectPattern(props)) = &s.left {
                         assert_eq!(props.len(), 1);
                         assert_eq!(props[0].key, "x");
-                        assert_eq!(props[0].binding, "y");
+                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) = &props[0].target {
+                            assert_eq!(n, "y");
+                        } else {
+                            panic!("expected Ident target");
+                        }
                         assert!(props[0].default_init.is_some());
                         return;
                     }
@@ -3498,10 +3541,18 @@ mod tests {
                     if let crate::frontend::ast::Binding::ObjectPattern(props) = &d.binding {
                         assert_eq!(props.len(), 2);
                         assert_eq!(props[0].key, "x");
-                        assert_eq!(props[0].binding, "x");
+                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) = &props[0].target {
+                            assert_eq!(n, "x");
+                        } else {
+                            panic!("expected Ident target");
+                        }
                         assert!(props[0].shorthand);
                         assert_eq!(props[1].key, "y");
-                        assert_eq!(props[1].binding, "y");
+                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) = &props[1].target {
+                            assert_eq!(n, "y");
+                        } else {
+                            panic!("expected Ident target");
+                        }
                         return;
                     }
                 }

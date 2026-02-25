@@ -209,9 +209,15 @@ pub enum Binding {
 }
 
 #[derive(Debug, Clone)]
+pub enum ObjectPatternTarget {
+    Ident(String),
+    Expr(Expression),
+}
+
+#[derive(Debug, Clone)]
 pub struct ObjectPatternProp {
     pub key: String,
-    pub binding: String,
+    pub target: ObjectPatternTarget,
     pub shorthand: bool,
     pub default_init: Option<Box<Expression>>,
 }
@@ -226,7 +232,10 @@ impl Binding {
     pub fn names(&self) -> Vec<&str> {
         match self {
             Binding::Ident(n) => vec![n.as_str()],
-            Binding::ObjectPattern(props) => props.iter().map(|p| p.binding.as_str()).collect(),
+            Binding::ObjectPattern(props) => props
+                .iter()
+                .filter_map(|p| match &p.target { ObjectPatternTarget::Ident(n) => Some(n.as_str()), ObjectPatternTarget::Expr(_) => None })
+                .collect(),
             Binding::ArrayPattern(elems) => {
                 elems.iter().filter_map(|e| e.binding.as_deref()).collect()
             }
