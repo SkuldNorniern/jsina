@@ -71,6 +71,7 @@ pub enum HirOp {
     CallBuiltin { builtin: BuiltinId, argc: u32, span: Span },
     CallMethod { argc: u32, span: Span },
     New { func_index: u32, argc: u32, span: Span },
+    NewMethod { argc: u32, span: Span },
     Rethrow { slot: u32, span: Span },
 }
 

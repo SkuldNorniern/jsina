@@ -41,6 +41,7 @@ pub fn opcode_name(op: u8) -> &'static str {
         x if x == Opcode::CallBuiltin as u8 => "CallBuiltin",
         x if x == Opcode::CallMethod as u8 => "CallMethod",
         x if x == Opcode::New as u8 => "New",
+        x if x == Opcode::NewMethod as u8 => "NewMethod",
         x if x == Opcode::Throw as u8 => "Throw",
         x if x == Opcode::Rethrow as u8 => "Rethrow",
         x if x == Opcode::JumpIfFalse as u8 => "JumpIfFalse",
@@ -133,6 +134,11 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 let name = crate::runtime::builtins::name(builtin_id);
                 let cat = crate::runtime::builtins::category(builtin_id);
                 format!("  {:04}  CallBuiltin  0x{:02X}  {}  ; {}.{}", line_start, builtin_id, argc, cat, name)
+            }
+            x if x == Opcode::NewMethod as u8 => {
+                let argc = code.get(pc).copied().unwrap_or(0);
+                pc += 1;
+                format!("  {:04}  NewMethod  {}", line_start, argc)
             }
             x if x == Opcode::JumpIfFalse as u8 => {
                 let offset = code.get(pc..pc + 2)

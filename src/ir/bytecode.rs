@@ -71,6 +71,7 @@ pub enum Opcode {
     CallBuiltin = 0x41,
     CallMethod = 0x42,
     New = 0x43,
+    NewMethod = 0x44,
     Throw = 0x21,
     Rethrow = 0x22,
     JumpIfFalse = 0x30,

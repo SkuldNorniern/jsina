@@ -613,6 +613,113 @@ pub fn interpret_program_with_heap_and_entry(
                     new_object: Some(obj_id),
                 });
             }
+            0x44 => {
+                let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                *pc += 1;
+                let mut args: Vec<Value> = (0..argc)
+                    .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+                    .collect::<Result<Vec<_>, _>>()?;
+                args.reverse();
+                let callee = stack.pop().ok_or(VmError::StackUnderflow)?;
+                let obj_id = heap.alloc_object();
+                let receiver = Value::Object(obj_id);
+                if let Value::Builtin(builtin_id) = callee {
+                    for a in &args {
+                        stack.push(a.clone());
+                    }
+                    stack.push(receiver);
+                    let mut ctx = builtins::BuiltinContext { heap, dynamic_chunks: &mut dynamic_chunks };
+                    match execute_builtin(builtin_id, argc + 1, &mut stack, &mut ctx) {
+                        Ok(BuiltinResult::Push(v)) => {
+                            getprop_cache.invalidate_all();
+                            stack.push(v);
+                        }
+                        Ok(BuiltinResult::Throw(v)) => return Ok(Completion::Throw(v)),
+                        Err(e) => return Err(e),
+                    }
+                } else if let Value::DynamicFunction(heap_idx) = callee {
+                    let callee_chunk = dynamic_chunks.get(heap_idx).ok_or(VmError::InvalidConstIndex(heap_idx))?.clone();
+                    let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
+                    if let Some(r) = callee_chunk.rest_param_index {
+                        let r = r as usize;
+                        for (i, v) in args.iter().take(r).cloned().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
+                        }
+                        if r < callee_locals.len() {
+                            let rest_id = heap.alloc_array();
+                            if r < args.len() {
+                                heap.array_push_values(rest_id, &args[r..]);
+                            }
+                            callee_locals[r] = Value::Array(rest_id);
+                        }
+                    } else {
+                        for (i, v) in args.into_iter().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
+                        }
+                    }
+                    if frames.len() >= MAX_CALL_DEPTH {
+                        return Err(VmError::CallDepthExceeded);
+                    }
+                    chunks_stack.push(callee_chunk);
+                    let chunk_idx = chunks_stack.len() - 1;
+                    frames.push(Frame {
+                        chunk_index: chunk_idx,
+                        is_dynamic: true,
+                        pc: 0,
+                        locals: callee_locals,
+                        this_value: receiver,
+                        rethrow_after_finally: false,
+                        new_object: Some(obj_id),
+                    });
+                } else if let Value::Function(i) = callee {
+                    let func_idx = i;
+                    let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
+                    let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
+                    if let Some(r) = callee_chunk.rest_param_index {
+                        let r = r as usize;
+                        for (i, v) in args.iter().take(r).cloned().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
+                        }
+                        if r < callee_locals.len() {
+                            let rest_id = heap.alloc_array();
+                            if r < args.len() {
+                                heap.array_push_values(rest_id, &args[r..]);
+                            }
+                            callee_locals[r] = Value::Array(rest_id);
+                        }
+                    } else {
+                        for (i, v) in args.into_iter().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
+                        }
+                    }
+                    if frames.len() >= MAX_CALL_DEPTH {
+                        return Err(VmError::CallDepthExceeded);
+                    }
+                    frames.push(Frame {
+                        chunk_index: func_idx,
+                        is_dynamic: false,
+                        pc: 0,
+                        locals: callee_locals,
+                        this_value: receiver,
+                        rethrow_after_finally: false,
+                        new_object: Some(obj_id),
+                    });
+                } else {
+                    let msg = format!(
+                        "TypeError: callee is not a function (got {})",
+                        callee.type_name_for_error(),
+                    );
+                    return Ok(Completion::Throw(Value::String(msg)));
+                }
+            }
             0x10 => {
                 let rhs = stack.pop().ok_or(VmError::StackUnderflow)?;
                 let lhs = stack.pop().ok_or(VmError::StackUnderflow)?;

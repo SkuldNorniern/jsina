@@ -2901,10 +2901,18 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     }
                 }
                 _ => {
-                    return Err(LowerError::Unsupported(
-                        "call to non-identifier not yet supported".to_string(),
-                        Some(e.span),
-                    ));
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Undefined,
+                        span: e.span,
+                    });
+                    compile_expression(e.callee.as_ref(), ctx)?;
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
                 }
             }
         }
@@ -3077,10 +3085,14 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     });
                 }
                 _ => {
-                    return Err(LowerError::Unsupported(
-                        "new only supported with identifier constructor".to_string(),
-                        Some(n.span),
-                    ));
+                    compile_expression(n.callee.as_ref(), ctx)?;
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::NewMethod {
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
                 }
             }
         }
