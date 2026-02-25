@@ -143,6 +143,13 @@ impl Driver {
         with_host(&host, || Self::run_with_host_and_limit_inner(source, false, Some(step_limit), cancel, false))
     }
 
+    /// Run with no step limit, only wall-clock timeout via cancel.
+    /// Use for test262 when step limit is not desired.
+    pub fn run_with_timeout_and_cancel(source: &str, cancel: Option<&AtomicBool>) -> Result<i64, DriverError> {
+        let host = CliHost;
+        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, None, cancel, false))
+    }
+
     fn run_with_host_inner(source: &str, trace: bool, enable_jit: bool) -> Result<i64, DriverError> {
         Self::run_with_host_and_limit_inner(source, trace, None, None, enable_jit)
     }
@@ -203,11 +210,16 @@ impl Driver {
             Completion::Normal(v) => v,
             Completion::Throw(v) => {
                 let msg = heap.format_thrown_value(&v);
-                return Err(DriverError::Diagnostic(vec![Diagnostic::error(
-                    ErrorCode::RunUncaughtException,
-                    format!("uncaught exception: {}", msg),
-                    None,
-                )]));
+                let diag = if msg.contains("callee is not a function") {
+                    crate::diagnostics::callee_not_function_diagnostic(msg)
+                } else {
+                    Diagnostic::error(
+                        ErrorCode::RunUncaughtException,
+                        format!("uncaught exception: {}", msg),
+                        None,
+                    )
+                };
+                return Err(DriverError::Diagnostic(vec![diag]));
             }
         };
         Ok(value.to_i64())
@@ -238,5 +250,12 @@ mod tests {
         assert!(r.is_ok());
         let v = captured.borrow();
         assert_eq!(v.as_slice(), &["hi"]);
+    }
+
+    #[test]
+    fn run_function_constructor_callable() {
+        let r = Driver::run("function main() { var f = Function(\"return 42\"); return f(); }");
+        assert!(r.is_ok(), "Function() should succeed: {:?}", r);
+        assert_eq!(r.unwrap(), 42, "Function(\"return 42\")() should return 42");
     }
 }

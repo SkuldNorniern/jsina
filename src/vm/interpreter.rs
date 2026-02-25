@@ -16,7 +16,7 @@ fn execute_builtin(
     builtin_id: u8,
     argc: usize,
     stack: &mut Vec<Value>,
-    heap: &mut Heap,
+    ctx: &mut builtins::BuiltinContext,
 ) -> Result<BuiltinResult, VmError> {
     if builtin_id > builtins::MAX_BUILTIN_ID {
         return Err(VmError::InvalidOpcode(builtin_id));
@@ -25,7 +25,7 @@ fn execute_builtin(
         .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
         .collect::<Result<Vec<_>, _>>()?;
     args.reverse();
-    match builtins::dispatch(builtin_id, &args, heap) {
+    match builtins::dispatch(builtin_id, &args, ctx) {
         Ok(v) => Ok(BuiltinResult::Push(v)),
         Err(builtins::BuiltinError::Throw(v)) => Ok(BuiltinResult::Throw(v)),
     }
@@ -90,6 +90,7 @@ pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
 
 struct Frame {
     chunk_index: usize,
+    is_dynamic: bool,
     pc: usize,
     locals: Vec<Value>,
     this_value: Value,
@@ -230,8 +231,11 @@ pub fn interpret_program_with_heap_and_entry(
         .chunks
         .get(entry)
         .ok_or(VmError::InvalidConstIndex(entry))?;
+    let mut dynamic_chunks: Vec<BytecodeChunk> = Vec::new();
+    let mut chunks_stack: Vec<BytecodeChunk> = Vec::new();
     let mut frames: Vec<Frame> = vec![Frame {
         chunk_index: entry,
+        is_dynamic: false,
         pc: 0,
         locals: (0..entry_chunk.num_locals).map(|_| Value::Undefined).collect(),
         this_value: Value::Undefined,
@@ -253,7 +257,11 @@ pub fn interpret_program_with_heap_and_entry(
         }
 
         let frame = frames.last_mut().ok_or(VmError::StackUnderflow)?;
-        let chunk = &program.chunks[frame.chunk_index];
+        let chunk = if frame.is_dynamic {
+            chunks_stack.get(frame.chunk_index).ok_or(VmError::InvalidConstIndex(frame.chunk_index))?
+        } else {
+            program.chunks.get(frame.chunk_index).ok_or(VmError::InvalidConstIndex(frame.chunk_index))?
+        };
         let code = &chunk.code;
         let constants = &chunk.constants;
         let locals = &mut frame.locals;
@@ -314,6 +322,11 @@ pub fn interpret_program_with_heap_and_entry(
             0x20 => {
                 let val = stack.pop().unwrap_or(Value::Undefined);
                 let popped = frames.pop();
+                if let Some(ref f) = popped {
+                    if f.is_dynamic {
+                        chunks_stack.pop();
+                    }
+                }
                 let result = if let Some(ref f) = popped {
                     if let Some(obj_id) = f.new_object {
                         if matches!(val, Value::Object(_)) {
@@ -396,6 +409,7 @@ pub fn interpret_program_with_heap_and_entry(
                 }
                 frames.push(Frame {
                     chunk_index: func_idx,
+                    is_dynamic: false,
                     pc: 0,
                     locals: callee_locals,
                     this_value: Value::Undefined,
@@ -408,7 +422,8 @@ pub fn interpret_program_with_heap_and_entry(
                 let argc = read_u8(code, *pc + 1) as usize;
                 *pc += 2;
                 let call_pc = *pc - 3;
-                match execute_builtin(builtin_id, argc, &mut stack, heap) {
+                let mut ctx = builtins::BuiltinContext { heap, dynamic_chunks: &mut dynamic_chunks };
+                match execute_builtin(builtin_id, argc, &mut stack, &mut ctx) {
                     Ok(BuiltinResult::Push(v)) => {
                         getprop_cache.invalidate_all();
                         stack.push(v);
@@ -445,7 +460,8 @@ pub fn interpret_program_with_heap_and_entry(
                         stack.push(a.clone());
                     }
                     stack.push(receiver);
-                    match execute_builtin(builtin_id, argc + 1, &mut stack, heap) {
+                    let mut ctx = builtins::BuiltinContext { heap, dynamic_chunks: &mut dynamic_chunks };
+                    match execute_builtin(builtin_id, argc + 1, &mut stack, &mut ctx) {
                         Ok(BuiltinResult::Push(v)) => {
                             getprop_cache.invalidate_all();
                             stack.push(v);
@@ -466,6 +482,44 @@ pub fn interpret_program_with_heap_and_entry(
                         }
                         Err(e) => return Err(e),
                     }
+                } else if let Value::DynamicFunction(heap_idx) = callee {
+                    let callee_chunk = dynamic_chunks.get(heap_idx).ok_or(VmError::InvalidConstIndex(heap_idx))?.clone();
+                    let mut callee_locals: Vec<Value> = (0..callee_chunk.num_locals).map(|_| Value::Undefined).collect();
+                    if let Some(r) = callee_chunk.rest_param_index {
+                        let r = r as usize;
+                        for (i, v) in args.iter().take(r).cloned().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
+                        }
+                        if r < callee_locals.len() {
+                            let rest_id = heap.alloc_array();
+                            if r < args.len() {
+                                heap.array_push_values(rest_id, &args[r..]);
+                            }
+                            callee_locals[r] = Value::Array(rest_id);
+                        }
+                    } else {
+                        for (i, v) in args.into_iter().enumerate() {
+                            if i < callee_locals.len() {
+                                callee_locals[i] = v;
+                            }
+                        }
+                    }
+                    if frames.len() >= MAX_CALL_DEPTH {
+                        return Err(VmError::CallDepthExceeded);
+                    }
+                    chunks_stack.push(callee_chunk);
+                    let chunk_idx = chunks_stack.len() - 1;
+                    frames.push(Frame {
+                        chunk_index: chunk_idx,
+                        is_dynamic: true,
+                        pc: 0,
+                        locals: callee_locals,
+                        this_value: receiver,
+                        rethrow_after_finally: false,
+                        new_object: None,
+                    });
                 } else if let Value::Function(i) = callee {
                     let func_idx = i;
                     let callee_chunk = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
@@ -496,6 +550,7 @@ pub fn interpret_program_with_heap_and_entry(
                     }
                     frames.push(Frame {
                         chunk_index: func_idx,
+                        is_dynamic: false,
                         pc: 0,
                         locals: callee_locals,
                         this_value: receiver,
@@ -503,9 +558,11 @@ pub fn interpret_program_with_heap_and_entry(
                         new_object: None,
                     });
                 } else {
-                    return Ok(Completion::Throw(Value::String(
-                        "TypeError: callee is not a function".to_string(),
-                    )));
+                    let msg = format!(
+                        "TypeError: callee is not a function (got {})",
+                        callee.type_name_for_error(),
+                    );
+                    return Ok(Completion::Throw(Value::String(msg)));
                 }
             }
             0x43 => {
@@ -548,6 +605,7 @@ pub fn interpret_program_with_heap_and_entry(
                 }
                 frames.push(Frame {
                     chunk_index: func_idx,
+                    is_dynamic: false,
                     pc: 0,
                     locals: callee_locals,
                     this_value: Value::Object(obj_id),
@@ -722,7 +780,7 @@ pub fn interpret_program_with_heap_and_entry(
                     Value::String(_) => "string",
                     Value::Symbol(_) => "symbol",
                     Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "object",
-                    Value::Function(_) | Value::Builtin(_) => "function",
+                    Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => "function",
                 };
                 stack.push(Value::String(s.to_string()));
             }
@@ -972,7 +1030,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => true,
+        Value::String(_) | Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => true,
     }
 }
 
@@ -1058,7 +1116,7 @@ fn value_to_prop_key(v: &Value) -> String {
         Value::Undefined => "undefined".to_string(),
         Value::Symbol(_) => "Symbol()".to_string(),
         Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "[object Object]".to_string(),
-        Value::Function(_) | Value::Builtin(_) => "function".to_string(),
+        Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => "function".to_string(),
     }
 }
 

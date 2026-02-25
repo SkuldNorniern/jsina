@@ -13,6 +13,7 @@ pub enum Value {
     Set(usize),
     Date(usize),
     Function(usize),
+    DynamicFunction(usize),
     Builtin(u8),
 }
 
@@ -92,6 +93,22 @@ impl Value {
         }
     }
 
+    pub fn type_name_for_error(&self) -> &'static str {
+        match self {
+            Value::Undefined => "undefined",
+            Value::Null => "null",
+            Value::Bool(_) => "boolean",
+            Value::Int(_) | Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Symbol(_) => "symbol",
+            Value::Object(_) => "object",
+            Value::Array(_) => "array",
+            Value::Map(_) => "map",
+            Value::Set(_) => "set",
+            Value::Date(_) => "date",
+            Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => "function",
+        }
+    }
 }
 
 impl std::fmt::Display for Value {
@@ -109,7 +126,7 @@ impl std::fmt::Display for Value {
             Value::Map(_) => write!(f, "[object Map]"),
             Value::Set(_) => write!(f, "[object Set]"),
             Value::Date(_) => write!(f, "[object Date]"),
-            Value::Function(_) | Value::Builtin(_) => write!(f, "[object Function]"),
+            Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => write!(f, "[object Function]"),
         }
     }
 }
