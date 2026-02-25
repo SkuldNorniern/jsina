@@ -87,6 +87,22 @@ fn check_statement(
             }
             scope.leave_block();
         }
+        Statement::ClassDecl(c) => {
+            if ctx.strict && is_strict_reserved(&c.name) {
+                errors.push(EarlyError {
+                    code: ErrorCode::EarlyStrictReserved,
+                    message: format!("'{}' may not be used as binding in strict mode", c.name),
+                    span: c.span,
+                });
+            }
+            if let Some(prev) = scope.add_lexical(&c.name, c.span) {
+                errors.push(EarlyError {
+                    code: ErrorCode::EarlyDuplicateLexical,
+                    message: format!("duplicate lexical declaration '{}'", c.name),
+                    span: prev,
+                });
+            }
+        }
         Statement::FunctionDecl(f) => {
             scope.enter_function();
             let fn_strict = ctx.strict

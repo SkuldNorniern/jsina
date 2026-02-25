@@ -219,6 +219,12 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
                 func_decls.push(f);
             }
             Statement::Expression(_) => top_level_expr_stmts.push(stmt),
+            Statement::ClassDecl(c) => {
+                return Err(LowerError::Unsupported(
+                    "class not implemented".to_string(),
+                    Some(c.span),
+                ));
+            }
             _ => {}
         }
     }
@@ -918,6 +924,12 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             return Ok(false);
         }
         Statement::FunctionDecl(_) => return Ok(false),
+        Statement::ClassDecl(c) => {
+            return Err(LowerError::Unsupported(
+                "class not implemented".to_string(),
+                Some(c.span),
+            ));
+        }
         Statement::For(f) => {
             let cond_slot = ctx.next_slot;
             ctx.next_slot += 1;
@@ -3105,6 +3117,12 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 value: HirConst::Function(idx),
                 span: af.span,
             });
+        }
+        Expression::ClassExpr(ce) => {
+            return Err(LowerError::Unsupported(
+                "class not implemented".to_string(),
+                Some(ce.span),
+            ));
         }
     }
     Ok(())

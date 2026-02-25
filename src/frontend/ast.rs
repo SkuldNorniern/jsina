@@ -26,9 +26,17 @@ pub enum Statement {
     LetDecl(LetDeclStmt),
     ConstDecl(ConstDeclStmt),
     FunctionDecl(FunctionDeclStmt),
+    ClassDecl(ClassDeclStmt),
     Throw(ThrowStmt),
     Try(TryStmt),
     Switch(SwitchStmt),
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassDeclStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -255,6 +263,14 @@ pub enum Expression {
     PostfixIncrement(PostfixExpr),
     PostfixDecrement(PostfixExpr),
     New(NewExpr),
+    ClassExpr(ClassExprData),
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassExprData {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -455,6 +471,7 @@ impl Statement {
             Statement::LetDecl(s) => s.span,
             Statement::ConstDecl(s) => s.span,
             Statement::FunctionDecl(s) => s.span,
+            Statement::ClassDecl(s) => s.span,
             Statement::Throw(s) => s.span,
             Statement::Try(s) => s.span,
             Statement::Switch(s) => s.span,
@@ -482,6 +499,7 @@ impl Expression {
             Expression::ArrowFunction(e) => e.span,
             Expression::PostfixIncrement(e) | Expression::PostfixDecrement(e) => e.span,
             Expression::New(e) => e.span,
+            Expression::ClassExpr(e) => e.span,
         }
     }
 }

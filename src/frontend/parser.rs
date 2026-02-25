@@ -120,6 +120,52 @@ impl Parser {
         }
     }
 
+    fn skip_until_class_body_brace(&mut self) -> Result<(), ParseError> {
+        let mut depth: i32 = 0;
+        loop {
+            let tt = self.current().ok_or_else(|| ParseError {
+                code: ErrorCode::ParseUnexpectedEofExpected,
+                message: "unexpected end while skipping to class body".to_string(),
+                span: None,
+            })?.token_type.clone();
+            if matches!(tt, TokenType::LeftBrace) && depth == 0 {
+                self.advance();
+                break;
+            }
+            match &tt {
+                TokenType::LeftParen | TokenType::LeftBracket | TokenType::LeftBrace => depth += 1,
+                TokenType::RightParen | TokenType::RightBracket | TokenType::RightBrace => depth -= 1,
+                _ => {}
+            }
+            self.advance();
+        }
+        Ok(())
+    }
+
+    fn skip_balanced_braces(&mut self) -> Result<Span, ParseError> {
+        let mut depth: i32 = 1;
+        let mut end_span = Span::point(crate::diagnostics::Position::start());
+        while depth > 0 {
+            let token = self.current().ok_or_else(|| ParseError {
+                code: ErrorCode::ParseUnexpectedEofExpected,
+                message: "unexpected end while skipping class body".to_string(),
+                span: None,
+            })?.clone();
+            match &token.token_type {
+                TokenType::LeftBrace => depth += 1,
+                TokenType::RightBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_span = token.span;
+                    }
+                }
+                _ => {}
+            }
+            self.advance();
+        }
+        Ok(end_span)
+    }
+
     pub fn parse(&mut self) -> Result<Script, ParseError> {
         let start_span = self.current().map(|t| t.span).unwrap_or(Span::point(crate::diagnostics::Position::start()));
         let id = self.next_id();
@@ -155,6 +201,7 @@ impl Parser {
 
         match &token.token_type {
             TokenType::Function => self.parse_function_decl(),
+            TokenType::Class => self.parse_class_decl(),
             TokenType::Return => self.parse_return(),
             TokenType::Throw => self.parse_throw(),
             TokenType::Break => self.parse_break(),
@@ -258,6 +305,38 @@ impl Parser {
             params,
             body,
         })
+    }
+
+    fn parse_class_expr(&mut self) -> Result<crate::frontend::ast::ClassExprData, ParseError> {
+        let start_span = self.expect(TokenType::Class)?.span;
+        let id = self.next_id();
+        let name = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
+            Some(self.expect(TokenType::Identifier)?.lexeme)
+        } else {
+            None
+        };
+        if self.optional(TokenType::Extends) {
+            self.skip_until_class_body_brace()?;
+        } else {
+            self.expect(TokenType::LeftBrace)?;
+        }
+        let end_span = self.skip_balanced_braces()?;
+        let span = start_span.merge(end_span);
+        Ok(crate::frontend::ast::ClassExprData { id, span, name })
+    }
+
+    fn parse_class_decl(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.expect(TokenType::Class)?.span;
+        let id = self.next_id();
+        let name = self.expect(TokenType::Identifier)?.lexeme;
+        if self.optional(TokenType::Extends) {
+            self.skip_until_class_body_brace()?;
+        } else {
+            self.expect(TokenType::LeftBrace)?;
+        }
+        let end_span = self.skip_balanced_braces()?;
+        let span = start_span.merge(end_span);
+        Ok(Statement::ClassDecl(crate::frontend::ast::ClassDeclStmt { id, span, name }))
     }
 
     fn try_parse_arrow_function(&mut self) -> Result<Option<(Expression, Span)>, ParseError> {
@@ -1465,6 +1544,10 @@ impl Parser {
                 let fe = self.parse_function_expr()?;
                 (Expression::FunctionExpr(fe.clone()), fe.span)
             }
+            TokenType::Class => {
+                let ce = self.parse_class_expr()?;
+                (Expression::ClassExpr(ce.clone()), ce.span)
+            }
             _ => {
                 return Err(ParseError {
                     code: ErrorCode::ParseUnexpectedTokenInExpr,
@@ -1932,6 +2015,35 @@ mod tests {
             }
         }
         panic!("expected IIFE with function expr");
+    }
+
+    #[test]
+    fn parse_class_expr() {
+        let script = parse_ok("function f() { return class Foo { }; }");
+        assert_eq!(script.body.len(), 1);
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::Return(r) = &b.body[0] {
+                    let arg = r.argument.as_ref().expect("return has arg");
+                    if let Expression::ClassExpr(ce) = arg.as_ref() {
+                        assert_eq!(ce.name.as_deref(), Some("Foo"));
+                        return;
+                    }
+                }
+            }
+        }
+        panic!("expected class expr in return");
+    }
+
+    #[test]
+    fn parse_class_decl() {
+        let script = parse_ok("class Bar { }");
+        assert_eq!(script.body.len(), 1);
+        if let Statement::ClassDecl(c) = &script.body[0] {
+            assert_eq!(c.name, "Bar");
+            return;
+        }
+        panic!("expected class decl");
     }
 
     #[test]

@@ -1082,7 +1082,14 @@ fn div_values(a: &Value, b: &Value) -> Result<Value, VmError> {
     match (a, b) {
         (Value::Int(x), Value::Int(y)) => {
             if *y == 0 {
-                Ok(Value::Number(f64::INFINITY))
+                let r = if *x == 0 {
+                    f64::NAN
+                } else if *x > 0 {
+                    f64::INFINITY
+                } else {
+                    f64::NEG_INFINITY
+                };
+                Ok(Value::Number(r))
             } else {
                 Ok(Value::Number(*x as f64 / *y as f64))
             }
@@ -1172,6 +1179,8 @@ fn strict_eq_values(a: &Value, b: &Value) -> Value {
         (Value::Null, Value::Null) => true,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Int(x), Value::Number(y)) => !y.is_nan() && (*x as f64) == *y,
+        (Value::Number(x), Value::Int(y)) => !x.is_nan() && *x == (*y as f64),
         (Value::Number(x), Value::Number(y)) => !x.is_nan() && !y.is_nan() && x == y,
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Symbol(x), Value::Symbol(y)) => x == y,
