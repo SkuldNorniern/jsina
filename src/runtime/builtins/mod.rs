@@ -75,6 +75,8 @@ pub(crate) fn strict_eq(a: &Value, b: &Value) -> bool {
         (Value::Null, Value::Null) => true,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Int(x), Value::Number(y)) => !y.is_nan() && (*x as f64) == *y,
+        (Value::Number(x), Value::Int(y)) => !x.is_nan() && *x == (*y as f64),
         (Value::Number(x), Value::Number(y)) => !x.is_nan() && !y.is_nan() && x == y,
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Symbol(x), Value::Symbol(y)) => x == y,

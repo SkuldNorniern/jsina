@@ -23,6 +23,7 @@ impl std::error::Error for ParseError {}
 
 fn binary_op_precedence(op: BinaryOp) -> u8 {
     match op {
+        BinaryOp::Comma => 0,
         BinaryOp::Pow => 14,
         BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => 12,
         BinaryOp::Add | BinaryOp::Sub => 11,
@@ -1114,6 +1115,7 @@ impl Parser {
 
         loop {
             let op = match self.current().map(|t| &t.token_type) {
+                Some(TokenType::Comma) => BinaryOp::Comma,
                 Some(TokenType::Plus) => BinaryOp::Add,
                 Some(TokenType::Minus) => BinaryOp::Sub,
                 Some(TokenType::Multiply) => BinaryOp::Mul,
@@ -1300,7 +1302,7 @@ impl Parser {
                         self.advance();
                         let mut args = Vec::new();
                         while !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightParen) | Some(TokenType::Eof) | None) {
-                            args.push(self.parse_expression()?);
+                            args.push(self.parse_expression_prec(1)?);
                             if !self.optional(TokenType::Comma) {
                                 break;
                             }
@@ -1348,7 +1350,7 @@ impl Parser {
                 self.advance();
                 let mut args = Vec::new();
                 while !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightParen) | Some(TokenType::Eof) | None) {
-                    args.push(self.parse_expression()?);
+                    args.push(self.parse_expression_prec(1)?);
                     if !self.optional(TokenType::Comma) {
                         break;
                     }
@@ -1505,10 +1507,30 @@ impl Parser {
                 self.advance();
                 let mut properties = Vec::new();
                 while !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightBrace) | Some(TokenType::Eof) | None) {
-                    let key_tok = self.expect(TokenType::Identifier)?;
-                    let key = key_tok.lexeme.clone();
+                    let key = match self.current().ok_or_else(|| ParseError {
+                        code: ErrorCode::ParseUnexpectedEofExpected,
+                        message: "unexpected end in object literal".to_string(),
+                        span: None,
+                    })?.token_type {
+                        TokenType::Identifier => self.expect(TokenType::Identifier)?.lexeme,
+                        TokenType::Number => self.expect(TokenType::Number)?.lexeme,
+                        TokenType::String => {
+                            let s = self.expect(TokenType::String)?.lexeme;
+                            s.strip_prefix('"').and_then(|s| s.strip_suffix('"'))
+                                .or_else(|| s.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+                                .unwrap_or(&s)
+                                .to_string()
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                code: ErrorCode::ParseUnexpectedToken,
+                                message: format!("expected property name, got {:?}", self.current().map(|t| &t.token_type)),
+                                span: self.current().map(|t| t.span),
+                            });
+                        }
+                    };
                     self.expect(TokenType::Colon)?;
-                    let value = self.parse_expression()?;
+                    let value = self.parse_expression_prec(1)?;
                     properties.push((key, value));
                     if !self.optional(TokenType::Comma) {
                         break;
@@ -1527,7 +1549,7 @@ impl Parser {
                 self.advance();
                 let mut elements = Vec::new();
                 while !matches!(self.current().map(|t| &t.token_type), Some(TokenType::RightBracket) | Some(TokenType::Eof) | None) {
-                    elements.push(self.parse_expression()?);
+                    elements.push(self.parse_expression_prec(1)?);
                     if !self.optional(TokenType::Comma) {
                         break;
                     }

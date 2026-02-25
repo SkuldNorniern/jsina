@@ -228,6 +228,7 @@ impl Heap {
         self.set_prop(global_id, "Proxy", Value::Object(proxy_id));
         let intl_id = self.alloc_object();
         self.set_prop(global_id, "Intl", Value::Object(intl_id));
+        self.set_prop(global_id, "testResult", Value::Undefined);
     }
 
     pub fn get_global(&self, name: &str) -> Value {

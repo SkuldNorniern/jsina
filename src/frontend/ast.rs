@@ -381,6 +381,7 @@ pub struct BinaryExpr {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
+    Comma,
     Add,
     Sub,
     Mul,

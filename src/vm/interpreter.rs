@@ -219,7 +219,7 @@ pub fn interpret_program_with_heap_and_entry(
     cancel: Option<&AtomicBool>,
 ) -> Result<Completion, VmError> {
     let mut steps_remaining = step_limit;
-    let mut stack: Vec<Value> = Vec::new();
+    let mut stack: Vec<Value> = Vec::with_capacity(64);
     let mut getprop_cache = GetPropCache {
         obj_id: usize::MAX,
         is_array: false,
@@ -891,7 +891,11 @@ fn add_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x + y)),
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 + y)),
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x + *y as f64)),
-        _ => Ok(Value::Number(f64::NAN)),
+        _ => {
+            let na = builtins::to_number(a);
+            let nb = builtins::to_number(b);
+            Ok(Value::Number(na + nb))
+        }
     }
 }
 
@@ -1064,7 +1068,7 @@ fn sub_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x - y)),
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 - y)),
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x - *y as f64)),
-        _ => Ok(Value::Number(f64::NAN)),
+        _ => Ok(Value::Number(builtins::to_number(a) - builtins::to_number(b))),
     }
 }
 
@@ -1074,7 +1078,7 @@ fn mul_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x * y)),
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 * y)),
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x * *y as f64)),
-        _ => Ok(Value::Number(f64::NAN)),
+        _ => Ok(Value::Number(builtins::to_number(a) * builtins::to_number(b))),
     }
 }
 
@@ -1097,7 +1101,7 @@ fn div_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x / y)),
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 / y)),
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x / *y as f64)),
-        _ => Ok(Value::Number(f64::NAN)),
+        _ => Ok(Value::Number(builtins::to_number(a) / builtins::to_number(b))),
     }
 }
 
@@ -1113,7 +1117,7 @@ fn mod_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x % y)),
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number(*x as f64 % y)),
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x % *y as f64)),
-        _ => Ok(Value::Number(f64::NAN)),
+        _ => Ok(Value::Number(builtins::to_number(a) % builtins::to_number(b))),
     }
 }
 
@@ -1125,7 +1129,7 @@ fn pow_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => Ok(Value::Number(x.powf(*y))),
         (Value::Int(x), Value::Number(y)) => Ok(Value::Number((*x as f64).powf(*y))),
         (Value::Number(x), Value::Int(y)) => Ok(Value::Number(x.powi(*y))),
-        _ => Ok(Value::Number(f64::NAN)),
+        _ => Ok(Value::Number(builtins::to_number(a).powf(builtins::to_number(b)))),
     }
 }
 
@@ -1135,7 +1139,8 @@ fn lt_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => x < y,
         (Value::Int(x), Value::Number(y)) => (*x as f64) < *y,
         (Value::Number(x), Value::Int(y)) => *x < (*y as f64),
-        _ => false,
+        (Value::String(x), Value::String(y)) => x < y,
+        _ => builtins::to_number(a) < builtins::to_number(b),
     };
     Ok(Value::Bool(result))
 }
@@ -1146,7 +1151,8 @@ fn lte_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => x <= y,
         (Value::Int(x), Value::Number(y)) => (*x as f64) <= *y,
         (Value::Number(x), Value::Int(y)) => *x <= (*y as f64),
-        _ => false,
+        (Value::String(x), Value::String(y)) => x <= y,
+        _ => builtins::to_number(a) <= builtins::to_number(b),
     };
     Ok(Value::Bool(result))
 }
@@ -1157,7 +1163,8 @@ fn gt_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => x > y,
         (Value::Int(x), Value::Number(y)) => (*x as f64) > *y,
         (Value::Number(x), Value::Int(y)) => *x > (*y as f64),
-        _ => false,
+        (Value::String(x), Value::String(y)) => x > y,
+        _ => builtins::to_number(a) > builtins::to_number(b),
     };
     Ok(Value::Bool(result))
 }
@@ -1168,7 +1175,8 @@ fn gte_values(a: &Value, b: &Value) -> Result<Value, VmError> {
         (Value::Number(x), Value::Number(y)) => x >= y,
         (Value::Int(x), Value::Number(y)) => (*x as f64) >= *y,
         (Value::Number(x), Value::Int(y)) => *x >= (*y as f64),
-        _ => false,
+        (Value::String(x), Value::String(y)) => x >= y,
+        _ => builtins::to_number(a) >= builtins::to_number(b),
     };
     Ok(Value::Bool(result))
 }
@@ -1250,6 +1258,24 @@ mod tests {
         } else {
             panic!("expected Return(3), got {:?}", result);
         }
+    }
+
+    #[test]
+    fn interpret_strict_eq_int_number() {
+        let result = crate::driver::Driver::run(
+            "function main() { return (1 === 1.0) ? 1 : 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "1 === 1.0 should be true");
+    }
+
+    #[test]
+    fn interpret_div_by_zero() {
+        let result = crate::driver::Driver::run(
+            "function main() { let a = 1/0; let b = -1/0; return (a > 1e9 && b < -1e9) ? 1 : 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1, "1/0=Infinity, -1/0=-Infinity");
     }
 
     #[test]

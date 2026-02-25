@@ -11,7 +11,7 @@ const GLOBAL_NAMES: &[&str] = &[
     "Reflect", "WeakMap", "WeakSet", "DataView",
     "eval", "encodeURI", "encodeURIComponent", "decodeURI", "decodeURIComponent", "parseInt", "parseFloat", "isNaN", "isFinite",
     "assert", "Test262Error", "$DONOTEVALUATE", "Function", "global",
-    "timeout", "Temporal", "Proxy", "Intl",
+    "timeout", "Temporal", "Proxy", "Intl", "testResult",
 ];
 
 #[derive(Debug)]
@@ -1757,6 +1757,11 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
+                BinaryOp::Comma => {
+                    compile_expression(&e.left, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Pop { span: e.span });
+                    compile_expression(&e.right, ctx)?;
+                }
                 _ => {
                     compile_expression(&e.left, ctx)?;
                     compile_expression(&e.right, ctx)?;
@@ -1780,6 +1785,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         BinaryOp::BitwiseOr => ctx.blocks[ctx.current_block].ops.push(HirOp::BitwiseOr { span: e.span }),
                         BinaryOp::BitwiseXor => ctx.blocks[ctx.current_block].ops.push(HirOp::BitwiseXor { span: e.span }),
                         BinaryOp::Instanceof => ctx.blocks[ctx.current_block].ops.push(HirOp::Instanceof { span: e.span }),
+                        BinaryOp::Comma => unreachable!("Comma handled in outer match"),
                         BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::LogicalAnd | BinaryOp::LogicalOr
                         | BinaryOp::NullishCoalescing => {
                             return Err(LowerError::Unsupported(
@@ -1929,21 +1935,43 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
         Expression::Assign(e) => {
             match e.left.as_ref() {
                 Expression::Identifier(id) => {
-                    let slot = *locals.get(&id.name).ok_or_else(|| {
-                        LowerError::Unsupported(
+                    if let Some(&slot) = locals.get(&id.name) {
+                        compile_expression(&e.right, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                            id: slot,
+                            span: e.span,
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                            id: slot,
+                            span: e.span,
+                        });
+                    } else if GLOBAL_NAMES.contains(&id.name.as_str()) {
+                        let result_slot = ctx.next_slot;
+                        ctx.next_slot += 1;
+                        compile_expression(&e.right, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                            id: result_slot,
+                            span: e.span,
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                            value: HirConst::Global("globalThis".to_string()),
+                            span: e.span,
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                            id: result_slot,
+                            span: e.span,
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span: e.span });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
+                            key: id.name.clone(),
+                            span: e.span,
+                        });
+                    } else {
+                        return Err(LowerError::Unsupported(
                             format!("assignment to undefined variable '{}'", id.name),
                             Some(id.span),
-                        )
-                    })?;
-                    compile_expression(&e.right, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                        id: slot,
-                        span: e.span,
-                    });
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                        id: slot,
-                        span: e.span,
-                    });
+                        ));
+                    }
                 }
                 Expression::Member(m) => {
                     compile_expression(&m.object, ctx)?;
