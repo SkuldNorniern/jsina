@@ -108,7 +108,12 @@ impl Driver {
 
     pub fn run_with_trace(source: &str, trace: bool) -> Result<i64, DriverError> {
         let host = CliHost;
-        Self::run_with_host(&host, source, trace)
+        Self::run_with_host(&host, source, trace, false)
+    }
+
+    pub fn run_with_jit(source: &str, trace: bool) -> Result<i64, DriverError> {
+        let host = CliHost;
+        Self::run_with_host(&host, source, trace, true)
     }
 
     /// Run with custom host. Use for browser embedding (provide HostHooks impl).
@@ -116,14 +121,15 @@ impl Driver {
         host: &H,
         source: &str,
         trace: bool,
+        enable_jit: bool,
     ) -> Result<i64, DriverError> {
-        with_host(host, || Self::run_with_host_inner(source, trace))
+        with_host(host, || Self::run_with_host_inner(source, trace, enable_jit))
     }
 
     /// Run with step limit. Use for test262 to prevent infinite loops from exhausting memory.
     pub fn run_with_step_limit(source: &str, step_limit: u64) -> Result<i64, DriverError> {
         let host = CliHost;
-        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, Some(step_limit), None))
+        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, Some(step_limit), None, false))
     }
 
     /// Run with step limit and cancellation flag. When cancel is set, execution stops.
@@ -134,11 +140,11 @@ impl Driver {
         cancel: Option<&AtomicBool>,
     ) -> Result<i64, DriverError> {
         let host = CliHost;
-        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, Some(step_limit), cancel))
+        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, Some(step_limit), cancel, false))
     }
 
-    fn run_with_host_inner(source: &str, trace: bool) -> Result<i64, DriverError> {
-        Self::run_with_host_and_limit_inner(source, trace, None, None)
+    fn run_with_host_inner(source: &str, trace: bool, enable_jit: bool) -> Result<i64, DriverError> {
+        Self::run_with_host_and_limit_inner(source, trace, None, None, enable_jit)
     }
 
     fn run_with_host_and_limit_inner(
@@ -146,6 +152,7 @@ impl Driver {
         trace: bool,
         step_limit: Option<u64>,
         cancel: Option<&AtomicBool>,
+        enable_jit: bool,
     ) -> Result<i64, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
@@ -161,6 +168,15 @@ impl Driver {
         let init_entry = funcs
             .iter()
             .position(|f| f.name.as_deref() == Some("__init__"));
+
+        if enable_jit && step_limit.is_none() && init_entry.is_none() {
+            let mut jit = crate::backend::JitSession::new();
+            let chunk = &chunks[entry];
+            if let Ok(Some(result)) = jit.try_compile(entry, chunk) {
+                return Ok(result);
+            }
+        }
+
         let program = Program {
             chunks,
             entry,
@@ -208,7 +224,7 @@ mod tests {
     fn run_with_host_custom_print() {
         let captured = Rc::new(RefCell::new(Vec::new()));
         let host = CaptureHost(captured.clone());
-        let r = Driver::run_with_host(&host, "function main() { print(\"hi\"); return 0; }", false);
+        let r = Driver::run_with_host(&host, "function main() { print(\"hi\"); return 0; }", false, false);
         assert!(r.is_ok());
         let v = captured.borrow();
         assert_eq!(v.as_slice(), &["hi"]);
