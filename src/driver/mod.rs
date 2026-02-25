@@ -177,10 +177,18 @@ impl Driver {
             }
         }
 
+        let global_funcs: Vec<(String, usize)> = funcs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| {
+                f.name.as_ref().filter(|n| *n != "__init__").map(|n| (n.clone(), i))
+            })
+            .collect();
         let program = Program {
             chunks,
             entry,
             init_entry,
+            global_funcs,
         };
         let completion = crate::vm::interpret_program_with_limit_and_cancel(
             &program,

@@ -196,6 +196,19 @@ impl Heap {
         self.set_prop(global_id, "Uint8Array", Value::Builtin(0xE1));
         self.set_prop(global_id, "Uint8ClampedArray", Value::Builtin(0xE2));
         self.set_prop(global_id, "ArrayBuffer", Value::Builtin(0xE3));
+        self.set_prop(global_id, "Function", Value::Builtin(0xE4));
+        self.set_prop(global_id, "isNaN", Value::Builtin(0xE5));
+        self.set_prop(global_id, "isFinite", Value::Builtin(0xE6));
+        let reflect_id = self.alloc_object();
+        self.set_prop(reflect_id, "apply", Value::Builtin(0xE7));
+        self.set_prop(reflect_id, "construct", Value::Builtin(0xE8));
+        self.set_prop(global_id, "Reflect", Value::Object(reflect_id));
+        let weakmap_id = self.alloc_object();
+        self.set_prop(global_id, "WeakMap", Value::Object(weakmap_id));
+        let weakset_id = self.alloc_object();
+        self.set_prop(global_id, "WeakSet", Value::Object(weakset_id));
+        let dataview_id = self.alloc_object();
+        self.set_prop(global_id, "DataView", Value::Object(dataview_id));
     }
 
     /// Add $262 host object for test262 harness. Match V8/Bun/Deno: $262 only exists when running via test262.
@@ -208,6 +221,7 @@ impl Heap {
         self.set_prop(dollar262_id, "gc", Value::Builtin(0xD7));
         self.set_prop(dollar262_id, "detachArrayBuffer", Value::Builtin(0xD8));
         self.set_prop(global_id, "$262", Value::Object(dollar262_id));
+        self.set_prop(global_id, "global", Value::Object(global_id));
     }
 
     pub fn get_global(&self, name: &str) -> Value {

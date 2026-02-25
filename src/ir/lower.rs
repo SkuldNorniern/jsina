@@ -8,7 +8,9 @@ const GLOBAL_NAMES: &[&str] = &[
     "Date", "RegExp", "Map", "Set", "Symbol", "NaN", "Infinity", "$262", "console", "print",
     "ReferenceError", "TypeError", "RangeError", "SyntaxError", "URIError", "globalThis",
     "Int32Array", "Uint8Array", "Uint8ClampedArray", "ArrayBuffer",
-    "eval", "encodeURI", "encodeURIComponent", "decodeURI", "decodeURIComponent", "parseInt", "parseFloat",
+    "Reflect", "WeakMap", "WeakSet", "DataView",
+    "eval", "encodeURI", "encodeURIComponent", "decodeURI", "decodeURIComponent", "parseInt", "parseFloat", "isNaN", "isFinite",
+    "assert", "Test262Error", "$DONOTEVALUATE", "Function", "global",
 ];
 
 #[derive(Debug)]
@@ -2780,6 +2782,67 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
+                    } else if id.name == "Function" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Function0,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if id.name == "isNaN" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::IsNaN0,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if id.name == "isFinite" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::IsFinite0,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if id.name == "parseInt" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ParseInt0,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if id.name == "parseFloat" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::ParseFloat0,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if GLOBAL_NAMES.contains(&id.name.as_str()) {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                            value: HirConst::Global("globalThis".to_string()),
+                            span: e.span,
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                            value: HirConst::Global(id.name.clone()),
+                            span: id.span,
+                        });
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
                     } else {
                         return Err(LowerError::Unsupported(
                             format!("call to undefined function '{}'", id.name),
@@ -3147,16 +3210,42 @@ mod tests {
         let script = parser.parse().expect("parse");
         let funcs = script_to_hir(&script).expect("lower");
         let chunks: Vec<_> = funcs.iter().map(|f| hir_to_bytecode(f).chunk).collect();
+        let global_funcs: Vec<(String, usize)> = funcs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| f.name.as_ref().filter(|n| *n != "__init__").map(|n| (n.clone(), i)))
+            .collect();
         let program = crate::vm::Program {
             chunks: chunks.clone(),
             entry: funcs.iter().position(|f| f.name.as_deref() == Some("main")).expect("main"),
             init_entry: None,
+            global_funcs,
         };
         let completion = crate::vm::interpret_program(&program).expect("interpret");
         if let crate::vm::Completion::Return(v) = completion {
             assert_eq!(v.to_i64(), 3);
         } else {
             panic!("expected Return(3), got {:?}", completion);
+        }
+    }
+
+    #[test]
+    fn lower_call_global_function() {
+        let mut parser = Parser::new("function main() { return parseInt(\"10\"); }");
+        let script = parser.parse().expect("parse");
+        let funcs = script_to_hir(&script).expect("lower");
+        let chunks: Vec<_> = funcs.iter().map(|f| hir_to_bytecode(f).chunk).collect();
+        let program = crate::vm::Program {
+            chunks,
+            entry: funcs.iter().position(|f| f.name.as_deref() == Some("main")).expect("main"),
+            init_entry: None,
+            global_funcs: Vec::new(),
+        };
+        let completion = crate::vm::interpret_program(&program).expect("interpret");
+        if let crate::vm::Completion::Return(v) = completion {
+            assert_eq!(v.to_i64(), 10, "parseInt(\"10\") should be 10");
+        } else {
+            panic!("expected Return(10), got {:?}", completion);
         }
     }
 

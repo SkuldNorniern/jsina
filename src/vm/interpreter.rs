@@ -75,6 +75,7 @@ pub struct Program {
     pub chunks: Vec<BytecodeChunk>,
     pub entry: usize,
     pub init_entry: Option<usize>,
+    pub global_funcs: Vec<(String, usize)>,
 }
 
 pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
@@ -82,6 +83,7 @@ pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
         chunks: vec![chunk.clone()],
         entry: 0,
         init_entry: None,
+        global_funcs: Vec::new(),
     };
     interpret_program(&program)
 }
@@ -178,6 +180,12 @@ fn interpret_program_with_trace_and_limit(
     let mut heap = Heap::new();
     if test262_mode {
         heap.init_test262_globals();
+    }
+    let global_id = heap.global_object();
+    for (name, chunk_idx) in &program.global_funcs {
+        if *chunk_idx < program.chunks.len() {
+            heap.set_prop(global_id, name, Value::Function(*chunk_idx));
+        }
     }
     interpret_program_with_heap(program, &mut heap, trace, step_limit, cancel)
 }

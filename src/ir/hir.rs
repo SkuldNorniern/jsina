@@ -165,6 +165,9 @@ pub enum BuiltinId {
     Uint8Array0 = 0xE1,
     Uint8ClampedArray0 = 0xE2,
     ArrayBuffer0 = 0xE3,
+    Function0 = 0xE4,
+    IsNaN0 = 0xE5,
+    IsFinite0 = 0xE6,
 }
 
 #[derive(Debug, Clone)]
