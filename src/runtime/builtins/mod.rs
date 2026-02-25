@@ -25,8 +25,14 @@ mod function_ctor;
 mod reflect;
 mod timeout;
 
+use crate::ir::bytecode::BytecodeChunk;
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+pub struct BuiltinContext<'a> {
+    pub heap: &'a mut Heap,
+    pub dynamic_chunks: &'a mut Vec<BytecodeChunk>,
+}
 
 #[derive(Debug)]
 pub enum BuiltinError {
@@ -41,7 +47,7 @@ pub(crate) fn to_number(v: &Value) -> f64 {
         Value::Null => 0.0,
         Value::Undefined => f64::NAN,
         Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
-        Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => f64::NAN,
+        Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => f64::NAN,
     }
 }
 
@@ -51,7 +57,7 @@ pub(crate) fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => true,
+        Value::String(_) | Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => true,
     }
 }
 
@@ -65,7 +71,7 @@ pub(crate) fn to_prop_key(v: &Value) -> String {
         Value::Undefined => "undefined".to_string(),
         Value::Symbol(_) => "Symbol()".to_string(),
         Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "[object Object]".to_string(),
-        Value::Function(_) | Value::Builtin(_) => "function".to_string(),
+        Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => "function".to_string(),
     }
 }
 
@@ -86,6 +92,7 @@ pub(crate) fn strict_eq(a: &Value, b: &Value) -> bool {
         (Value::Set(x), Value::Set(y)) => x == y,
         (Value::Date(x), Value::Date(y)) => x == y,
         (Value::Function(x), Value::Function(y)) => x == y,
+        (Value::DynamicFunction(x), Value::DynamicFunction(y)) => x == y,
         (Value::Builtin(x), Value::Builtin(y)) => x == y,
         _ => false,
     }
@@ -139,10 +146,10 @@ pub fn seed_random(seed: u64) {
 }
 
 pub type BuiltinFn = fn(&[Value], &mut Heap) -> Value;
-type ThrowingBuiltinFn = fn(&[Value], &mut Heap) -> Result<Value, BuiltinError>;
+type ThrowingBuiltinFn = fn(&[Value], &mut BuiltinContext) -> Result<Value, BuiltinError>;
 
 pub trait Builtin {
-    fn call(&self, args: &[Value], heap: &mut Heap) -> Result<Value, BuiltinError>;
+    fn call(&self, args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError>;
 }
 
 enum BuiltinEntry {
@@ -151,10 +158,10 @@ enum BuiltinEntry {
 }
 
 impl Builtin for BuiltinEntry {
-    fn call(&self, args: &[Value], heap: &mut Heap) -> Result<Value, BuiltinError> {
+    fn call(&self, args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
         match self {
-            Self::Normal(f) => Ok(f(args, heap)),
-            Self::Throwing(f) => f(args, heap),
+            Self::Normal(f) => Ok(f(args, ctx.heap)),
+            Self::Throwing(f) => f(args, ctx),
         }
     }
 }
@@ -281,16 +288,16 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "Global", name: "encodeURIComponent", entry: BuiltinEntry::Normal(encode::encode_uri_component_builtin) },
     BuiltinDef { category: "Global", name: "parseInt", entry: BuiltinEntry::Normal(number::parse_int) },
     BuiltinDef { category: "Global", name: "parseFloat", entry: BuiltinEntry::Normal(number::parse_float) },
-    BuiltinDef { category: "Global", name: "isNaN", entry: BuiltinEntry::Normal(number::is_nan) },
-    BuiltinDef { category: "Global", name: "isFinite", entry: BuiltinEntry::Normal(number::is_finite) },
     BuiltinDef { category: "Global", name: "decodeURI", entry: BuiltinEntry::Throwing(encode::decode_uri_builtin) },
     BuiltinDef { category: "Global", name: "decodeURIComponent", entry: BuiltinEntry::Throwing(encode::decode_uri_component_builtin) },
     BuiltinDef { category: "TypedArray", name: "Int32Array", entry: BuiltinEntry::Normal(typed_array::int32_array) },
     BuiltinDef { category: "TypedArray", name: "Uint8Array", entry: BuiltinEntry::Normal(typed_array::uint8_array) },
     BuiltinDef { category: "TypedArray", name: "Uint8ClampedArray", entry: BuiltinEntry::Normal(typed_array::uint8_clamped_array) },
     BuiltinDef { category: "TypedArray", name: "ArrayBuffer", entry: BuiltinEntry::Normal(typed_array::array_buffer) },
-    BuiltinDef { category: "TypedArray", name: "DataView", entry: BuiltinEntry::Throwing(typed_array::data_view) },
     BuiltinDef { category: "Global", name: "Function", entry: BuiltinEntry::Throwing(function_ctor::function_constructor) },
+    BuiltinDef { category: "Global", name: "isNaN", entry: BuiltinEntry::Normal(number::is_nan) },
+    BuiltinDef { category: "Global", name: "isFinite", entry: BuiltinEntry::Normal(number::is_finite) },
+    BuiltinDef { category: "TypedArray", name: "DataView", entry: BuiltinEntry::Throwing(typed_array::data_view) },
     BuiltinDef { category: "Reflect", name: "apply", entry: BuiltinEntry::Throwing(reflect::reflect_apply) },
     BuiltinDef { category: "Reflect", name: "construct", entry: BuiltinEntry::Throwing(reflect::reflect_construct) },
     BuiltinDef { category: "Host", name: "timeout", entry: BuiltinEntry::Throwing(timeout::timeout) },
@@ -490,7 +497,7 @@ pub fn resolve(category: &str, name: &str) -> Option<u8> {
         .and_then(|(i, _)| INDEX_TO_ENCODED.get(i).copied())
 }
 
-pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, BuiltinError> {
+pub fn dispatch(id: u8, args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
     let idx = match index_for(id) {
         Some(i) => i,
         None => {
@@ -499,7 +506,7 @@ pub fn dispatch(id: u8, args: &[Value], heap: &mut Heap) -> Result<Value, Builti
             )));
         }
     };
-    BUILTINS[idx].entry.call(args, heap)
+    BUILTINS[idx].entry.call(args, ctx)
 }
 
 #[cfg(test)]
@@ -510,8 +517,10 @@ mod tests {
     #[test]
     fn dispatch_regexp_escape() {
         let mut heap = Heap::new();
+        let mut dynamic_chunks = Vec::new();
+        let mut ctx = BuiltinContext { heap: &mut heap, dynamic_chunks: &mut dynamic_chunks };
         let args = [crate::runtime::Value::String(".".to_string())];
-        let r = dispatch(0x80, &args, &mut heap);
+        let r = dispatch(0x80, &args, &mut ctx);
         assert!(r.is_ok(), "dispatch failed: {:?}", r);
         let v = r.unwrap();
         let expected = crate::runtime::Value::String("\\.".to_string());
@@ -528,6 +537,13 @@ mod tests {
         assert_eq!(resolve("Object", "setPrototypeOf"), Some(0x46));
         assert_eq!(resolve("String", "fromCharCode"), Some(0x66));
         assert_eq!(resolve("Date", "now"), Some(0xC1));
+        assert_eq!(resolve("Global", "Function"), Some(0xE4));
         assert_eq!(resolve("Unknown", "foo"), None);
+    }
+
+    #[test]
+    fn function_builtin_at_0xe4() {
+        assert_eq!(resolve("Global", "Function"), Some(0xE4));
+        assert_eq!(name(0xE4), "Function");
     }
 }
