@@ -1,3 +1,4 @@
+use super::codes::ErrorCode;
 use super::span::Span;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,6 +83,18 @@ impl Diagnostic {
     }
 }
 
+/// Build a diagnostic for "callee is not a function" runtime errors.
+/// Message should be the full TypeError string (e.g. "TypeError: callee is not a function (got number)").
+pub fn callee_not_function_diagnostic(message: impl Into<String>) -> Diagnostic {
+    let msg = message.into();
+    let note = if let Some(got) = msg.split("(got ").nth(1).and_then(|s| s.strip_suffix(')')) {
+        format!("received type: {}", got.trim())
+    } else {
+        "the value being called must be a function, builtin, or method".to_string()
+    };
+    Diagnostic::error(ErrorCode::RunCalleeNotFunction, msg, None).with_note(note)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +119,15 @@ mod tests {
         let s = d.format(None);
         assert!(s.contains("parse failed"));
         assert!(s.contains("JSINA-003"));
+    }
+
+    #[test]
+    fn callee_not_function_diagnostic_has_code_and_note() {
+        use super::super::codes::ErrorCode;
+        let d = super::callee_not_function_diagnostic("TypeError: callee is not a function (got number)");
+        assert_eq!(d.code, ErrorCode::RunCalleeNotFunction.as_str());
+        assert_eq!(d.message, "TypeError: callee is not a function (got number)");
+        assert_eq!(d.notes.len(), 1);
+        assert_eq!(d.notes[0], "received type: number");
     }
 }

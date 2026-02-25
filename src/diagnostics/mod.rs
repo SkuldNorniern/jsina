@@ -3,5 +3,5 @@ pub mod error;
 pub mod span;
 
 pub use codes::ErrorCode;
-pub use error::{Diagnostic, Severity};
+pub use error::{callee_not_function_diagnostic, Diagnostic, Severity};
 pub use span::{Position, Span};

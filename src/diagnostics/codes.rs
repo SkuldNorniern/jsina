@@ -56,6 +56,8 @@ pub enum ErrorCode {
     RunNoMain,
     /// Uncaught exception
     RunUncaughtException,
+    /// Callee is not callable (not a function or builtin)
+    RunCalleeNotFunction,
 }
 
 impl ErrorCode {
@@ -86,6 +88,7 @@ impl ErrorCode {
 
             Self::RunNoMain => "JSINA-RUN-001",
             Self::RunUncaughtException => "JSINA-RUN-002",
+            Self::RunCalleeNotFunction => "JSINA-RUN-003",
         }
     }
 }
