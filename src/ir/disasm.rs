@@ -221,6 +221,8 @@ mod tests {
             code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
             num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
         };

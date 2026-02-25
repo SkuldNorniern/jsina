@@ -13,6 +13,8 @@ pub struct HirFunction {
     pub name: Option<String>,
     pub params: Vec<String>,
     pub num_locals: u32,
+    pub named_locals: Vec<(String, u32)>,
+    pub captured_names: Vec<String>,
     pub rest_param_index: Option<u32>,
     pub entry_block: HirBlockId,
     pub blocks: Vec<HirBlock>,
@@ -318,6 +320,8 @@ mod tests {
             name: Some("main".to_string()),
             params: vec![],
             num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
             rest_param_index: None,
             entry_block: 0,
             blocks: vec![HirBlock {

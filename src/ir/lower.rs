@@ -221,7 +221,10 @@ fn collect_function_exprs_expr(expr: &Expression, out: &mut Vec<(NodeId, Functio
             collect_function_exprs_expr(&b.right, out);
         }
         Expression::Unary(u) => collect_function_exprs_expr(&u.argument, out),
-        Expression::PostfixIncrement(p) | Expression::PostfixDecrement(p) => {
+        Expression::PrefixIncrement(p)
+        | Expression::PrefixDecrement(p)
+        | Expression::PostfixIncrement(p)
+        | Expression::PostfixDecrement(p) => {
             collect_function_exprs_expr(&p.argument, out);
         }
         Expression::New(n) => {
@@ -363,6 +366,8 @@ fn compile_init_block(
         exception_regions: Vec::new(),
         current_loop_label: None,
         label_map: HashMap::new(),
+        allow_function_captures: false,
+        captured_names: Vec::new(),
     };
     for s in &block.body {
         let _ = compile_statement(s, &mut ctx)?;
@@ -372,6 +377,8 @@ fn compile_init_block(
         name: Some("__init__".to_string()),
         params: Vec::new(),
         num_locals: ctx.next_slot,
+        named_locals: named_locals_from_map(&ctx.locals),
+        captured_names: Vec::new(),
         rest_param_index: None,
         entry_block: 0,
         blocks: ctx.blocks,
@@ -396,6 +403,8 @@ struct LowerCtx<'a> {
     exception_regions: Vec<ExceptionRegion>,
     current_loop_label: Option<String>,
     label_map: HashMap<String, (HirBlockId, HirBlockId)>,
+    allow_function_captures: bool,
+    captured_names: Vec<String>,
 }
 
 fn get_func_index<'a>(ctx: &'a LowerCtx<'a>) -> &'a HashMap<String, u32> {
@@ -418,6 +427,29 @@ fn terminator_for_exit(ctx: &LowerCtx<'_>) -> HirTerminator {
             span: ctx.return_span,
         }
     }
+}
+
+fn named_locals_from_map(locals: &HashMap<String, u32>) -> Vec<(String, u32)> {
+    let mut named_locals: Vec<(String, u32)> =
+        locals.iter().map(|(name, slot)| (name.clone(), *slot)).collect();
+    named_locals.sort_by_key(|(_, slot)| *slot);
+    named_locals
+}
+
+fn get_or_alloc_capture_slot(ctx: &mut LowerCtx<'_>, name: &str) -> Option<u32> {
+    if !ctx.allow_function_captures {
+        return None;
+    }
+    if let Some(&slot) = ctx.locals.get(name) {
+        return Some(slot);
+    }
+    let slot = ctx.next_slot;
+    ctx.next_slot += 1;
+    ctx.locals.insert(name.to_string(), slot);
+    if !ctx.captured_names.iter().any(|n| n == name) {
+        ctx.captured_names.push(name.to_string());
+    }
+    Some(slot)
 }
 
 fn compile_declarator(
@@ -545,6 +577,8 @@ fn compile_function(
         exception_regions: Vec::new(),
         current_loop_label: None,
         label_map: HashMap::new(),
+        allow_function_captures: false,
+        captured_names: Vec::new(),
     };
 
     let param_names: Vec<String> = f.params.iter().map(|p| p.name().to_string()).collect();
@@ -616,6 +650,8 @@ fn compile_function(
         name: Some(f.name.clone()),
         params: param_names,
         num_locals: ctx.next_slot,
+        named_locals: named_locals_from_map(&ctx.locals),
+        captured_names: Vec::new(),
         rest_param_index,
         entry_block: 0,
         blocks: ctx.blocks,
@@ -1635,6 +1671,8 @@ fn compile_function_expr_to_hir(
         exception_regions: Vec::new(),
         current_loop_label: None,
         label_map: HashMap::new(),
+        allow_function_captures: true,
+        captured_names: Vec::new(),
     };
     let param_names: Vec<String> = fe.params.iter().map(|p| p.name().to_string()).collect();
     let rest_param_index = fe.params.iter().position(|p| p.is_rest()).map(|i| i as u32);
@@ -1701,6 +1739,8 @@ fn compile_function_expr_to_hir(
         name: fe.name.clone(),
         params: param_names,
         num_locals: ctx.next_slot,
+        named_locals: named_locals_from_map(&ctx.locals),
+        captured_names: ctx.captured_names,
         rest_param_index,
         entry_block: 0,
         blocks: ctx.blocks,
@@ -1709,7 +1749,6 @@ fn compile_function_expr_to_hir(
 }
 
 fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
-    let locals = &ctx.locals;
     let func_index = get_func_index(ctx);
     match expr {
         Expression::Literal(e) => match &e.value {
@@ -1755,7 +1794,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     value: HirConst::Undefined,
                     span: e.span,
                 });
-            } else if let Some(&slot) = locals.get(&e.name) {
+            } else if let Some(&slot) = ctx.locals.get(&e.name) {
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
                     id: slot,
                     span: e.span,
@@ -1768,6 +1807,11 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
             } else if GLOBAL_NAMES.contains(&e.name.as_str()) {
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                     value: HirConst::Global(e.name.clone()),
+                    span: e.span,
+                });
+            } else if let Some(slot) = get_or_alloc_capture_slot(ctx, &e.name) {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                    id: slot,
                     span: e.span,
                 });
             } else {
@@ -2110,20 +2154,75 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 }
             }
         },
+        Expression::PrefixIncrement(p) | Expression::PrefixDecrement(p) => {
+            let inc = matches!(expr, Expression::PrefixIncrement(_));
+            match p.argument.as_ref() {
+                Expression::Identifier(id) => {
+                    let slot = if let Some(&slot) = ctx.locals.get(&id.name) {
+                        slot
+                    } else if let Some(slot) = get_or_alloc_capture_slot(ctx, &id.name) {
+                        slot
+                    } else {
+                        return Err(LowerError::Unsupported(
+                            format!(
+                                "prefix {} on undefined variable '{}'",
+                                if inc { "++" } else { "--" },
+                                id.name
+                            ),
+                            Some(p.span),
+                        ));
+                    };
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: slot,
+                        span: p.span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Int(1),
+                        span: p.span,
+                    });
+                    if inc {
+                        ctx.blocks[ctx.current_block]
+                            .ops
+                            .push(HirOp::Add { span: p.span });
+                    } else {
+                        ctx.blocks[ctx.current_block]
+                            .ops
+                            .push(HirOp::Sub { span: p.span });
+                    }
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::Dup { span: p.span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: slot,
+                        span: p.span,
+                    });
+                }
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "prefix ++/-- only supported on identifiers".to_string(),
+                        Some(p.span),
+                    ));
+                }
+            }
+        }
         Expression::PostfixIncrement(p) | Expression::PostfixDecrement(p) => {
             let inc = matches!(expr, Expression::PostfixIncrement(_));
             match p.argument.as_ref() {
                 Expression::Identifier(id) => {
-                    let slot = *locals.get(&id.name).ok_or_else(|| {
-                        LowerError::Unsupported(
+                    let slot = if let Some(&slot) = ctx.locals.get(&id.name) {
+                        slot
+                    } else if let Some(slot) = get_or_alloc_capture_slot(ctx, &id.name) {
+                        slot
+                    } else {
+                        return Err(LowerError::Unsupported(
                             format!(
                                 "postfix {} on undefined variable '{}'",
                                 if inc { "++" } else { "--" },
                                 id.name
                             ),
                             Some(p.span),
-                        )
-                    })?;
+                        ));
+                    };
                     ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
                         id: slot,
                         span: p.span,
@@ -2159,7 +2258,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
         }
         Expression::Assign(e) => match e.left.as_ref() {
             Expression::Identifier(id) => {
-                if let Some(&slot) = locals.get(&id.name) {
+                if let Some(&slot) = ctx.locals.get(&id.name) {
                     compile_expression(&e.right, ctx)?;
                     ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                         id: slot,
@@ -2190,6 +2289,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         .push(HirOp::Swap { span: e.span });
                     ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
                         key: id.name.clone(),
+                        span: e.span,
+                    });
+                } else if let Some(slot) = get_or_alloc_capture_slot(ctx, &id.name) {
+                    compile_expression(&e.right, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                        id: slot,
+                        span: e.span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: slot,
                         span: e.span,
                     });
                 } else {
@@ -3211,6 +3320,19 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         argc: e.args.len() as u32,
                         span: e.span,
                     });
+                } else if ctx.allow_function_captures {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Undefined,
+                        span: e.span,
+                    });
+                    compile_expression(&Expression::Identifier(id.clone()), ctx)?;
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
                 } else {
                     return Err(LowerError::Unsupported(
                         format!("call to undefined function '{}'", id.name),
@@ -3841,6 +3963,18 @@ mod tests {
     }
 
     #[test]
+    fn lower_prefix_and_postfix_update() {
+        let result = crate::driver::Driver::run(
+            "function main() { let x = 1; let a = ++x; let b = x++; return a * 100 + b * 10 + x; }",
+        )
+        .expect("run");
+        assert_eq!(
+            result, 223,
+            "prefix returns updated value while postfix returns previous value"
+        );
+    }
+
+    #[test]
     fn lower_destructuring() {
         let result = crate::driver::Driver::run(
             "function main() { let obj = { x: 1, y: 2 }; let { x, y } = obj; return x + y; }",
@@ -3879,6 +4013,24 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 11, "arrow function with block body");
+    }
+
+    #[test]
+    fn lower_arrow_function_closure_capture() {
+        let result = crate::driver::Driver::run(
+            "function main() { let base = 3; let addBase = (x) => x + base; return addBase(4); }",
+        )
+        .expect("run");
+        assert_eq!(result, 7, "arrow function should capture outer local variable");
+    }
+
+    #[test]
+    fn lower_function_expression_closure_capture() {
+        let result = crate::driver::Driver::run(
+            "function main() { let base = 5; let addBase = function(x) { return x + base; }; return addBase(6); }",
+        )
+        .expect("run");
+        assert_eq!(result, 11, "function expression should capture outer local variable");
     }
 
     #[test]

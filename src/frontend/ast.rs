@@ -271,6 +271,8 @@ pub enum Expression {
     Member(MemberExpr),
     FunctionExpr(FunctionExprData),
     ArrowFunction(ArrowFunctionExpr),
+    PrefixIncrement(PostfixExpr),
+    PrefixDecrement(PostfixExpr),
     PostfixIncrement(PostfixExpr),
     PostfixDecrement(PostfixExpr),
     New(NewExpr),
@@ -522,7 +524,10 @@ impl Expression {
             Expression::Member(e) => e.span,
             Expression::FunctionExpr(e) => e.span,
             Expression::ArrowFunction(e) => e.span,
-            Expression::PostfixIncrement(e) | Expression::PostfixDecrement(e) => e.span,
+            Expression::PrefixIncrement(e)
+            | Expression::PrefixDecrement(e)
+            | Expression::PostfixIncrement(e)
+            | Expression::PostfixDecrement(e) => e.span,
             Expression::New(e) => e.span,
             Expression::ClassExpr(e) => e.span,
         }

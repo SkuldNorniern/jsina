@@ -1507,6 +1507,28 @@ impl Parser {
         let token = self.current().cloned();
         if let Some(ref t) = token {
             let (op, span) = match &t.token_type {
+                TokenType::Increment => {
+                    self.advance();
+                    let argument = self.parse_unary()?;
+                    let span = t.span.merge(argument.span());
+                    self.end_recursion();
+                    return Ok(Expression::PrefixIncrement(PostfixExpr {
+                        id: self.next_id(),
+                        span,
+                        argument: Box::new(argument),
+                    }));
+                }
+                TokenType::Decrement => {
+                    self.advance();
+                    let argument = self.parse_unary()?;
+                    let span = t.span.merge(argument.span());
+                    self.end_recursion();
+                    return Ok(Expression::PrefixDecrement(PostfixExpr {
+                        id: self.next_id(),
+                        span,
+                        argument: Box::new(argument),
+                    }));
+                }
                 TokenType::Minus => {
                     self.advance();
                     (UnaryOp::Minus, t.span)
@@ -2208,6 +2230,34 @@ mod tests {
                 if let Statement::Return(r) = &b.body[1] {
                     let arg = r.argument.as_ref().unwrap();
                     assert!(matches!(arg.as_ref(), Expression::PostfixIncrement(_)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_prefix_increment() {
+        let script = parse_ok("function f() { var x = 0; return ++x; }");
+        assert_eq!(script.body.len(), 1);
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = f.body.as_ref() {
+                if let Statement::Return(r) = &b.body[1] {
+                    let arg = r.argument.as_ref().unwrap();
+                    assert!(matches!(arg.as_ref(), Expression::PrefixIncrement(_)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_prefix_decrement() {
+        let script = parse_ok("function f() { var x = 1; return --x; }");
+        assert_eq!(script.body.len(), 1);
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = f.body.as_ref() {
+                if let Statement::Return(r) = &b.body[1] {
+                    let arg = r.argument.as_ref().unwrap();
+                    assert!(matches!(arg.as_ref(), Expression::PrefixDecrement(_)));
                 }
             }
         }

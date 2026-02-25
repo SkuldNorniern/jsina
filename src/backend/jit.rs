@@ -417,6 +417,8 @@ mod tests {
             code: vec![0x01, 0, 0x01, 1, 0x10, 0x20],
             constants: vec![ConstEntry::Int(10), ConstEntry::Int(32)],
             num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
         };
