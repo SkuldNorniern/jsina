@@ -52,11 +52,21 @@ fn is_strict_reserved(name: &str) -> bool {
     STRICT_RESERVED.contains(&name)
 }
 
+#[derive(Clone)]
 struct CheckContext {
     in_function: bool,
     in_iteration: bool,
     in_switch: bool,
     strict: bool,
+    iter_labels: Vec<String>,
+    break_labels: Vec<String>,
+}
+
+fn is_iteration(stmt: &Statement) -> bool {
+    matches!(
+        stmt,
+        Statement::For(_) | Statement::While(_) | Statement::ForIn(_) | Statement::ForOf(_)
+    )
 }
 
 fn check_script(script: &Script, errors: &mut Vec<EarlyError>) {
@@ -67,6 +77,8 @@ fn check_script(script: &Script, errors: &mut Vec<EarlyError>) {
         in_iteration: false,
         in_switch: false,
         strict: script_strict,
+        iter_labels: Vec::new(),
+        break_labels: Vec::new(),
     };
     for stmt in &script.body {
         check_statement(stmt, &mut scope, &ctx, errors);
@@ -86,6 +98,16 @@ fn check_statement(
                 check_statement(s, scope, ctx, errors);
             }
             scope.leave_block();
+        }
+        Statement::Labeled(l) => {
+            let mut new_ctx = ctx.clone();
+            if is_iteration(&l.body) {
+                new_ctx.iter_labels.push(l.label.clone());
+                new_ctx.break_labels.push(l.label.clone());
+            } else if matches!(l.body.as_ref(), Statement::Switch(_)) {
+                new_ctx.break_labels.push(l.label.clone());
+            }
+            check_statement(&l.body, scope, &new_ctx, errors);
         }
         Statement::ClassDecl(c) => {
             if ctx.strict && is_strict_reserved(&c.name) {
@@ -133,6 +155,8 @@ fn check_statement(
                 in_iteration: ctx.in_iteration,
                 in_switch: ctx.in_switch,
                 strict: fn_strict,
+                iter_labels: ctx.iter_labels.clone(),
+                break_labels: ctx.break_labels.clone(),
             };
             check_statement(&f.body, scope, &fn_ctx, errors);
             scope.leave_function();
@@ -148,11 +172,13 @@ fn check_statement(
         }
         Statement::Break(b) => {
             if let Some(ref label) = b.label {
-                errors.push(EarlyError {
-                    code: ErrorCode::EarlyUnknownLabel,
-                    message: format!("unknown label '{}'", label),
-                    span: b.span,
-                });
+                if !ctx.break_labels.contains(label) {
+                    errors.push(EarlyError {
+                        code: ErrorCode::EarlyUnknownLabel,
+                        message: format!("unknown label '{}'", label),
+                        span: b.span,
+                    });
+                }
             } else if !ctx.in_iteration && !ctx.in_switch {
                 errors.push(EarlyError {
                     code: ErrorCode::EarlyBreakOutsideIteration,
@@ -163,11 +189,13 @@ fn check_statement(
         }
         Statement::Continue(c) => {
             if let Some(ref label) = c.label {
-                errors.push(EarlyError {
-                    code: ErrorCode::EarlyContinueUnknownLabel,
-                    message: format!("unknown label '{}'", label),
-                    span: c.span,
-                });
+                if !ctx.iter_labels.contains(label) {
+                    errors.push(EarlyError {
+                        code: ErrorCode::EarlyContinueUnknownLabel,
+                        message: format!("unknown label '{}'", label),
+                        span: c.span,
+                    });
+                }
             } else if !ctx.in_iteration {
                 errors.push(EarlyError {
                     code: ErrorCode::EarlyContinueOutsideIteration,
@@ -242,6 +270,8 @@ fn check_statement(
                 in_iteration: true,
                 in_switch: ctx.in_switch,
                 strict: ctx.strict,
+                iter_labels: ctx.iter_labels.clone(),
+                break_labels: ctx.break_labels.clone(),
             };
             check_statement(&w.body, scope, &iter_ctx, errors);
         }
@@ -254,6 +284,8 @@ fn check_statement(
                 in_iteration: true,
                 in_switch: ctx.in_switch,
                 strict: ctx.strict,
+                iter_labels: ctx.iter_labels.clone(),
+                break_labels: ctx.break_labels.clone(),
             };
             check_statement(&f.body, scope, &iter_ctx, errors);
         }
@@ -282,6 +314,8 @@ fn check_statement(
                 in_iteration: true,
                 in_switch: ctx.in_switch,
                 strict: ctx.strict,
+                iter_labels: ctx.iter_labels.clone(),
+                break_labels: ctx.break_labels.clone(),
             };
             check_statement(&f.body, scope, &iter_ctx, errors);
         }
@@ -310,6 +344,8 @@ fn check_statement(
                 in_iteration: true,
                 in_switch: ctx.in_switch,
                 strict: ctx.strict,
+                iter_labels: ctx.iter_labels.clone(),
+                break_labels: ctx.break_labels.clone(),
             };
             check_statement(&f.body, scope, &iter_ctx, errors);
         }
@@ -319,6 +355,8 @@ fn check_statement(
                 in_iteration: ctx.in_iteration,
                 in_switch: true,
                 strict: ctx.strict,
+                iter_labels: ctx.iter_labels.clone(),
+                break_labels: ctx.break_labels.clone(),
             };
             for case in &s.cases {
                 for stmt in &case.body {

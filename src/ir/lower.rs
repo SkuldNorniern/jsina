@@ -64,6 +64,7 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
                 collect_function_exprs_stmt(s, out);
             }
         }
+        Statement::Labeled(l) => collect_function_exprs_stmt(&l.body, out),
         Statement::FunctionDecl(f) => {
             collect_function_exprs_stmt(&f.body, out);
         }
@@ -316,6 +317,8 @@ fn compile_init_block(
         loop_stack: Vec::new(),
         switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
+        current_loop_label: None,
+        label_map: HashMap::new(),
     };
     for s in &block.body {
         let _ = compile_statement(s, &mut ctx)?;
@@ -347,6 +350,8 @@ struct LowerCtx<'a> {
     loop_stack: Vec<(HirBlockId, HirBlockId)>,
     switch_break_stack: Vec<HirBlockId>,
     exception_regions: Vec<ExceptionRegion>,
+    current_loop_label: Option<String>,
+    label_map: HashMap<String, (HirBlockId, HirBlockId)>,
 }
 
 fn get_func_index<'a>(ctx: &'a LowerCtx<'a>) -> &'a HashMap<String, u32> {
@@ -481,6 +486,8 @@ fn compile_function(
         loop_stack: Vec::new(),
         switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
+        current_loop_label: None,
+        label_map: HashMap::new(),
     };
 
     let param_names: Vec<String> = f.params.iter().map(|p| p.name().to_string()).collect();
@@ -557,6 +564,21 @@ fn compile_function(
 
 fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, LowerError> {
     match stmt {
+        Statement::Labeled(l) => {
+            let is_loop = matches!(
+                l.body.as_ref(),
+                Statement::For(_) | Statement::While(_) | Statement::ForIn(_) | Statement::ForOf(_)
+            );
+            let is_switch = matches!(l.body.as_ref(), Statement::Switch(_));
+            if is_loop || is_switch {
+                ctx.current_loop_label = Some(l.label.clone());
+            }
+            let hit = compile_statement(&l.body, ctx)?;
+            if is_loop || is_switch {
+                ctx.current_loop_label = None;
+            }
+            return Ok(hit);
+        }
         Statement::Block(b) => {
             let mut block_func_index = get_func_index(ctx).clone();
             let mut hit_return = false;
@@ -867,6 +889,9 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
 
             const WHILE_EXIT_PLACEHOLDER: HirBlockId = u32::MAX - 3;
             loop_stack_push(ctx, loop_id, WHILE_EXIT_PLACEHOLDER);
+            if let Some(label) = ctx.current_loop_label.take() {
+                ctx.label_map.insert(label, (loop_id, WHILE_EXIT_PLACEHOLDER));
+            }
             ctx.current_block = body_id as usize;
             let body_exits = compile_statement(&w.body, ctx)?;
             loop_stack_pop(ctx);
@@ -976,6 +1001,9 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             };
 
             loop_stack_push(ctx, FOR_UPDATE_PLACEHOLDER, FOR_EXIT_PLACEHOLDER);
+            if let Some(label) = ctx.current_loop_label.take() {
+                ctx.label_map.insert(label, (FOR_UPDATE_PLACEHOLDER, FOR_EXIT_PLACEHOLDER));
+            }
             ctx.current_block = body_id as usize;
             let body_exits = compile_statement(&f.body, ctx)?;
             loop_stack_pop(ctx);
@@ -1023,6 +1051,14 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
                 }
             }
 
+            for (_, (cont, exit)) in ctx.label_map.iter_mut() {
+                if *cont == FOR_UPDATE_PLACEHOLDER {
+                    *cont = update_id;
+                }
+                if *exit == FOR_EXIT_PLACEHOLDER {
+                    *exit = exit_id;
+                }
+            }
             ctx.current_block = exit_id as usize;
         }
         Statement::ForIn(f) => {
@@ -1124,6 +1160,9 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             };
 
             loop_stack_push(ctx, loop_id, exit_id);
+            if let Some(label) = ctx.current_loop_label.take() {
+                ctx.label_map.insert(label, (loop_id, exit_id));
+            }
             ctx.current_block = body_id as usize;
             ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
                 id: keys_slot,
@@ -1159,6 +1198,9 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
                 ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
             }
 
+            if let Some(label) = ctx.current_loop_label.take() {
+                ctx.label_map.insert(label, (loop_id, exit_id));
+            }
             ctx.current_block = exit_id as usize;
         }
         Statement::ForOf(f) => {
@@ -1245,6 +1287,9 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             };
 
             loop_stack_push(ctx, loop_id, exit_id);
+            if let Some(label) = ctx.current_loop_label.take() {
+                ctx.label_map.insert(label, (loop_id, exit_id));
+            }
             ctx.current_block = body_id as usize;
             ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
                 id: right_slot,
@@ -1280,6 +1325,9 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
                 ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
             }
 
+            if let Some(label) = ctx.current_loop_label.take() {
+                ctx.label_map.insert(label, (loop_id, exit_id));
+            }
             ctx.current_block = exit_id as usize;
         }
         Statement::Switch(s) => {
@@ -1384,10 +1432,17 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             }
             ctx.switch_break_stack.pop();
 
+            if let Some(label) = ctx.current_loop_label.take() {
+                ctx.label_map.insert(label, (exit_id, exit_id));
+            }
             ctx.current_block = exit_id as usize;
         }
         Statement::Break(b) => {
-            let exit = if let Some(&switch_exit) = ctx.switch_break_stack.last() {
+            let exit = if let Some(ref label) = b.label {
+                ctx.label_map.get(label).map(|(_, e)| *e).ok_or_else(|| {
+                    LowerError::Unsupported(format!("unknown label '{}'", label), Some(b.span))
+                })?
+            } else if let Some(&switch_exit) = ctx.switch_break_stack.last() {
                 switch_exit
             } else if let Some((_, loop_exit)) = ctx.loop_stack.last() {
                 *loop_exit
@@ -1415,14 +1470,20 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             ctx.current_block = unreachable_id as usize;
         }
         Statement::Continue(c) => {
-            let (cont, exit) = ctx.loop_stack.last().ok_or_else(|| {
-                LowerError::Unsupported("continue outside loop".to_string(), Some(c.span))
-            })?;
+            let (cont, exit) = if let Some(ref label) = c.label {
+                ctx.label_map.get(label).copied().ok_or_else(|| {
+                    LowerError::Unsupported(format!("unknown label '{}'", label), Some(c.span))
+                })?
+            } else {
+                *ctx.loop_stack.last().ok_or_else(|| {
+                    LowerError::Unsupported("continue outside loop".to_string(), Some(c.span))
+                })?
+            };
             let cont_block_id = ctx.blocks.len() as HirBlockId;
             ctx.blocks.push(HirBlock {
                 id: cont_block_id,
                 ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: *cont },
+                terminator: HirTerminator::Jump { target: cont },
             });
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
                 target: cont_block_id,
@@ -1431,7 +1492,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             ctx.blocks.push(HirBlock {
                 id: unreachable_id,
                 ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: *exit },
+                terminator: HirTerminator::Jump { target: exit },
             });
             ctx.current_block = unreachable_id as usize;
         }
@@ -1475,6 +1536,8 @@ fn compile_function_expr_to_hir(
         loop_stack: Vec::new(),
         switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
+        current_loop_label: None,
+        label_map: HashMap::new(),
     };
     let param_names: Vec<String> = fe.params.iter().map(|p| p.name().to_string()).collect();
     let rest_param_index = fe.params.iter().position(|p| p.is_rest()).map(|i| i as u32);
@@ -3069,20 +3132,28 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     });
                 }
                 Expression::Identifier(id) => {
-                    let idx = *get_func_index(ctx).get(&id.name).ok_or_else(|| {
-                        LowerError::Unsupported(
-                            format!("new on undefined constructor '{}'", id.name),
-                            Some(n.span),
-                        )
-                    })?;
-                    for arg in &n.args {
-                        compile_expression(arg, ctx)?;
+                    if let Some(&idx) = get_func_index(ctx)
+                        .get(&id.name)
+                        .or_else(|| ctx.func_index.get(&id.name))
+                    {
+                        for arg in &n.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::New {
+                            func_index: idx,
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    } else {
+                        compile_expression(&Expression::Identifier(id.clone()), ctx)?;
+                        for arg in &n.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::NewMethod {
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
                     }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::New {
-                        func_index: idx,
-                        argc: n.args.len() as u32,
-                        span: n.span,
-                    });
                 }
                 _ => {
                     compile_expression(n.callee.as_ref(), ctx)?;

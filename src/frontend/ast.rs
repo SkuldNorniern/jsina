@@ -13,6 +13,7 @@ pub struct Script {
 #[derive(Debug, Clone)]
 pub enum Statement {
     Block(BlockStmt),
+    Labeled(LabeledStmt),
     If(IfStmt),
     While(WhileStmt),
     For(ForStmt),
@@ -30,6 +31,14 @@ pub enum Statement {
     Throw(ThrowStmt),
     Try(TryStmt),
     Switch(SwitchStmt),
+}
+
+#[derive(Debug, Clone)]
+pub struct LabeledStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub label: String,
+    pub body: Box<Statement>,
 }
 
 #[derive(Debug, Clone)]
@@ -461,6 +470,7 @@ impl Statement {
     pub fn span(&self) -> Span {
         match self {
             Statement::Block(s) => s.span,
+            Statement::Labeled(s) => s.span,
             Statement::If(s) => s.span,
             Statement::While(s) => s.span,
             Statement::For(s) => s.span,

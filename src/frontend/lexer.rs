@@ -205,6 +205,39 @@ impl Lexer<'_> {
         Token::new(TokenType::Number, lexeme, span)
     }
 
+    fn scan_decimal_literal(&mut self) -> Token {
+        let start_pos = self.position;
+        let mut lexeme = String::from("0");
+        lexeme.push(self.current_char.expect("caller ensures we are at '.'"));
+        self.advance();
+        while let Some(ch) = self.current_char {
+            if ch.is_ascii_digit() {
+                lexeme.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if let Some(ch) = self.current_char && (ch == 'e' || ch == 'E') {
+            lexeme.push(ch);
+            self.advance();
+            if let Some(ch) = self.current_char && (ch == '+' || ch == '-') {
+                lexeme.push(ch);
+                self.advance();
+            }
+            while let Some(ch) = self.current_char {
+                if ch.is_ascii_digit() {
+                    lexeme.push(ch);
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        let span = Span::from_text(start_pos, &lexeme);
+        Token::new(TokenType::Number, lexeme, span)
+    }
+
     fn scan_string(&mut self) -> Token {
         let start_pos = self.position;
         let quote = self.current_char.unwrap();
@@ -423,6 +456,8 @@ impl Lexer<'_> {
                     self.advance();
                     self.advance();
                     Token::new(TokenType::Spread, "...".to_string(), Span::from_text(start_pos, "..."))
+                } else if self.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                    self.scan_decimal_literal()
                 } else {
                     self.advance();
                     Token::new(TokenType::Dot, ".".to_string(), Span::from_text(start_pos, "."))
@@ -547,6 +582,21 @@ mod tests {
         assert_eq!(tokens[2].token_type, TokenType::Number);
         assert_eq!(tokens[3].token_type, TokenType::Number);
         assert_eq!(tokens[4].token_type, TokenType::Number);
+    }
+
+    #[test]
+    fn lexer_decimal_literal_leading_dot() {
+        let source = ".5 .5e2 .123".to_string();
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize();
+
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].token_type, TokenType::Number);
+        assert_eq!(tokens[0].lexeme, "0.5");
+        assert_eq!(tokens[1].token_type, TokenType::Number);
+        assert_eq!(tokens[1].lexeme, "0.5e2");
+        assert_eq!(tokens[2].token_type, TokenType::Number);
+        assert_eq!(tokens[2].lexeme, "0.123");
     }
 
     #[test]

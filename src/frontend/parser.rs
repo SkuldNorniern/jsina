@@ -200,6 +200,12 @@ impl Parser {
             span: None,
         })?.clone();
 
+        if matches!(&token.token_type, TokenType::Identifier)
+            && matches!(self.peek(), Some(TokenType::Colon))
+        {
+            return self.parse_labeled_statement();
+        }
+
         match &token.token_type {
             TokenType::Function => self.parse_function_decl(),
             TokenType::Class => self.parse_class_decl(),
@@ -218,6 +224,21 @@ impl Parser {
             TokenType::LeftBrace => self.parse_block(),
             _ => self.parse_expression_statement(),
         }
+    }
+
+    fn parse_labeled_statement(&mut self) -> Result<Statement, ParseError> {
+        let label_tok = self.expect(TokenType::Identifier)?;
+        let label = label_tok.lexeme.clone();
+        let start_span = label_tok.span;
+        self.expect(TokenType::Colon)?;
+        let body = Box::new(self.parse_statement()?);
+        let span = start_span.merge(body.span());
+        Ok(Statement::Labeled(LabeledStmt {
+            id: self.next_id(),
+            span,
+            label,
+            body,
+        }))
     }
 
     fn parse_block(&mut self) -> Result<Statement, ParseError> {
@@ -1312,13 +1333,14 @@ impl Parser {
                     } else {
                         (Vec::new(), callee.span())
                     };
-                    self.end_recursion();
-                    return Ok(Expression::New(NewExpr {
+                    let new_expr = Expression::New(NewExpr {
                         id: self.next_id(),
                         span,
                         callee: Box::new(callee),
                         args,
-                    }));
+                    });
+                    self.end_recursion();
+                    return self.parse_postfix_continued(new_expr);
                 }
                 _ => {
                     self.end_recursion();
@@ -1342,8 +1364,11 @@ impl Parser {
     }
 
     fn parse_postfix(&mut self) -> Result<Expression, ParseError> {
-        let mut expr = self.parse_primary()?;
+        let expr = self.parse_primary()?;
+        self.parse_postfix_continued(expr)
+    }
 
+    fn parse_postfix_continued(&mut self, mut expr: Expression) -> Result<Expression, ParseError> {
         loop {
             if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftParen)) {
                 let start_span = expr.span();
@@ -2749,6 +2774,8 @@ mod tests {
     fn parse_number_int() { let _ = parse_ok("function f() { return 999; }"); }
     #[test]
     fn parse_number_float() { let _ = parse_ok("function f() { return 0.5; }"); }
+    #[test]
+    fn parse_number_decimal_leading_dot() { let _ = parse_ok("function f() { return .5; }"); }
     #[test]
     fn parse_number_int_large() { let _ = parse_ok("function f() { return 12345; }"); }
     #[test]
