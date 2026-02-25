@@ -1,9 +1,9 @@
 //! timeout(callback, delay) - test262 host hook stub. Throws when called.
 
-use crate::runtime::{Heap, Value};
-use super::BuiltinError;
+use crate::runtime::Value;
+use super::{BuiltinContext, BuiltinError};
 
-pub fn timeout(args: &[Value], _heap: &mut Heap) -> Result<Value, BuiltinError> {
+pub fn timeout(args: &[Value], _ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
     let _ = args;
     Err(BuiltinError::Throw(Value::String(
         "timeout is not implemented".to_string(),
@@ -13,11 +13,14 @@ pub fn timeout(args: &[Value], _heap: &mut Heap) -> Result<Value, BuiltinError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::Heap;
 
     #[test]
     fn timeout_throws_not_implemented() {
         let mut heap = Heap::new();
-        let r = timeout(&[], &mut heap);
+        let mut dynamic_chunks = Vec::new();
+        let mut ctx = BuiltinContext { heap: &mut heap, dynamic_chunks: &mut dynamic_chunks };
+        let r = timeout(&[], &mut ctx);
         assert!(r.is_err());
         if let Err(BuiltinError::Throw(Value::String(s))) = r {
             assert!(s.contains("timeout"));

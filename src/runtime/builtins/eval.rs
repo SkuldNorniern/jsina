@@ -1,10 +1,11 @@
 //! eval(x) - Execute code string in global scope. Minimal implementation for test262.
-use crate::runtime::{Heap, Value};
+use crate::runtime::Value;
 use crate::frontend::{check_early_errors, Parser};
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::vm::{interpret_program_with_heap, Completion, Program};
+use super::BuiltinContext;
 
-pub fn eval(args: &[Value], heap: &mut Heap) -> Result<Value, super::BuiltinError> {
+pub fn eval(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, super::BuiltinError> {
     let code = match args.first() {
         None | Some(Value::Undefined) | Some(Value::Null) => return Ok(Value::Undefined),
         Some(Value::String(s)) => s.clone(),
@@ -44,7 +45,7 @@ pub fn eval(args: &[Value], heap: &mut Heap) -> Result<Value, super::BuiltinErro
         init_entry: None,
         global_funcs: Vec::new(),
     };
-    match interpret_program_with_heap(&program, heap, false, None, None) {
+    match interpret_program_with_heap(&program, ctx.heap, false, None, None) {
         Ok(Completion::Return(v)) => Ok(v),
         Ok(Completion::Throw(v)) => Err(super::BuiltinError::Throw(v)),
         Ok(Completion::Normal(v)) => Ok(v),

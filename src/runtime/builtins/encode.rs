@@ -86,17 +86,17 @@ fn decode_uri_impl(s: &str, decode_reserved: bool) -> Result<String, ()> {
     String::from_utf8(out).map_err(|_| ())
 }
 
-pub fn decode_uri_builtin(args: &[Value], heap: &mut crate::runtime::Heap) -> Result<Value, BuiltinError> {
+pub fn decode_uri_builtin(args: &[Value], ctx: &mut super::BuiltinContext) -> Result<Value, BuiltinError> {
     let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
     decode_uri_impl(&s, false).map(Value::String).map_err(|_| {
-        BuiltinError::Throw(super::error::uri_error(&[Value::String("URI malformed".to_string())], heap))
+        BuiltinError::Throw(super::error::uri_error(&[Value::String("URI malformed".to_string())], ctx.heap))
     })
 }
 
-pub fn decode_uri_component_builtin(args: &[Value], heap: &mut crate::runtime::Heap) -> Result<Value, BuiltinError> {
+pub fn decode_uri_component_builtin(args: &[Value], ctx: &mut super::BuiltinContext) -> Result<Value, BuiltinError> {
     let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
     decode_uri_impl(&s, true).map(Value::String).map_err(|_| {
-        BuiltinError::Throw(super::error::uri_error(&[Value::String("URI malformed".to_string())], heap))
+        BuiltinError::Throw(super::error::uri_error(&[Value::String("URI malformed".to_string())], ctx.heap))
     })
 }
 

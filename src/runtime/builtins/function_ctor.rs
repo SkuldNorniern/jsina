@@ -1,13 +1,14 @@
 //! Function constructor: new Function(arg1, arg2, ..., body) - creates function from string.
 //! Uses eval internally. Last argument is body, preceding are param names.
+//! Returns Value::DynamicFunction so the created function can be invoked in the caller's context.
 
-use crate::runtime::{Heap, Value};
 use crate::frontend::{check_early_errors, Parser};
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::vm::{interpret_program_with_heap, Completion, Program};
-use super::{to_prop_key, BuiltinError};
+use super::{to_prop_key, BuiltinContext, BuiltinError};
+use crate::runtime::Value;
 
-pub fn function_constructor(args: &[Value], heap: &mut Heap) -> Result<Value, BuiltinError> {
+pub fn function_constructor(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
     if args.is_empty() {
         return Ok(Value::Undefined);
     }
@@ -55,8 +56,16 @@ pub fn function_constructor(args: &[Value], heap: &mut Heap) -> Result<Value, Bu
         init_entry: None,
         global_funcs,
     };
-    match interpret_program_with_heap(&program, heap, false, None, None) {
-        Ok(Completion::Return(v)) => Ok(v),
+    match interpret_program_with_heap(&program, ctx.heap, false, None, None) {
+        Ok(Completion::Return(v)) => {
+            if let Value::Function(inner_idx) = v {
+                if let Some(inner_chunk) = program.chunks.get(inner_idx) {
+                    ctx.dynamic_chunks.push(inner_chunk.clone());
+                    return Ok(Value::DynamicFunction(ctx.dynamic_chunks.len() - 1));
+                }
+            }
+            Ok(v)
+        }
         Ok(Completion::Throw(v)) => Err(BuiltinError::Throw(v)),
         Ok(Completion::Normal(v)) => Ok(v),
         Err(e) => Err(BuiltinError::Throw(Value::String(e.to_string()))),
