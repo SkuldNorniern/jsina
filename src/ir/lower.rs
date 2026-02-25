@@ -11,6 +11,7 @@ const GLOBAL_NAMES: &[&str] = &[
     "Reflect", "WeakMap", "WeakSet", "DataView",
     "eval", "encodeURI", "encodeURIComponent", "decodeURI", "decodeURIComponent", "parseInt", "parseFloat", "isNaN", "isFinite",
     "assert", "Test262Error", "$DONOTEVALUATE", "Function", "global",
+    "timeout", "Temporal", "Proxy", "Intl",
 ];
 
 #[derive(Debug)]
@@ -2995,6 +2996,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::ArrayBuffer0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "DataView" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::DataView0,
                         argc: n.args.len() as u32,
                         span: n.span,
                     });
