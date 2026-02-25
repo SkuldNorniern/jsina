@@ -60,7 +60,54 @@ pub enum ErrorCode {
     RunCalleeNotFunction,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ErrorCategory {
+    Parse,
+    Early,
+    Bytecode,
+    Runtime,
+}
+
+impl ErrorCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Parse => "PARSE",
+            Self::Early => "EARLY",
+            Self::Bytecode => "BC",
+            Self::Runtime => "RUN",
+        }
+    }
+}
+
 impl ErrorCode {
+    pub fn category(self) -> ErrorCategory {
+        match self {
+            Self::ParseRecursionLimit
+            | Self::ParseUnexpectedEofExpected
+            | Self::ParseUnexpectedToken
+            | Self::ParseUnexpectedEof
+            | Self::ParseUnexpectedEofInExpr
+            | Self::ParseUnexpectedTokenInExpr
+            | Self::ParseTryNeedsCatchOrFinally
+            | Self::ParseSwitchExpectedCaseOrDefault
+            | Self::ParseForInOfDecl
+            | Self::ParseExpectedVarLetConst
+            | Self::ParseExpectedIdentOrComma => ErrorCategory::Parse,
+            Self::EarlyDuplicateParam
+            | Self::EarlyReturnOutsideFunction
+            | Self::EarlyDuplicateLexical
+            | Self::EarlyUnknownLabel
+            | Self::EarlyBreakOutsideIteration
+            | Self::EarlyContinueUnknownLabel
+            | Self::EarlyContinueOutsideIteration
+            | Self::EarlyStrictReserved => ErrorCategory::Early,
+            Self::BcNoFunction => ErrorCategory::Bytecode,
+            Self::RunNoMain | Self::RunUncaughtException | Self::RunCalleeNotFunction => {
+                ErrorCategory::Runtime
+            }
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ParseRecursionLimit => "JSINA-PARSE-001",
@@ -96,5 +143,26 @@ impl ErrorCode {
 impl std::fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_code_category_is_runtime() {
+        assert_eq!(
+            ErrorCode::RunCalleeNotFunction.category(),
+            ErrorCategory::Runtime
+        );
+    }
+
+    #[test]
+    fn category_string_is_stable() {
+        assert_eq!(ErrorCategory::Parse.as_str(), "PARSE");
+        assert_eq!(ErrorCategory::Early.as_str(), "EARLY");
+        assert_eq!(ErrorCategory::Bytecode.as_str(), "BC");
+        assert_eq!(ErrorCategory::Runtime.as_str(), "RUN");
     }
 }

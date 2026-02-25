@@ -67,6 +67,18 @@ impl Span {
         self.end.byte_offset.saturating_sub(self.start.byte_offset)
     }
 
+    pub fn is_point(&self) -> bool {
+        self.start == self.end
+    }
+
+    pub fn is_single_line(&self) -> bool {
+        self.start.line == self.end.line
+    }
+
+    pub fn contains_byte_offset(&self, byte_offset: usize) -> bool {
+        self.start.byte_offset <= byte_offset && byte_offset <= self.end.byte_offset
+    }
+
     pub fn merge(self, other: Span) -> Span {
         let start = if self.start.byte_offset <= other.start.byte_offset {
             self.start
@@ -103,6 +115,17 @@ mod tests {
         let start = Position::start();
         let span = Span::from_text(start, "foo");
         assert_eq!(span.length(), 3);
+    }
+
+    #[test]
+    fn span_flags_and_contains() {
+        let start = Position::new(1, 1, 0);
+        let end = Position::new(1, 4, 3);
+        let span = Span::new(start, end);
+        assert!(span.is_single_line());
+        assert!(!span.is_point());
+        assert!(span.contains_byte_offset(1));
+        assert!(!span.contains_byte_offset(5));
     }
 }
 
