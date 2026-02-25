@@ -234,7 +234,10 @@ impl Binding {
             Binding::Ident(n) => vec![n.as_str()],
             Binding::ObjectPattern(props) => props
                 .iter()
-                .filter_map(|p| match &p.target { ObjectPatternTarget::Ident(n) => Some(n.as_str()), ObjectPatternTarget::Expr(_) => None })
+                .filter_map(|p| match &p.target {
+                    ObjectPatternTarget::Ident(n) => Some(n.as_str()),
+                    ObjectPatternTarget::Expr(_) => None,
+                })
                 .collect(),
             Binding::ArrayPattern(elems) => {
                 elems.iter().filter_map(|e| e.binding.as_deref()).collect()

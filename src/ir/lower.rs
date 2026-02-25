@@ -696,9 +696,10 @@ fn store_value_to_expression(
             compile_expression(&m.object, ctx)?;
             match &m.property {
                 MemberProperty::Identifier(key) => {
-                    ctx.blocks[ctx.current_block]
-                        .ops
-                        .push(HirOp::LoadLocal { id: effective_slot, span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: effective_slot,
+                        span,
+                    });
                     ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
                         key: key.clone(),
                         span,
@@ -706,9 +707,10 @@ fn store_value_to_expression(
                 }
                 MemberProperty::Expression(key_expr) => {
                     compile_expression(key_expr, ctx)?;
-                    ctx.blocks[ctx.current_block]
-                        .ops
-                        .push(HirOp::LoadLocal { id: effective_slot, span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: effective_slot,
+                        span,
+                    });
                     ctx.blocks[ctx.current_block]
                         .ops
                         .push(HirOp::SetPropDyn { span });

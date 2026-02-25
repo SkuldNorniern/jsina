@@ -1441,10 +1441,7 @@ impl Parser {
                     };
                     (name, false, default_init)
                 } else {
-                    if !matches!(
-                        key_tok.token_type,
-                        TokenType::Identifier | TokenType::Yield
-                    ) {
+                    if !matches!(key_tok.token_type, TokenType::Identifier | TokenType::Yield) {
                         return Err(ParseError {
                             code: ErrorCode::ParseUnexpectedToken,
                             message: "object binding shorthand must be an identifier".to_string(),
@@ -3456,7 +3453,9 @@ mod tests {
                     if let ForInOfLeft::LetBinding(Binding::ObjectPattern(props)) = &s.left {
                         assert_eq!(props.len(), 1);
                         assert_eq!(props[0].key, "x");
-                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) = &props[0].target {
+                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) =
+                            &props[0].target
+                        {
                             assert_eq!(n, "y");
                         } else {
                             panic!("expected Ident target");
@@ -3479,7 +3478,9 @@ mod tests {
                     if let ForInOfLeft::Pattern(Binding::ObjectPattern(props)) = &s.left {
                         assert_eq!(props.len(), 1);
                         assert_eq!(props[0].key, "x");
-                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) = &props[0].target {
+                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) =
+                            &props[0].target
+                        {
                             assert_eq!(n, "y");
                         } else {
                             panic!("expected Ident target");
@@ -3541,14 +3542,18 @@ mod tests {
                     if let crate::frontend::ast::Binding::ObjectPattern(props) = &d.binding {
                         assert_eq!(props.len(), 2);
                         assert_eq!(props[0].key, "x");
-                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) = &props[0].target {
+                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) =
+                            &props[0].target
+                        {
                             assert_eq!(n, "x");
                         } else {
                             panic!("expected Ident target");
                         }
                         assert!(props[0].shorthand);
                         assert_eq!(props[1].key, "y");
-                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) = &props[1].target {
+                        if let crate::frontend::ast::ObjectPatternTarget::Ident(n) =
+                            &props[1].target
+                        {
                             assert_eq!(n, "y");
                         } else {
                             panic!("expected Ident target");

@@ -589,7 +589,11 @@ impl Heap {
                     crate::runtime::Value::String(s) => s.clone(),
                     _ => message_val.to_string(),
                 };
-                let name_str = if name.is_empty() { "Error" } else { name.as_str() };
+                let name_str = if name.is_empty() {
+                    "Error"
+                } else {
+                    name.as_str()
+                };
                 if self.is_error_object(*id) || !name.is_empty() || !message.is_empty() {
                     if message.is_empty() {
                         name_str.to_string()
