@@ -67,6 +67,9 @@ impl Heap {
         self.set_prop(obj_id, "isSealed", Value::Builtin(0x4C));
         self.set_prop(obj_id, "hasOwn", Value::Builtin(0x4D));
         self.set_prop(obj_id, "is", Value::Builtin(0x4E));
+        self.set_prop(obj_id, "getOwnPropertyDescriptor", Value::Builtin(0x4F));
+        self.set_prop(obj_id, "getOwnPropertyNames", Value::Builtin(0x57));
+        self.set_prop(obj_id, "defineProperty", Value::Builtin(0x58));
         self.set_prop(global_id, "Object", Value::Object(obj_id));
 
         let arr_id = self.alloc_object();
@@ -263,10 +266,31 @@ impl Heap {
     }
 
     pub fn set_function_prop(&mut self, func_index: usize, key: &str, value: Value) {
+        let props = self.function_props.entry(func_index).or_default();
+        if key == "name" && props.contains_key("name") {
+            return;
+        }
+        props.insert(key.to_string(), value);
+    }
+
+    pub fn function_has_own_property(&self, func_index: usize, key: &str) -> bool {
         self.function_props
-            .entry(func_index)
-            .or_default()
-            .insert(key.to_string(), value);
+            .get(&func_index)
+            .map(|props| props.contains_key(key))
+            .unwrap_or(false)
+    }
+
+    pub fn function_keys(&self, func_index: usize) -> Vec<String> {
+        self.function_props
+            .get(&func_index)
+            .map(|props| props.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn delete_function_prop(&mut self, func_index: usize, key: &str) {
+        if let Some(props) = self.function_props.get_mut(&func_index) {
+            props.remove(key);
+        }
     }
 
     pub fn global_object(&self) -> usize {
@@ -484,6 +508,13 @@ impl Heap {
         }
     }
 
+    pub fn array_len(&self, arr_id: usize) -> usize {
+        self.arrays
+            .get(arr_id)
+            .map(|elements| elements.len())
+            .unwrap_or(0)
+    }
+
     pub fn array_pop(&mut self, arr_id: usize) -> Value {
         if let Some(elements) = self.arrays.get_mut(arr_id) {
             elements.pop().unwrap_or(Value::Undefined)
@@ -553,23 +584,20 @@ impl Heap {
                     crate::runtime::Value::String(s) => s,
                     _ => String::new(),
                 };
-                let message = match self.get_prop(*id, "message") {
-                    crate::runtime::Value::String(s) => s,
-                    _ => String::new(),
+                let message_val = self.get_prop(*id, "message");
+                let message = match &message_val {
+                    crate::runtime::Value::String(s) => s.clone(),
+                    _ => message_val.to_string(),
                 };
+                let name_str = if name.is_empty() { "Error" } else { name.as_str() };
                 if self.is_error_object(*id) || !name.is_empty() || !message.is_empty() {
-                    let n = if name.is_empty() {
-                        "Error"
-                    } else {
-                        name.as_str()
-                    };
                     if message.is_empty() {
-                        n.to_string()
+                        name_str.to_string()
                     } else {
-                        format!("{}: {}", n, message)
+                        format!("{}: {}", name_str, message)
                     }
                 } else {
-                    v.to_string()
+                    "Thrown object".to_string()
                 }
             }
             _ => v.to_string(),

@@ -439,6 +439,10 @@ pub fn interpret_program_with_heap_and_entry(
                             true
                         }
                     }
+                    Value::Function(function_index) => {
+                        heap.delete_function_prop(*function_index, &key_str);
+                        true
+                    }
                     _ => true,
                 };
                 state.stack.push(Value::Bool(result));

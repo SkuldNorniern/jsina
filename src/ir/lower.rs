@@ -55,6 +55,15 @@ const GLOBAL_NAMES: &[&str] = &[
     "Proxy",
     "Intl",
     "testResult",
+    "__isArray",
+    "__defineProperty",
+    "__getOwnPropertyDescriptor",
+    "__getOwnPropertyNames",
+    "__join",
+    "__push",
+    "__hasOwnProperty",
+    "__propertyIsEnumerable",
+    "nonIndexNumericPropertyName",
 ];
 
 #[derive(Debug)]
@@ -123,10 +132,12 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
             collect_function_exprs_stmt(&f.body, out);
         }
         Statement::ForIn(f) => {
+            collect_function_exprs_for_in_of_left(&f.left, out);
             collect_function_exprs_expr(&f.right, out);
             collect_function_exprs_stmt(&f.body, out);
         }
         Statement::ForOf(f) => {
+            collect_function_exprs_for_in_of_left(&f.left, out);
             collect_function_exprs_expr(&f.right, out);
             collect_function_exprs_stmt(&f.body, out);
         }
@@ -159,6 +170,7 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
         Statement::Expression(e) => collect_function_exprs_expr(&e.expression, out),
         Statement::VarDecl(v) => {
             for d in &v.declarations {
+                collect_function_exprs_binding(&d.binding, out);
                 if let Some(init) = &d.init {
                     collect_function_exprs_expr(init, out);
                 }
@@ -166,6 +178,7 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
         }
         Statement::LetDecl(v) => {
             for d in &v.declarations {
+                collect_function_exprs_binding(&d.binding, out);
                 if let Some(init) = &d.init {
                     collect_function_exprs_expr(init, out);
                 }
@@ -173,6 +186,7 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
         }
         Statement::ConstDecl(v) => {
             for d in &v.declarations {
+                collect_function_exprs_binding(&d.binding, out);
                 if let Some(init) = &d.init {
                     collect_function_exprs_expr(init, out);
                 }
@@ -252,6 +266,42 @@ fn collect_function_exprs_expr(expr: &Expression, out: &mut Vec<(NodeId, Functio
             }
         }
         _ => {}
+    }
+}
+
+fn collect_function_exprs_binding(binding: &Binding, out: &mut Vec<(NodeId, FunctionExprData)>) {
+    match binding {
+        Binding::Ident(_) => {}
+        Binding::ObjectPattern(props) => {
+            for prop in props {
+                if let Some(default_init) = &prop.default_init {
+                    collect_function_exprs_expr(default_init, out);
+                }
+            }
+        }
+        Binding::ArrayPattern(elems) => {
+            for elem in elems {
+                if let Some(default_init) = &elem.default_init {
+                    collect_function_exprs_expr(default_init, out);
+                }
+            }
+        }
+    }
+}
+
+fn collect_function_exprs_for_in_of_left(
+    left: &ForInOfLeft,
+    out: &mut Vec<(NodeId, FunctionExprData)>,
+) {
+    match left {
+        ForInOfLeft::VarBinding(binding)
+        | ForInOfLeft::LetBinding(binding)
+        | ForInOfLeft::ConstBinding(binding)
+        | ForInOfLeft::Pattern(binding) => collect_function_exprs_binding(binding, out),
+        ForInOfLeft::VarDecl(_)
+        | ForInOfLeft::LetDecl(_)
+        | ForInOfLeft::ConstDecl(_)
+        | ForInOfLeft::Identifier(_) => {}
     }
 }
 
@@ -513,16 +563,22 @@ fn store_binding_value(
             ops: Vec::new(),
             terminator: HirTerminator::Jump { target: 0 },
         });
-        let continue_block_id = ctx.blocks.len() as HirBlockId;
+        let non_default_block_id = ctx.blocks.len() as HirBlockId;
         ctx.blocks.push(HirBlock {
-            id: continue_block_id,
+            id: non_default_block_id,
+            ops: Vec::new(),
+            terminator: HirTerminator::Jump { target: 0 },
+        });
+        let merge_block_id = ctx.blocks.len() as HirBlockId;
+        ctx.blocks.push(HirBlock {
+            id: merge_block_id,
             ops: Vec::new(),
             terminator: HirTerminator::Jump { target: 0 },
         });
         ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
             cond: cond_slot,
             then_block: default_block_id,
-            else_block: continue_block_id,
+            else_block: non_default_block_id,
         };
         ctx.current_block = default_block_id as usize;
         compile_expression(default_expr, ctx)?;
@@ -531,9 +587,9 @@ fn store_binding_value(
             span,
         });
         ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
-            target: continue_block_id,
+            target: merge_block_id,
         };
-        ctx.current_block = continue_block_id as usize;
+        ctx.current_block = non_default_block_id as usize;
         ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
             id: value_slot,
             span,
@@ -542,6 +598,10 @@ fn store_binding_value(
             id: target_slot,
             span,
         });
+        ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+            target: merge_block_id,
+        };
+        ctx.current_block = merge_block_id as usize;
     } else {
         ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
             id: value_slot,
@@ -710,6 +770,26 @@ fn compile_declarator(
                     id: slot,
                     span: decl.span,
                 });
+                if GLOBAL_NAMES.contains(&name.as_str()) {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Global("globalThis".to_string()),
+                        span: decl.span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: slot,
+                        span: decl.span,
+                    });
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::Swap { span: decl.span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
+                        key: name.clone(),
+                        span: decl.span,
+                    });
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::Pop { span: decl.span });
+                }
             }
         }
         crate::frontend::ast::Binding::ObjectPattern(props) => {
@@ -1831,6 +1911,25 @@ fn compile_function_expr(fe: &FunctionExprData, ctx: &mut LowerCtx<'_>) -> Resul
         value: HirConst::Function(idx),
         span: fe.span,
     });
+    if let Some(name) = fe.name.as_ref() {
+        ctx.blocks[ctx.current_block]
+            .ops
+            .push(HirOp::Dup { span: fe.span });
+        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+            value: HirConst::String(name.clone()),
+            span: fe.span,
+        });
+        ctx.blocks[ctx.current_block]
+            .ops
+            .push(HirOp::Swap { span: fe.span });
+        ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
+            key: "name".to_string(),
+            span: fe.span,
+        });
+        ctx.blocks[ctx.current_block]
+            .ops
+            .push(HirOp::Pop { span: fe.span });
+    }
     Ok(())
 }
 
@@ -4181,6 +4280,36 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 30, "array destructuring");
+    }
+
+    #[test]
+    fn lower_for_of_destructuring_default_function_name() {
+        let result = crate::driver::Driver::run(
+            "function main() { var fn; for ({ x: fn = function() {} } of [{}]) { if (fn.name === 'fn') return 1; if (fn.name === undefined) return 2; return 3; } return 0; }",
+        )
+        .expect("run");
+        assert_eq!(
+            result, 1,
+            "anonymous default initializer should get binding name"
+        );
+
+        let result = crate::driver::Driver::run(
+            "function main() { var named, anon; for ({ x: named = function x() {}, x: anon = function() {} } of [{}]) { return (named.name === 'x' && anon.name === 'anon') ? 1 : 0; } return 0; }",
+        )
+        .expect("run");
+        assert_eq!(
+            result, 1,
+            "named function keeps explicit name while anonymous gets binding name"
+        );
+
+        let result = crate::driver::Driver::run(
+            "function main() { var cover, noName; for ({ x: cover = (function() {}), x: noName = (0, function() {}) } of [{}]) { return (cover.name === 'cover' && noName.name !== 'noName') ? 1 : 0; } return 0; }",
+        )
+        .expect("run");
+        assert_eq!(
+            result, 1,
+            "cover parenthesized anonymous gets name, comma expression does not"
+        );
     }
 
     #[test]

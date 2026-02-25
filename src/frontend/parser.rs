@@ -142,6 +142,36 @@ impl Parser {
         }
     }
 
+    /// Consume a binding identifier: Identifier or Yield (yield is a valid identifier in binding positions).
+    /// Returns (name, span).
+    fn expect_binding_identifier(&mut self) -> Result<(String, Span), ParseError> {
+        let token = self
+            .current()
+            .ok_or_else(|| ParseError {
+                code: ErrorCode::ParseUnexpectedEofExpected,
+                message: "unexpected end of input, expected identifier".to_string(),
+                span: None,
+            })?
+            .clone();
+        let name = match &token.token_type {
+            TokenType::Identifier => token.lexeme.clone(),
+            TokenType::Yield => "yield".to_string(),
+            _ => {
+                return Err(ParseError {
+                    code: ErrorCode::ParseUnexpectedToken,
+                    message: format!(
+                        "unexpected token {:?}, expected Identifier",
+                        token.token_type
+                    ),
+                    span: Some(token.span),
+                });
+            }
+        };
+        let span = token.span;
+        self.advance();
+        Ok((name, span))
+    }
+
     fn optional(&mut self, tt: TokenType) -> bool {
         if self
             .current()
@@ -1192,7 +1222,12 @@ impl Parser {
                         }
                         Expression::Assign(assign) => {
                             if let Expression::Identifier(ident) = assign.left.as_ref() {
-                                (ident.name.clone(), Some(assign.right.clone()), false)
+                                let mut default_init = *assign.right.clone();
+                                Self::assign_default_initializer_name(
+                                    &mut default_init,
+                                    &ident.name,
+                                );
+                                (ident.name.clone(), Some(Box::new(default_init)), false)
                             } else {
                                 return None;
                             }
@@ -1215,7 +1250,12 @@ impl Parser {
                         Expression::Identifier(ident) => (Some(ident.name.clone()), None),
                         Expression::Assign(assign) => {
                             if let Expression::Identifier(ident) = assign.left.as_ref() {
-                                (Some(ident.name.clone()), Some(assign.right.clone()))
+                                let mut default_init = *assign.right.clone();
+                                Self::assign_default_initializer_name(
+                                    &mut default_init,
+                                    &ident.name,
+                                );
+                                (Some(ident.name.clone()), Some(Box::new(default_init)))
                             } else {
                                 return None;
                             }
@@ -1370,13 +1410,18 @@ impl Parser {
                         });
                     };
                     let default_init = if self.optional(TokenType::Assign) {
-                        Some(Box::new(self.parse_assignment_expression_allow_in()?))
+                        let mut default_expr = self.parse_assignment_expression_allow_in()?;
+                        Self::assign_default_initializer_name(&mut default_expr, &name);
+                        Some(Box::new(default_expr))
                     } else {
                         None
                     };
                     (name, false, default_init)
                 } else {
-                    if key_tok.token_type != TokenType::Identifier {
+                    if !matches!(
+                        key_tok.token_type,
+                        TokenType::Identifier | TokenType::Yield
+                    ) {
                         return Err(ParseError {
                             code: ErrorCode::ParseUnexpectedToken,
                             message: "object binding shorthand must be an identifier".to_string(),
@@ -1384,7 +1429,9 @@ impl Parser {
                         });
                     }
                     let default_init = if self.optional(TokenType::Assign) {
-                        Some(Box::new(self.parse_assignment_expression_allow_in()?))
+                        let mut default_expr = self.parse_assignment_expression_allow_in()?;
+                        Self::assign_default_initializer_name(&mut default_expr, &key);
+                        Some(Box::new(default_expr))
                     } else {
                         None
                     };
@@ -1426,10 +1473,10 @@ impl Parser {
                 }
                 let binding = if matches!(
                     self.current().map(|t| &t.token_type),
-                    Some(TokenType::Identifier)
+                    Some(TokenType::Identifier) | Some(TokenType::Yield)
                 ) {
-                    let tok = self.expect(TokenType::Identifier)?;
-                    Some(tok.lexeme)
+                    let (name, _) = self.expect_binding_identifier()?;
+                    Some(name)
                 } else {
                     return Err(ParseError {
                         code: ErrorCode::ParseExpectedIdentOrComma,
@@ -1438,7 +1485,11 @@ impl Parser {
                     });
                 };
                 let default_init = if self.optional(TokenType::Assign) {
-                    Some(Box::new(self.parse_assignment_expression_allow_in()?))
+                    let mut default_expr = self.parse_assignment_expression_allow_in()?;
+                    if let Some(binding_name) = binding.as_deref() {
+                        Self::assign_default_initializer_name(&mut default_expr, binding_name);
+                    }
+                    Some(Box::new(default_expr))
                 } else {
                     None
                 };
@@ -1454,8 +1505,8 @@ impl Parser {
             let end_span = self.current().map(|t| t.span).unwrap_or(start_span);
             Ok((Binding::ArrayPattern(elems), start_span.merge(end_span)))
         } else {
-            let name_tok = self.expect(TokenType::Identifier)?;
-            Ok((Binding::Ident(name_tok.lexeme.clone()), name_tok.span))
+            let (name, span) = self.expect_binding_identifier()?;
+            Ok((Binding::Ident(name), span))
         }
     }
 
@@ -1471,6 +1522,22 @@ impl Parser {
 
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
         self.parse_expression_prec(0)
+    }
+
+    fn assign_default_initializer_name(initializer: &mut Expression, binding_name: &str) {
+        match initializer {
+            Expression::FunctionExpr(function_expr) => {
+                if function_expr.name.is_none() {
+                    function_expr.name = Some(binding_name.to_string());
+                }
+            }
+            Expression::ClassExpr(class_expr) => {
+                if class_expr.name.is_none() {
+                    class_expr.name = Some(binding_name.to_string());
+                }
+            }
+            _ => {}
+        }
     }
 
     fn parse_assignment_expression_allow_in(&mut self) -> Result<Expression, ParseError> {
@@ -3384,6 +3451,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_for_of_assignment_pattern_sets_anonymous_function_name() {
+        let script = parse_ok(
+            "function f() { let fn; for ({ x: fn = function() {} } of arr) { return fn; } }",
+        );
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::ForOf(s) = &b.body[1] {
+                    if let ForInOfLeft::Pattern(Binding::ObjectPattern(props)) = &s.left {
+                        if let Some(default_init) = &props[0].default_init {
+                            if let Expression::FunctionExpr(function_expr) = default_init.as_ref() {
+                                assert_eq!(function_expr.name.as_deref(), Some("fn"));
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        panic!("expected anonymous function default initializer to be renamed");
+    }
+
+    #[test]
     fn parse_throw() {
         let script = parse_ok("function f() { throw 42; }");
         if let Statement::FunctionDecl(f) = &script.body[0] {
@@ -3706,5 +3795,29 @@ mod tests {
             }
         }
         panic!("expected object literal with computed keys");
+    }
+
+    #[test]
+    fn parse_object_literal_shorthand_and_computed_mixed() {
+        let script = parse_ok("({ a, [x]: 1, b });");
+        if let Statement::Expression(expr_stmt) = &script.body[0] {
+            if let Expression::ObjectLiteral(object_literal) = expr_stmt.expression.as_ref() {
+                assert_eq!(object_literal.properties.len(), 3);
+                assert!(matches!(
+                    &object_literal.properties[0].key,
+                    ObjectPropertyKey::Static(s) if s == "a"
+                ));
+                assert!(matches!(
+                    &object_literal.properties[1].key,
+                    ObjectPropertyKey::Computed(_)
+                ));
+                assert!(matches!(
+                    &object_literal.properties[2].key,
+                    ObjectPropertyKey::Static(s) if s == "b"
+                ));
+                return;
+            }
+        }
+        panic!("expected object literal with shorthand and computed keys");
     }
 }
