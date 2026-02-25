@@ -526,19 +526,24 @@ impl Heap {
 
     pub fn format_thrown_value(&self, v: &crate::runtime::Value) -> String {
         match v {
-            crate::runtime::Value::Object(id) if self.is_error_object(*id) => {
+            crate::runtime::Value::Object(id) => {
                 let name = match self.get_prop(*id, "name") {
                     crate::runtime::Value::String(s) => s,
-                    _ => "Error".to_string(),
+                    _ => String::new(),
                 };
                 let message = match self.get_prop(*id, "message") {
                     crate::runtime::Value::String(s) => s,
-                    _ => "".to_string(),
+                    _ => String::new(),
                 };
-                if message.is_empty() {
-                    name
+                if self.is_error_object(*id) || !name.is_empty() || !message.is_empty() {
+                    let n = if name.is_empty() { "Error" } else { name.as_str() };
+                    if message.is_empty() {
+                        n.to_string()
+                    } else {
+                        format!("{}: {}", n, message)
+                    }
                 } else {
-                    format!("{}: {}", name, message)
+                    v.to_string()
                 }
             }
             _ => v.to_string(),
@@ -580,5 +585,15 @@ mod tests {
         heap.set_prop(obj, "x", Value::Int(1));
         assert_eq!(heap.get_prop(obj, "x").to_i64(), 1);
         assert_eq!(heap.get_prop(obj, "y").to_i64(), 10);
+    }
+
+    #[test]
+    fn format_thrown_value_error_like_object() {
+        let mut heap = Heap::new();
+        let obj = heap.alloc_object();
+        heap.set_prop(obj, "name", Value::String("Test262Error".to_string()));
+        heap.set_prop(obj, "message", Value::String("expected true".to_string()));
+        let v = Value::Object(obj);
+        assert_eq!(heap.format_thrown_value(&v), "Test262Error: expected true");
     }
 }
