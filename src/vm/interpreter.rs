@@ -30,6 +30,7 @@ struct RunState {
     stack: Vec<Value>,
     frames: Vec<Frame>,
     dynamic_chunks: Vec<BytecodeChunk>,
+    dynamic_captures: Vec<Vec<(u32, Value)>>,
     chunks_stack: Vec<BytecodeChunk>,
     getprop_cache: GetPropCache,
 }
@@ -143,6 +144,7 @@ pub fn interpret_program_with_heap_and_entry(
             new_object: None,
         }],
         dynamic_chunks: Vec::new(),
+        dynamic_captures: Vec::new(),
         chunks_stack: Vec::new(),
         getprop_cache: GetPropCache::new(),
     };
@@ -203,6 +205,42 @@ pub fn interpret_program_with_heap_and_entry(
                 *pc += 1;
                 let val = match constants.get(idx).ok_or(VmError::InvalidConstIndex(idx))? {
                     ConstEntry::Global(name) => heap.get_global(name),
+                    ConstEntry::Function(func_idx) => {
+                        let callee_chunk = program
+                            .chunks
+                            .get(*func_idx)
+                            .ok_or(VmError::InvalidConstIndex(*func_idx))?;
+                        if callee_chunk.captured_names.is_empty() {
+                            Value::Function(*func_idx)
+                        } else {
+                            let mut captured_slots: Vec<(u32, Value)> = Vec::new();
+                            for capture_name in &callee_chunk.captured_names {
+                                let outer_slot = chunk
+                                    .named_locals
+                                    .iter()
+                                    .find_map(|(name, slot)| (name == capture_name).then_some(*slot))
+                                    .map(|slot| slot as usize);
+                                let inner_slot = callee_chunk
+                                    .named_locals
+                                    .iter()
+                                    .find_map(|(name, slot)| (name == capture_name).then_some(*slot));
+                                if let Some(inner_slot) = inner_slot {
+                                    let captured_value = outer_slot
+                                        .and_then(|slot| locals.get(slot))
+                                        .cloned()
+                                        .unwrap_or(Value::Undefined);
+                                    captured_slots.push((inner_slot, captured_value));
+                                }
+                            }
+                            let dynamic_index = state.dynamic_chunks.len();
+                            state.dynamic_chunks.push(callee_chunk.clone());
+                            if state.dynamic_captures.len() <= dynamic_index {
+                                state.dynamic_captures.resize(dynamic_index + 1, Vec::new());
+                            }
+                            state.dynamic_captures[dynamic_index] = captured_slots;
+                            Value::DynamicFunction(dynamic_index)
+                        }
+                    }
                     c => c.to_value(),
                 };
                 state.stack.push(val);
@@ -575,7 +613,15 @@ pub fn interpret_program_with_heap_and_entry(
                             .get(heap_idx)
                             .ok_or(VmError::InvalidConstIndex(heap_idx))?
                             .clone();
-                        let callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
+                        let mut callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
+                        if let Some(captured) = state.dynamic_captures.get(heap_idx) {
+                            for (slot, value) in captured {
+                                let slot = *slot as usize;
+                                if slot < callee_locals.len() {
+                                    callee_locals[slot] = value.clone();
+                                }
+                            }
+                        }
                         if state.frames.len() >= MAX_CALL_DEPTH {
                             return Err(VmError::CallDepthExceeded);
                         }
@@ -680,7 +726,15 @@ pub fn interpret_program_with_heap_and_entry(
                             .get(heap_idx)
                             .ok_or(VmError::InvalidConstIndex(heap_idx))?
                             .clone();
-                        let callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
+                        let mut callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
+                        if let Some(captured) = state.dynamic_captures.get(heap_idx) {
+                            for (slot, value) in captured {
+                                let slot = *slot as usize;
+                                if slot < callee_locals.len() {
+                                    callee_locals[slot] = value.clone();
+                                }
+                            }
+                        }
                         if state.frames.len() >= MAX_CALL_DEPTH {
                             return Err(VmError::CallDepthExceeded);
                         }
@@ -852,6 +906,8 @@ mod tests {
             code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
             num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
         };
@@ -875,6 +931,8 @@ mod tests {
             ],
             constants: vec![ConstEntry::Int(1), ConstEntry::Int(2)],
             num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
         };
@@ -920,6 +978,8 @@ mod tests {
             ],
             constants: vec![ConstEntry::Int(42), ConstEntry::String("x".to_string())],
             num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
         };
@@ -957,6 +1017,8 @@ mod tests {
                 ConstEntry::String("x".to_string()),
             ],
             num_locals: 1,
+            named_locals: vec![],
+            captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
         };
@@ -1003,6 +1065,8 @@ mod tests {
                 ConstEntry::String("length".to_string()),
             ],
             num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
         };
