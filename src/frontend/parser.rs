@@ -1,4 +1,4 @@
-use crate::diagnostics::Span;
+use crate::diagnostics::{ErrorCode, Span};
 use crate::frontend::ast::*;
 use crate::frontend::token_type::{Token, TokenType};
 use crate::frontend::Lexer;
@@ -7,7 +7,7 @@ const MAX_RECURSION: u32 = 256;
 
 #[derive(Debug)]
 pub struct ParseError {
-    pub code: String,
+    pub code: ErrorCode,
     pub message: String,
     pub span: Option<Span>,
 }
@@ -80,7 +80,7 @@ impl Parser {
     fn check_recursion(&mut self) -> Result<(), ParseError> {
         if self.recursion_depth >= MAX_RECURSION {
             return Err(ParseError {
-                code: "JSINA-PARSE-001".to_string(),
+                code: ErrorCode::ParseRecursionLimit,
                 message: "parser recursion limit exceeded".to_string(),
                 span: self.current().map(|t| t.span),
             });
@@ -95,14 +95,14 @@ impl Parser {
 
     fn expect(&mut self, tt: TokenType) -> Result<Token, ParseError> {
         let token = self.current().ok_or_else(|| ParseError {
-            code: "JSINA-PARSE-002".to_string(),
+            code: ErrorCode::ParseUnexpectedEofExpected,
             message: format!("unexpected end of input, expected {:?}", tt),
             span: None,
         })?.clone();
 
         if std::mem::discriminant(&token.token_type) != std::mem::discriminant(&tt) {
             return Err(ParseError {
-                code: "JSINA-PARSE-003".to_string(),
+                code: ErrorCode::ParseUnexpectedToken,
                 message: format!("unexpected token {:?}, expected {:?}", token.token_type, tt),
                 span: Some(token.span),
             });
@@ -148,7 +148,7 @@ impl Parser {
 
     fn parse_statement_inner(&mut self) -> Result<Statement, ParseError> {
         let token = self.current().ok_or_else(|| ParseError {
-            code: "JSINA-PARSE-004".to_string(),
+            code: ErrorCode::ParseUnexpectedEof,
             message: "unexpected end of input".to_string(),
             span: None,
         })?.clone();
@@ -485,7 +485,7 @@ impl Parser {
         };
         if catch_param.is_none() && finally_body.is_none() {
             return Err(ParseError {
-                code: "JSINA-PARSE-007".to_string(),
+                code: ErrorCode::ParseTryNeedsCatchOrFinally,
                 message: "try must have catch or finally".to_string(),
                 span: Some(start_span),
             });
@@ -551,7 +551,7 @@ impl Parser {
                 });
             } else {
                 return Err(ParseError {
-                    code: "JSINA-PARSE-008".to_string(),
+                    code: ErrorCode::ParseSwitchExpectedCaseOrDefault,
                     message: "expected case or default in switch".to_string(),
                     span: Some(case_span),
                 });
@@ -723,7 +723,7 @@ impl Parser {
         let is_const = matches!(self.current().map(|t| &t.token_type), Some(TokenType::Const));
         if !is_var && !is_let && !is_const {
             return Err(ParseError {
-                code: "JSINA-PARSE-010".to_string(),
+                code: ErrorCode::ParseExpectedVarLetConst,
                 message: "expected var, let, or const".to_string(),
                 span: Some(start_span),
             });
@@ -750,14 +750,14 @@ impl Parser {
         let left = match &decl_stmt {
             Statement::VarDecl(v) => {
                 let d = v.declarations.first().ok_or_else(|| ParseError {
-                    code: "JSINA-PARSE-009".to_string(),
+                    code: ErrorCode::ParseForInOfDecl,
                     message: "for-in/for-of requires declaration".to_string(),
                     span: Some(start_span),
                 })?;
                 let name = match &d.binding {
                     crate::frontend::ast::Binding::Ident(n) => n.clone(),
                     _ => return Err(ParseError {
-                        code: "JSINA-PARSE-009".to_string(),
+                        code: ErrorCode::ParseForInOfDecl,
                         message: "for-in/for-of requires single identifier".to_string(),
                         span: Some(start_span),
                     }),
@@ -766,14 +766,14 @@ impl Parser {
             }
             Statement::LetDecl(l) => {
                 let d = l.declarations.first().ok_or_else(|| ParseError {
-                    code: "JSINA-PARSE-009".to_string(),
+                    code: ErrorCode::ParseForInOfDecl,
                     message: "for-in/for-of requires declaration".to_string(),
                     span: Some(start_span),
                 })?;
                 let name = match &d.binding {
                     crate::frontend::ast::Binding::Ident(n) => n.clone(),
                     _ => return Err(ParseError {
-                        code: "JSINA-PARSE-009".to_string(),
+                        code: ErrorCode::ParseForInOfDecl,
                         message: "for-in/for-of requires single identifier".to_string(),
                         span: Some(start_span),
                     }),
@@ -782,14 +782,14 @@ impl Parser {
             }
             Statement::ConstDecl(c) => {
                 let d = c.declarations.first().ok_or_else(|| ParseError {
-                    code: "JSINA-PARSE-009".to_string(),
+                    code: ErrorCode::ParseForInOfDecl,
                     message: "for-in/for-of requires declaration".to_string(),
                     span: Some(start_span),
                 })?;
                 let name = match &d.binding {
                     crate::frontend::ast::Binding::Ident(n) => n.clone(),
                     _ => return Err(ParseError {
-                        code: "JSINA-PARSE-009".to_string(),
+                        code: ErrorCode::ParseForInOfDecl,
                         message: "for-in/for-of requires single identifier".to_string(),
                         span: Some(start_span),
                     }),
@@ -798,7 +798,7 @@ impl Parser {
             }
             _ => {
                 return Err(ParseError {
-                    code: "JSINA-PARSE-009".to_string(),
+                    code: ErrorCode::ParseForInOfDecl,
                     message: "for-in/for-of left must be var/let/const declaration".to_string(),
                     span: Some(start_span),
                 });
@@ -839,7 +839,7 @@ impl Parser {
             Expression::Identifier(e) => crate::frontend::ast::ForInOfLeft::Identifier(e.name.clone()),
             _ => {
                 return Err(ParseError {
-                    code: "JSINA-PARSE-009".to_string(),
+                    code: ErrorCode::ParseForInOfDecl,
                     message: "for-in/for-of left must be identifier or var/let/const".to_string(),
                     span: Some(expr.span()),
                 });
@@ -910,7 +910,7 @@ impl Parser {
             let decl_span = init.as_ref().map(|e| start_span.merge(e.span())).unwrap_or(start_span);
             if matches!(&binding, Binding::ObjectPattern(_) | Binding::ArrayPattern(_)) && init.is_none() {
                 return Err(ParseError {
-                    code: "JSINA-PARSE-009".to_string(),
+                    code: ErrorCode::ParseForInOfDecl,
                     message: "destructuring declaration requires an initializer".to_string(),
                     span: Some(decl_span),
                 });
@@ -947,7 +947,7 @@ impl Parser {
                     let name = nested.names().into_iter().next().unwrap_or("").to_string();
                     if matches!(&nested, Binding::ObjectPattern(_) | Binding::ArrayPattern(_)) {
                         return Err(ParseError {
-                            code: "JSINA-PARSE-010".to_string(),
+                            code: ErrorCode::ParseExpectedVarLetConst,
                             message: "nested destructuring not yet supported".to_string(),
                             span: Some(key_tok.span),
                         });
@@ -980,7 +980,7 @@ impl Parser {
                     Some(tok.lexeme)
                 } else {
                     return Err(ParseError {
-                        code: "JSINA-PARSE-011".to_string(),
+                        code: ErrorCode::ParseExpectedIdentOrComma,
                         message: "expected identifier or comma in array pattern".to_string(),
                         span: self.current().map(|t| t.span),
                     });
@@ -1334,7 +1334,7 @@ impl Parser {
 
     fn parse_primary(&mut self) -> Result<Expression, ParseError> {
         let token = self.current().ok_or_else(|| ParseError {
-            code: "JSINA-PARSE-005".to_string(),
+            code: ErrorCode::ParseUnexpectedEofInExpr,
             message: "unexpected end of input in expression".to_string(),
             span: None,
         })?.clone();
@@ -1467,7 +1467,7 @@ impl Parser {
             }
             _ => {
                 return Err(ParseError {
-                    code: "JSINA-PARSE-006".to_string(),
+                    code: ErrorCode::ParseUnexpectedTokenInExpr,
                     message: format!("unexpected token in expression: {:?}", token.token_type),
                     span: Some(token.span),
                 });
@@ -1967,409 +1967,409 @@ mod tests {
     #[test]
     fn parse_error_unexpected_eof() {
         let err = parse_err("function 123");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_token() {
         let err = parse_err("function 123 () {}");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_missing_rparen() {
         let err = parse_err("function f( ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_missing_rbrace() {
         let err = parse_err("function f() { return 1 ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_expr_unexpected() {
         let err = parse_err("function f() { return + ; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_empty_function_name() {
         let err = parse_err("function () {}");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_missing_semicolon_for() {
         let err = parse_err("function f() { for (i = 0 i < 10;) {} }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_const_requires_init() {
         let err = parse_err("function f() { const ; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_const_requires_semicolon() {
         let err = parse_err("function f() { const x = 1 }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_empty_input_expr() {
         let err = parse_err("function f() { return ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_in_primary() {
         let err = parse_err("function f() { ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_missing_rparen_expr() {
         let err = parse_err("function f() { return (1 + 2; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_missing_rparen_while() {
         let err = parse_err("function f() { while (x return 1; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_missing_rparen_for() {
         let err = parse_err("function f() { for (;; return 1; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_missing_lbrace_block() {
         let err = parse_err("function f( ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_var_decl_no_name() {
         let err = parse_err("function f() { var ; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_let_decl_no_name() {
         let err = parse_err("function f() { let ; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_for_missing_semicolons() {
         let err = parse_err("function f() { for (i) {} }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_if_missing_condition() {
         let err = parse_err("function f() { if () return 1; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_while_missing_condition() {
         let err = parse_err("function f() { while () return 1; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_call_missing_rparen() {
         let err = parse_err("function f() { return foo(1; }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_missing_comma_in_call() {
         let err = parse_err("function f() { return foo(1 2); }");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_block() {
         let err = parse_err("function f() { ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_for() {
         let err = parse_err("function f() { for (i = 0; ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_params() {
         let err = parse_err("function f(a, ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_decl() {
         let err = parse_err("function f() { var x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_if() {
         let err = parse_err("function f() { if (");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_while() {
         let err = parse_err("function f() { while (");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_else() {
         let err = parse_err("function f() { if (true) {} else ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_for_body() {
         let err = parse_err("function f() { for (;;) ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_for_init() {
         let err = parse_err("function f() { for (var x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_for_update() {
         let err = parse_err("function f() { for (;; x + ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_for_cond() {
         let err = parse_err("function f() { for (; x < ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_block_nested() {
         let err = parse_err("function f() { { { ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_assign() {
         let err = parse_err("function f() { x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_binary() {
         let err = parse_err("function f() { return 1 + ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_unary() {
         let err = parse_err("function f() { return - ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_call() {
         let err = parse_err("function f() { return foo(1, ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_paren_expr() {
         let err = parse_err("function f() { return (1 + ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_assign_chain() {
         let err = parse_err("function f() { a = b = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_if_cond() {
         let err = parse_err("function f() { if (x ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_while_cond() {
         let err = parse_err("function f() { while (x ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_for_cond_expr() {
         let err = parse_err("function f() { for (; x ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_var_decl() {
         let err = parse_err("function f() { var x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_let_decl() {
         let err = parse_err("function f() { let x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_const_decl() {
         let err = parse_err("function f() { const x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_decl_multi() {
         let err = parse_err("function f() { var a = 1, b = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_if_then() {
         let err = parse_err("function f() { if (true) ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_else_then() {
         let err = parse_err("function f() { if (true) {} else ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_for_body_stmt() {
         let err = parse_err("function f() { for (;;) ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_block_stmt() {
         let err = parse_err("function f() { { ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_expr_stmt() {
         let err = parse_err("function f() { 1 + ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_return_expr() {
         let err = parse_err("function f() { return 1 + ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_unary_arg() {
         let err = parse_err("function f() { return ! ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_call_callee() {
         let err = parse_err("function f() { return ( ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_assign_right() {
         let err = parse_err("function f() { return x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_binary_right() {
         let err = parse_err("function f() { return 1 + ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_paren_expr_inner() {
         let err = parse_err("function f() { return (1 + ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_call_arg() {
         let err = parse_err("function f() { return foo(1, ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_assign_chain_right() {
         let err = parse_err("function f() { a = b = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_if_cond_expr() {
         let err = parse_err("function f() { if (x ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_while_cond_expr() {
         let err = parse_err("function f() { while (x ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_var_decl_init() {
         let err = parse_err("function f() { var x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_let_decl_init() {
         let err = parse_err("function f() { let x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_const_decl_init() {
         let err = parse_err("function f() { const x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_decl_multi_init() {
         let err = parse_err("function f() { var a = 1, b = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_if_then_stmt() {
         let err = parse_err("function f() { if (true) ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]
     fn parse_error_unexpected_eof_in_const_decl_initializer() {
         let err = parse_err("function f() { return const x = ");
-        assert!(err.code.contains("PARSE"));
+        assert!(err.code.as_str().contains("PARSE"));
     }
 
     #[test]

@@ -17,9 +17,9 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn error(code: impl Into<String>, message: impl Into<String>, primary_span: Option<Span>) -> Self {
+    pub fn error(code: impl std::fmt::Display, message: impl Into<String>, primary_span: Option<Span>) -> Self {
         Self {
-            code: code.into(),
+            code: code.to_string(),
             severity: Severity::Error,
             message: message.into(),
             primary_span,

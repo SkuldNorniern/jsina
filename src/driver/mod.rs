@@ -2,6 +2,7 @@ use crate::backend::translate_to_lamina_ir;
 use crate::diagnostics::Diagnostic;
 use crate::frontend::{check_early_errors, Lexer, Parser};
 use crate::host::{with_host, CliHost, HostHooks};
+use crate::diagnostics::ErrorCode;
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::vm::{Completion, Program};
 use std::sync::atomic::AtomicBool;
@@ -89,7 +90,7 @@ impl Driver {
             .find(|f| f.name.as_deref() == Some("main"))
             .or(funcs.first())
             .ok_or_else(|| DriverError::Diagnostic(vec![Diagnostic::error(
-                "JSINA-BC-001",
+                ErrorCode::BcNoFunction,
                 "no function to compile",
                 None,
             )]))?;
@@ -152,7 +153,7 @@ impl Driver {
             .iter()
             .position(|f| f.name.as_deref() == Some("main"))
             .ok_or_else(|| DriverError::Diagnostic(vec![Diagnostic::error(
-                "JSINA-RUN-001",
+                ErrorCode::RunNoMain,
                 "no main function found",
                 None,
             )]))?;
@@ -177,7 +178,7 @@ impl Driver {
             Completion::Normal(v) => v,
             Completion::Throw(v) => {
                 return Err(DriverError::Diagnostic(vec![Diagnostic::error(
-                    "JSINA-RUN-002",
+                    ErrorCode::RunUncaughtException,
                     format!("uncaught exception: {}", v),
                     None,
                 )]));

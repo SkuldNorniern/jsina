@@ -1,4 +1,4 @@
-use crate::diagnostics::{Diagnostic, Span};
+use crate::diagnostics::{Diagnostic, ErrorCode, Span};
 use crate::frontend::ast::*;
 
 fn is_use_strict(stmt: &Statement) -> bool {
@@ -22,7 +22,7 @@ fn block_is_strict(body: &[Statement]) -> bool {
 
 #[derive(Debug)]
 pub struct EarlyError {
-    pub code: String,
+    pub code: ErrorCode,
     pub message: String,
     pub span: Span,
 }
@@ -99,14 +99,14 @@ fn check_statement(
                 let name = param.name();
                 if fn_strict && is_strict_reserved(name) {
                     errors.push(EarlyError {
-                        code: "JSINA-EARLY-008".to_string(),
+                        code: ErrorCode::EarlyStrictReserved,
                         message: format!("'{}' may not be used as parameter name in strict mode", name),
                         span: f.span,
                     });
                 }
                 if let Some(prev) = scope.add_lexical(name, f.span) {
                     errors.push(EarlyError {
-                        code: "JSINA-EARLY-001".to_string(),
+                        code: ErrorCode::EarlyDuplicateParam,
                         message: format!("duplicate parameter name '{}'", name),
                         span: prev,
                     });
@@ -124,7 +124,7 @@ fn check_statement(
         Statement::Return(r) => {
             if !ctx.in_function {
                 errors.push(EarlyError {
-                    code: "JSINA-EARLY-002".to_string(),
+                    code: ErrorCode::EarlyReturnOutsideFunction,
                     message: "illegal return statement outside function".to_string(),
                     span: r.span,
                 });
@@ -133,13 +133,13 @@ fn check_statement(
         Statement::Break(b) => {
             if let Some(ref label) = b.label {
                 errors.push(EarlyError {
-                    code: "JSINA-EARLY-004".to_string(),
+                    code: ErrorCode::EarlyUnknownLabel,
                     message: format!("unknown label '{}'", label),
                     span: b.span,
                 });
             } else if !ctx.in_iteration && !ctx.in_switch {
                 errors.push(EarlyError {
-                    code: "JSINA-EARLY-005".to_string(),
+                    code: ErrorCode::EarlyBreakOutsideIteration,
                     message: "illegal break statement: not inside iteration or switch".to_string(),
                     span: b.span,
                 });
@@ -148,13 +148,13 @@ fn check_statement(
         Statement::Continue(c) => {
             if let Some(ref label) = c.label {
                 errors.push(EarlyError {
-                    code: "JSINA-EARLY-006".to_string(),
+                    code: ErrorCode::EarlyContinueUnknownLabel,
                     message: format!("unknown label '{}'", label),
                     span: c.span,
                 });
             } else if !ctx.in_iteration {
                 errors.push(EarlyError {
-                    code: "JSINA-EARLY-007".to_string(),
+                    code: ErrorCode::EarlyContinueOutsideIteration,
                     message: "illegal continue statement: not inside iteration".to_string(),
                     span: c.span,
                 });
@@ -165,14 +165,14 @@ fn check_statement(
                 for name in decl.binding.names() {
                     if ctx.strict && is_strict_reserved(name) {
                         errors.push(EarlyError {
-                            code: "JSINA-EARLY-008".to_string(),
+                            code: ErrorCode::EarlyStrictReserved,
                             message: format!("'{}' may not be used as binding in strict mode", name),
                             span: decl.span,
                         });
                     }
                     if let Some(prev) = scope.add_lexical(name, decl.span) {
                         errors.push(EarlyError {
-                            code: "JSINA-EARLY-003".to_string(),
+                            code: ErrorCode::EarlyDuplicateLexical,
                             message: format!("duplicate lexical declaration '{}'", name),
                             span: prev,
                         });
@@ -185,14 +185,14 @@ fn check_statement(
                 for name in decl.binding.names() {
                     if ctx.strict && is_strict_reserved(name) {
                         errors.push(EarlyError {
-                            code: "JSINA-EARLY-008".to_string(),
+                            code: ErrorCode::EarlyStrictReserved,
                             message: format!("'{}' may not be used as binding in strict mode", name),
                             span: decl.span,
                         });
                     }
                     if let Some(prev) = scope.add_lexical(name, decl.span) {
                         errors.push(EarlyError {
-                            code: "JSINA-EARLY-003".to_string(),
+                            code: ErrorCode::EarlyDuplicateLexical,
                             message: format!("duplicate lexical declaration '{}'", name),
                             span: prev,
                         });
@@ -205,7 +205,7 @@ fn check_statement(
                 for name in decl.binding.names() {
                     if ctx.strict && is_strict_reserved(name) {
                         errors.push(EarlyError {
-                            code: "JSINA-EARLY-008".to_string(),
+                            code: ErrorCode::EarlyStrictReserved,
                             message: format!("'{}' may not be used as binding in strict mode", name),
                             span: decl.span,
                         });
@@ -245,14 +245,14 @@ fn check_statement(
             if let ForInOfLeft::LetDecl(ref n) | ForInOfLeft::ConstDecl(ref n) = f.left {
                 if ctx.strict && is_strict_reserved(n) {
                     errors.push(EarlyError {
-                        code: "JSINA-EARLY-008".to_string(),
+                        code: ErrorCode::EarlyStrictReserved,
                         message: format!("'{}' may not be used as binding in strict mode", n),
                         span: f.span,
                     });
                 }
                 if let Some(prev) = scope.add_lexical(n, f.span) {
                     errors.push(EarlyError {
-                        code: "JSINA-EARLY-003".to_string(),
+                        code: ErrorCode::EarlyDuplicateLexical,
                         message: format!("duplicate lexical declaration '{}'", n),
                         span: prev,
                     });
@@ -273,14 +273,14 @@ fn check_statement(
             if let ForInOfLeft::LetDecl(ref n) | ForInOfLeft::ConstDecl(ref n) = f.left {
                 if ctx.strict && is_strict_reserved(n) {
                     errors.push(EarlyError {
-                        code: "JSINA-EARLY-008".to_string(),
+                        code: ErrorCode::EarlyStrictReserved,
                         message: format!("'{}' may not be used as binding in strict mode", n),
                         span: f.span,
                     });
                 }
                 if let Some(prev) = scope.add_lexical(n, f.span) {
                     errors.push(EarlyError {
-                        code: "JSINA-EARLY-003".to_string(),
+                        code: ErrorCode::EarlyDuplicateLexical,
                         message: format!("duplicate lexical declaration '{}'", n),
                         span: prev,
                     });
@@ -372,7 +372,7 @@ impl Scope {
 impl EarlyError {
     pub fn to_diagnostic(&self) -> Diagnostic {
         Diagnostic::error(
-            self.code.clone(),
+            self.code,
             self.message.clone(),
             Some(self.span),
         )
