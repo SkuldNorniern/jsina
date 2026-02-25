@@ -300,6 +300,7 @@ fn compile_init_block(
         return_span: span,
         throw_span: None,
         func_index,
+        block_func_index: None,
         func_expr_map,
         functions: None,
         functions_base: 0,
@@ -330,12 +331,17 @@ struct LowerCtx<'a> {
     return_span: Span,
     throw_span: Option<Span>,
     func_index: &'a HashMap<String, u32>,
+    block_func_index: Option<HashMap<String, u32>>,
     func_expr_map: &'a HashMap<NodeId, u32>,
     functions: Option<&'a mut Vec<HirFunction>>,
     functions_base: u32,
     loop_stack: Vec<(HirBlockId, HirBlockId)>,
     switch_break_stack: Vec<HirBlockId>,
     exception_regions: Vec<ExceptionRegion>,
+}
+
+fn get_func_index<'a>(ctx: &'a LowerCtx<'a>) -> &'a HashMap<String, u32> {
+    ctx.block_func_index.as_ref().unwrap_or(ctx.func_index)
 }
 
 fn loop_stack_push(ctx: &mut LowerCtx<'_>, continue_target: HirBlockId, exit_target: HirBlockId) {
@@ -459,6 +465,7 @@ fn compile_function(
         return_span: span,
         throw_span: None,
         func_index,
+        block_func_index: None,
         func_expr_map,
         functions,
         functions_base,
@@ -542,10 +549,42 @@ fn compile_function(
 fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, LowerError> {
     match stmt {
         Statement::Block(b) => {
+            let mut block_func_index = get_func_index(ctx).clone();
             let mut hit_return = false;
             for s in &b.body {
-                if compile_statement(s, ctx)? {
-                    hit_return = true;
+                if let Statement::FunctionDecl(nested) = s {
+                    if let Some(ref mut funcs) = ctx.functions {
+                        let hir = compile_function(
+                            nested,
+                            &block_func_index,
+                            ctx.func_expr_map,
+                            Some(funcs),
+                            ctx.functions_base,
+                        )?;
+                        funcs.push(hir);
+                        let idx = ctx.functions_base + (funcs.len() - 1) as u32;
+                        block_func_index.insert(nested.name.clone(), idx);
+                        let slot = *ctx.locals.entry(nested.name.clone()).or_insert_with(|| {
+                            let s = ctx.next_slot;
+                            ctx.next_slot += 1;
+                            s
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                            value: HirConst::Function(idx),
+                            span: nested.span,
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                            id: slot,
+                            span: nested.span,
+                        });
+                    }
+                    continue;
+                }
+                let prev = ctx.block_func_index.take();
+                ctx.block_func_index = Some(block_func_index.clone());
+                hit_return = compile_statement(s, ctx)? || hit_return;
+                ctx.block_func_index = prev;
+                if hit_return {
                     break;
                 }
             }
@@ -875,33 +914,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             }
             return Ok(false);
         }
-        Statement::FunctionDecl(nested) => {
-            if let Some(ref mut funcs) = ctx.functions {
-                let hir = compile_function(
-                    nested,
-                    ctx.func_index,
-                    ctx.func_expr_map,
-                    Some(funcs),
-                    ctx.functions_base,
-                )?;
-                funcs.push(hir);
-                let idx = ctx.functions_base + (funcs.len() - 1) as u32;
-                let slot = *ctx.locals.entry(nested.name.clone()).or_insert_with(|| {
-                    let s = ctx.next_slot;
-                    ctx.next_slot += 1;
-                    s
-                });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                    value: HirConst::Function(idx),
-                    span: nested.span,
-                });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                    id: slot,
-                    span: nested.span,
-                });
-            }
-            return Ok(false);
-        }
+        Statement::FunctionDecl(_) => return Ok(false),
         Statement::For(f) => {
             let cond_slot = ctx.next_slot;
             ctx.next_slot += 1;
@@ -1440,6 +1453,7 @@ fn compile_function_expr_to_hir(
         return_span: span,
         throw_span: None,
         func_index,
+        block_func_index: None,
         func_expr_map,
         functions: None,
         functions_base: 0,
@@ -1517,7 +1531,7 @@ fn compile_function_expr_to_hir(
 
 fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
     let locals = &ctx.locals;
-    let func_index = &ctx.func_index;
+    let func_index = get_func_index(ctx);
     match expr {
         Expression::Literal(e) => {
             match &e.value {
@@ -1567,7 +1581,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     id: slot,
                     span: e.span,
                 });
-            } else if let Some(&idx) = ctx.func_index.get(&e.name) {
+            } else if let Some(&idx) = func_index.get(&e.name) {
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                     value: HirConst::Function(idx),
                     span: e.span,
@@ -2924,7 +2938,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     });
                 }
                 Expression::Identifier(id) => {
-                    let idx = *ctx.func_index.get(&id.name).ok_or_else(|| {
+                    let idx = *get_func_index(ctx).get(&id.name).ok_or_else(|| {
                         LowerError::Unsupported(
                             format!("new on undefined constructor '{}'", id.name),
                             Some(n.span),
