@@ -74,12 +74,14 @@ impl std::error::Error for VmError {}
 pub struct Program {
     pub chunks: Vec<BytecodeChunk>,
     pub entry: usize,
+    pub init_entry: Option<usize>,
 }
 
 pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
     let program = Program {
         chunks: vec![chunk.clone()],
         entry: 0,
+        init_entry: None,
     };
     interpret_program(&program)
 }
@@ -187,6 +189,24 @@ pub fn interpret_program_with_heap(
     step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
 ) -> Result<Completion, VmError> {
+    if let Some(init_idx) = program.init_entry {
+        interpret_program_with_heap_and_entry(
+            program, heap, init_idx, trace, step_limit, cancel,
+        )?;
+    }
+    interpret_program_with_heap_and_entry(
+        program, heap, program.entry, trace, step_limit, cancel,
+    )
+}
+
+pub fn interpret_program_with_heap_and_entry(
+    program: &Program,
+    heap: &mut Heap,
+    entry: usize,
+    trace: bool,
+    step_limit: Option<u64>,
+    cancel: Option<&AtomicBool>,
+) -> Result<Completion, VmError> {
     let mut steps_remaining = step_limit;
     let mut stack: Vec<Value> = Vec::new();
     let mut getprop_cache = GetPropCache {
@@ -197,10 +217,10 @@ pub fn interpret_program_with_heap(
     };
     let entry_chunk = program
         .chunks
-        .get(program.entry)
-        .ok_or(VmError::InvalidConstIndex(program.entry))?;
+        .get(entry)
+        .ok_or(VmError::InvalidConstIndex(entry))?;
     let mut frames: Vec<Frame> = vec![Frame {
-        chunk_index: program.entry,
+        chunk_index: entry,
         pc: 0,
         locals: (0..entry_chunk.num_locals).map(|_| Value::Undefined).collect(),
         this_value: Value::Undefined,
@@ -744,6 +764,7 @@ pub fn interpret_program_with_heap(
                     Value::Date(_) => primitive_date_method(&key_str),
                     Value::Number(_) | Value::Int(_) => primitive_number_method(&key_str),
                     Value::Bool(_) => primitive_bool_method(&key_str),
+                    Value::Function(i) => heap.get_function_prop(*i, &key_str),
                     _ => Value::Undefined,
                 };
                 stack.push(result);
@@ -772,6 +793,7 @@ pub fn interpret_program_with_heap(
                         heap.set_array_prop(*id, &key_str, value.clone());
                     }
                     Value::Map(id) => heap.map_set(*id, &key_str, value.clone()),
+                    Value::Function(i) => heap.set_function_prop(*i, &key_str, value.clone()),
                     _ => {}
                 }
                 stack.push(value);
@@ -798,6 +820,7 @@ pub fn interpret_program_with_heap(
                     Value::Date(_) => primitive_date_method(&key_str),
                     Value::Number(_) | Value::Int(_) => primitive_number_method(&key_str),
                     Value::Bool(_) => primitive_bool_method(&key_str),
+                    Value::Function(i) => heap.get_function_prop(*i, &key_str),
                     _ => Value::Undefined,
                 };
                 stack.push(result);
@@ -811,6 +834,7 @@ pub fn interpret_program_with_heap(
                     Value::Object(id) => heap.set_prop(*id, &key_str, value.clone()),
                     Value::Array(id) => heap.set_array_prop(*id, &key_str, value.clone()),
                     Value::Map(id) => heap.map_set(*id, &key_str, value.clone()),
+                    Value::Function(i) => heap.set_function_prop(*i, &key_str, value.clone()),
                     _ => {}
                 }
                 stack.push(value);

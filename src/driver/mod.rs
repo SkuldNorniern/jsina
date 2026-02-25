@@ -157,9 +157,13 @@ impl Driver {
                 None,
             )]))?;
         let chunks: Vec<_> = funcs.iter().map(|f| hir_to_bytecode(f).chunk).collect();
+        let init_entry = funcs
+            .iter()
+            .position(|f| f.name.as_deref() == Some("__init__"));
         let program = Program {
             chunks,
             entry,
+            init_entry,
         };
         let completion = crate::vm::interpret_program_with_limit_and_cancel(
             &program,

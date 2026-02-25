@@ -20,6 +20,7 @@ pub struct Heap {
     symbols: Vec<Option<String>>,
     error_object_ids: HashSet<usize>,
     global_object_id: usize,
+    function_props: HashMap<usize, HashMap<String, Value>>,
 }
 
 impl Default for Heap {
@@ -34,6 +35,7 @@ impl Default for Heap {
             symbols: Vec::new(),
             error_object_ids: HashSet::new(),
             global_object_id: 0,
+            function_props: HashMap::new(),
         };
         heap.init_globals();
         heap
@@ -210,6 +212,20 @@ impl Heap {
 
     pub fn get_global(&self, name: &str) -> Value {
         self.get_prop(self.global_object_id, name)
+    }
+
+    pub fn get_function_prop(&self, func_index: usize, key: &str) -> Value {
+        self.function_props
+            .get(&func_index)
+            .and_then(|m| m.get(key).cloned())
+            .unwrap_or(Value::Undefined)
+    }
+
+    pub fn set_function_prop(&mut self, func_index: usize, key: &str, value: Value) {
+        self.function_props
+            .entry(func_index)
+            .or_default()
+            .insert(key.to_string(), value);
     }
 
     pub fn global_object(&self) -> usize {

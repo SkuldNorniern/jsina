@@ -41,6 +41,7 @@ pub fn eval(args: &[Value], heap: &mut Heap) -> Result<Value, super::BuiltinErro
     let program = Program {
         chunks,
         entry,
+        init_entry: None,
     };
     match interpret_program_with_heap(&program, heap, false, None, None) {
         Ok(Completion::Return(v)) => Ok(v),

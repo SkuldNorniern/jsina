@@ -207,11 +207,16 @@ fn collect_function_exprs_expr(expr: &Expression, out: &mut Vec<(NodeId, Functio
 pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
     let mut func_index: HashMap<String, u32> = HashMap::new();
     let mut func_decls: Vec<&FunctionDeclStmt> = Vec::new();
+    let mut top_level_expr_stmts: Vec<&Statement> = Vec::new();
     for stmt in &script.body {
-        if let Statement::FunctionDecl(f) = stmt {
-            let idx = func_index.len() as u32;
-            func_index.insert(f.name.clone(), idx);
-            func_decls.push(f);
+        match stmt {
+            Statement::FunctionDecl(f) => {
+                let idx = func_index.len() as u32;
+                func_index.insert(f.name.clone(), idx);
+                func_decls.push(f);
+            }
+            Statement::Expression(_) => top_level_expr_stmts.push(stmt),
+            _ => {}
         }
     }
     let func_exprs = collect_function_exprs(script);
@@ -221,13 +226,100 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
         func_expr_map.insert(*nid, num_declared + i as u32);
     }
     let mut functions = Vec::new();
+    if !top_level_expr_stmts.is_empty() {
+        let init_span = top_level_expr_stmts
+            .first()
+            .and_then(|s| match s {
+                Statement::Expression(e) => Some(e.span),
+                _ => None,
+            })
+            .unwrap_or_else(|| Span::point(crate::diagnostics::Position::start()));
+        let init_body = BlockStmt {
+            id: NodeId(0),
+            span: init_span,
+            body: top_level_expr_stmts.iter().map(|s| (*s).clone()).collect(),
+        };
+        let func_index_init: HashMap<String, u32> = func_index
+            .iter()
+            .map(|(k, v)| (k.clone(), v + 1))
+            .collect();
+        let func_expr_map_init: HashMap<NodeId, u32> = func_expr_map
+            .iter()
+            .map(|(k, v)| (*k, v + 1))
+            .collect();
+        functions.push(compile_init_block(
+            &init_body,
+            &func_index_init,
+            &func_expr_map_init,
+        )?);
+    }
+    let func_index_comp: HashMap<String, u32> = if functions.is_empty() {
+        func_index.clone()
+    } else {
+        func_index.iter().map(|(k, v)| (k.clone(), v + 1)).collect()
+    };
+    let func_expr_map_comp: HashMap<NodeId, u32> = if functions.is_empty() {
+        func_expr_map.clone()
+    } else {
+        func_expr_map.iter().map(|(k, v)| (*k, v + 1)).collect()
+    };
     for f in func_decls {
-        functions.push(compile_function(f, &func_index, &func_expr_map)?);
+        let mut nested_funcs = Vec::new();
+        let base = functions.len() as u32;
+        let hir = compile_function(
+            f,
+            &func_index_comp,
+            &func_expr_map_comp,
+            Some(&mut nested_funcs),
+            base,
+        )?;
+        functions.extend(nested_funcs);
+        functions.push(hir);
     }
     for (_, fe) in &func_exprs {
-        functions.push(compile_function_expr_to_hir(fe, &func_index, &func_expr_map)?);
+        functions.push(compile_function_expr_to_hir(fe, &func_index_comp, &func_expr_map_comp)?);
     }
     Ok(functions)
+}
+
+fn compile_init_block(
+    block: &BlockStmt,
+    func_index: &HashMap<String, u32>,
+    func_expr_map: &HashMap<NodeId, u32>,
+) -> Result<HirFunction, LowerError> {
+    let span = block.span;
+    let mut ctx = LowerCtx {
+        blocks: vec![HirBlock {
+            id: 0,
+            ops: Vec::new(),
+            terminator: HirTerminator::Return { span },
+        }],
+        current_block: 0,
+        locals: HashMap::new(),
+        next_slot: 0,
+        return_span: span,
+        throw_span: None,
+        func_index,
+        func_expr_map,
+        functions: None,
+        functions_base: 0,
+        loop_stack: Vec::new(),
+        switch_break_stack: Vec::new(),
+        exception_regions: Vec::new(),
+    };
+    for s in &block.body {
+        let _ = compile_statement(s, &mut ctx)?;
+    }
+    ctx.blocks[ctx.current_block].terminator = HirTerminator::Return { span };
+    Ok(HirFunction {
+        name: Some("__init__".to_string()),
+        params: Vec::new(),
+        num_locals: ctx.next_slot,
+        rest_param_index: None,
+        entry_block: 0,
+        blocks: ctx.blocks,
+        exception_regions: ctx.exception_regions,
+    })
 }
 
 struct LowerCtx<'a> {
@@ -239,6 +331,8 @@ struct LowerCtx<'a> {
     throw_span: Option<Span>,
     func_index: &'a HashMap<String, u32>,
     func_expr_map: &'a HashMap<NodeId, u32>,
+    functions: Option<&'a mut Vec<HirFunction>>,
+    functions_base: u32,
     loop_stack: Vec<(HirBlockId, HirBlockId)>,
     switch_break_stack: Vec<HirBlockId>,
     exception_regions: Vec<ExceptionRegion>,
@@ -349,6 +443,8 @@ fn compile_function(
     f: &FunctionDeclStmt,
     func_index: &HashMap<String, u32>,
     func_expr_map: &HashMap<NodeId, u32>,
+    functions: Option<&mut Vec<HirFunction>>,
+    functions_base: u32,
 ) -> Result<HirFunction, LowerError> {
     let span = f.span;
     let mut ctx = LowerCtx {
@@ -364,6 +460,8 @@ fn compile_function(
         throw_span: None,
         func_index,
         func_expr_map,
+        functions,
+        functions_base,
         loop_stack: Vec::new(),
         switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
@@ -777,7 +875,33 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             }
             return Ok(false);
         }
-        Statement::FunctionDecl(_) => return Ok(false),
+        Statement::FunctionDecl(nested) => {
+            if let Some(ref mut funcs) = ctx.functions {
+                let hir = compile_function(
+                    nested,
+                    ctx.func_index,
+                    ctx.func_expr_map,
+                    Some(funcs),
+                    ctx.functions_base,
+                )?;
+                funcs.push(hir);
+                let idx = ctx.functions_base + (funcs.len() - 1) as u32;
+                let slot = *ctx.locals.entry(nested.name.clone()).or_insert_with(|| {
+                    let s = ctx.next_slot;
+                    ctx.next_slot += 1;
+                    s
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                    value: HirConst::Function(idx),
+                    span: nested.span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                    id: slot,
+                    span: nested.span,
+                });
+            }
+            return Ok(false);
+        }
         Statement::For(f) => {
             let cond_slot = ctx.next_slot;
             ctx.next_slot += 1;
@@ -1317,6 +1441,8 @@ fn compile_function_expr_to_hir(
         throw_span: None,
         func_index,
         func_expr_map,
+        functions: None,
+        functions_base: 0,
         loop_stack: Vec::new(),
         switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
@@ -3010,6 +3136,7 @@ mod tests {
         let program = crate::vm::Program {
             chunks: chunks.clone(),
             entry: funcs.iter().position(|f| f.name.as_deref() == Some("main")).expect("main"),
+            init_entry: None,
         };
         let completion = crate::vm::interpret_program(&program).expect("interpret");
         if let crate::vm::Completion::Return(v) = completion {
