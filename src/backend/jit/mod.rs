@@ -1,0 +1,38 @@
+mod error;
+mod lower;
+mod runtime;
+mod session;
+mod source;
+
+pub use error::BackendError;
+pub use session::JitSession;
+pub use source::{run_via_jit, translate_to_lamina_ir};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::bytecode::{BytecodeChunk, ConstEntry};
+
+    #[test]
+    fn translate_simple_main() {
+        let ir = translate_to_lamina_ir("function main() { return 42; }").expect("translate");
+        assert!(ir.contains("ret.i64 42"));
+        assert!(ir.contains("@main"));
+    }
+
+    #[test]
+    fn jit_session_trivial_add() {
+        let chunk = BytecodeChunk {
+            code: vec![0x01, 0, 0x01, 1, 0x10, 0x20],
+            constants: vec![ConstEntry::Int(10), ConstEntry::Int(32)],
+            num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
+            rest_param_index: None,
+            handlers: vec![],
+        };
+        let mut jit = JitSession::new();
+        let result = jit.try_compile(0, &chunk).expect("compile");
+        assert_eq!(result, Some(42));
+    }
+}
