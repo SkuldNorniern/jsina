@@ -2827,6 +2827,15 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
+                    } else if id.name == "eval" {
+                        for arg in &e.args {
+                            compile_expression(arg, ctx)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Eval0,
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
                     } else if GLOBAL_NAMES.contains(&id.name.as_str()) {
                         ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                             value: HirConst::Global("globalThis".to_string()),
