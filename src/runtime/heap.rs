@@ -58,6 +58,12 @@ impl Heap {
         self.set_prop(obj_id, "seal", Value::Builtin(0x45));
         self.set_prop(obj_id, "setPrototypeOf", Value::Builtin(0x46));
         self.set_prop(obj_id, "propertyIsEnumerable", Value::Builtin(0x47));
+        self.set_prop(obj_id, "getPrototypeOf", Value::Builtin(0x48));
+        self.set_prop(obj_id, "freeze", Value::Builtin(0x49));
+        self.set_prop(obj_id, "isExtensible", Value::Builtin(0x4A));
+        self.set_prop(obj_id, "isFrozen", Value::Builtin(0x4B));
+        self.set_prop(obj_id, "isSealed", Value::Builtin(0x4C));
+        self.set_prop(obj_id, "hasOwn", Value::Builtin(0x4D));
         self.set_prop(global_id, "Object", Value::Object(obj_id));
 
         let arr_id = self.alloc_object();
@@ -102,7 +108,14 @@ impl Heap {
         self.set_prop(str_id, "fromCharCode", Value::Builtin(0x66));
         self.set_prop(global_id, "String", Value::Object(str_id));
 
-        self.set_prop(global_id, "Number", Value::Builtin(0x52));
+        let num_id = self.alloc_object();
+        self.set_prop(num_id, "__call__", Value::Builtin(0x52));
+        self.set_prop(num_id, "EPSILON", Value::Number(2.0_f64.powi(-52)));
+        self.set_prop(num_id, "MIN_SAFE_INTEGER", Value::Number(-9007199254740991.0));
+        self.set_prop(num_id, "MAX_SAFE_INTEGER", Value::Number(9007199254740991.0));
+        self.set_prop(num_id, "isSafeInteger", Value::Builtin(0x54));
+        self.set_prop(global_id, "Number", Value::Object(num_id));
+
         self.set_prop(global_id, "Boolean", Value::Builtin(0x53));
 
         let err_id = self.alloc_object();
@@ -137,6 +150,7 @@ impl Heap {
 
         let regexp_id = self.alloc_object();
         self.set_prop(regexp_id, "escape", Value::Builtin(0x80));
+        self.set_prop(regexp_id, "__call__", Value::Builtin(0x81));
         self.set_prop(global_id, "RegExp", Value::Object(regexp_id));
 
         let map_id = self.alloc_object();

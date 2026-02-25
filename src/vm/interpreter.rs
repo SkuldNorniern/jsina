@@ -738,9 +738,12 @@ pub fn interpret_program_with_heap(
                         if let Ok(idx) = key_str.parse::<usize>() {
                             s.chars().nth(idx).map(|c| Value::String(c.to_string())).unwrap_or(Value::Undefined)
                         } else {
-                            Value::Undefined
+                            primitive_string_method(&key_str)
                         }
                     }
+                    Value::Date(_) => primitive_date_method(&key_str),
+                    Value::Number(_) | Value::Int(_) => primitive_number_method(&key_str),
+                    Value::Bool(_) => primitive_bool_method(&key_str),
                     _ => Value::Undefined,
                 };
                 stack.push(result);
@@ -789,9 +792,12 @@ pub fn interpret_program_with_heap(
                         if let Ok(idx) = key_str.parse::<usize>() {
                             s.chars().nth(idx).map(|c| Value::String(c.to_string())).unwrap_or(Value::Undefined)
                         } else {
-                            Value::Undefined
+                            primitive_string_method(&key_str)
                         }
                     }
+                    Value::Date(_) => primitive_date_method(&key_str),
+                    Value::Number(_) | Value::Int(_) => primitive_number_method(&key_str),
+                    Value::Bool(_) => primitive_bool_method(&key_str),
                     _ => Value::Undefined,
                 };
                 stack.push(result);
@@ -928,6 +934,43 @@ fn is_truthy(v: &Value) -> bool {
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
         Value::String(_) | Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::Builtin(_) => true,
+    }
+}
+
+fn primitive_string_method(key: &str) -> Value {
+    match key {
+        "split" => Value::Builtin(0x60),
+        "trim" => Value::Builtin(0x61),
+        "toLowerCase" => Value::Builtin(0x62),
+        "toUpperCase" => Value::Builtin(0x63),
+        "charAt" => Value::Builtin(0x64),
+        "repeat" => Value::Builtin(0x65),
+        _ => Value::Undefined,
+    }
+}
+
+fn primitive_date_method(key: &str) -> Value {
+    match key {
+        "getTime" => Value::Builtin(0xC2),
+        "toString" => Value::Builtin(0xC3),
+        "toISOString" => Value::Builtin(0xC4),
+        _ => Value::Undefined,
+    }
+}
+
+fn primitive_number_method(key: &str) -> Value {
+    match key {
+        "toString" => Value::Builtin(0x55),
+        "valueOf" => Value::Builtin(0x56),
+        _ => Value::Undefined,
+    }
+}
+
+fn primitive_bool_method(key: &str) -> Value {
+    match key {
+        "toString" => Value::Builtin(0x55),
+        "valueOf" => Value::Builtin(0x56),
+        _ => Value::Undefined,
     }
 }
 

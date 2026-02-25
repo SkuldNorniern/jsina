@@ -71,3 +71,21 @@ pub fn parse_float(args: &[Value], _heap: &mut Heap) -> Value {
     let n: f64 = buf.parse().unwrap_or(f64::NAN);
     number_to_value(n)
 }
+
+pub fn is_safe_integer(args: &[Value], _heap: &mut Heap) -> Value {
+    let n = args.first().map(to_number).unwrap_or(f64::NAN);
+    let ok = n.is_finite()
+        && n.fract() == 0.0
+        && n >= -9007199254740991.0
+        && n <= 9007199254740991.0;
+    Value::Bool(ok)
+}
+
+pub fn primitive_to_string(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
+    Value::String(s)
+}
+
+pub fn primitive_value_of(args: &[Value], _heap: &mut Heap) -> Value {
+    args.first().cloned().unwrap_or(Value::Undefined)
+}

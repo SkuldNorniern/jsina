@@ -198,11 +198,20 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "Object", name: "seal", entry: BuiltinEntry::Normal(object::seal) },
     BuiltinDef { category: "Object", name: "setPrototypeOf", entry: BuiltinEntry::Normal(object::set_prototype_of) },
     BuiltinDef { category: "Object", name: "propertyIsEnumerable", entry: BuiltinEntry::Normal(object::property_is_enumerable) },
+    BuiltinDef { category: "Object", name: "getPrototypeOf", entry: BuiltinEntry::Normal(object::get_prototype_of) },
+    BuiltinDef { category: "Object", name: "freeze", entry: BuiltinEntry::Normal(object::freeze) },
+    BuiltinDef { category: "Object", name: "isExtensible", entry: BuiltinEntry::Normal(object::is_extensible) },
+    BuiltinDef { category: "Object", name: "isFrozen", entry: BuiltinEntry::Normal(object::is_frozen) },
+    BuiltinDef { category: "Object", name: "isSealed", entry: BuiltinEntry::Normal(object::is_sealed) },
+    BuiltinDef { category: "Object", name: "hasOwn", entry: BuiltinEntry::Normal(object::has_own) },
     // Type 0..3 (String, Error, Number, Boolean constructors)
     BuiltinDef { category: "Type", name: "String", entry: BuiltinEntry::Normal(string::string) },
     BuiltinDef { category: "Type", name: "Error", entry: BuiltinEntry::Normal(error::error) },
     BuiltinDef { category: "Type", name: "Number", entry: BuiltinEntry::Normal(number::number) },
     BuiltinDef { category: "Type", name: "Boolean", entry: BuiltinEntry::Normal(boolean::boolean) },
+    BuiltinDef { category: "Number", name: "isSafeInteger", entry: BuiltinEntry::Normal(number::is_safe_integer) },
+    BuiltinDef { category: "Number", name: "primitiveToString", entry: BuiltinEntry::Normal(number::primitive_to_string) },
+    BuiltinDef { category: "Number", name: "primitiveValueOf", entry: BuiltinEntry::Normal(number::primitive_value_of) },
     // String 0..6 (methods)
     BuiltinDef { category: "String", name: "split", entry: BuiltinEntry::Normal(string::split) },
     BuiltinDef { category: "String", name: "trim", entry: BuiltinEntry::Normal(string::trim) },
@@ -293,55 +302,64 @@ static ENCODED_TO_INDEX: [u8; 256] = {
     t[0x45] = 29;
     t[0x46] = 30;
     t[0x47] = 31;
-    t[0x50] = 32;
-    t[0x51] = 33;
-    t[0x52] = 34;
-    t[0x53] = 35;
-    t[0x60] = 36;
-    t[0x61] = 37;
-    t[0x62] = 38;
-    t[0x63] = 39;
-    t[0x64] = 40;
-    t[0x65] = 41;
-    t[0x66] = 42;
-    t[0x70] = 43;
-    t[0x80] = 44;
-    t[0x81] = 45;
-    t[0x82] = 46;
-    t[0x90] = 47;
-    t[0x91] = 48;
-    t[0x92] = 49;
-    t[0x93] = 50;
-    t[0xA0] = 51;
-    t[0xA1] = 52;
-    t[0xA2] = 53;
-    t[0xA3] = 54;
-    t[0xB0] = 55;
-    t[0xC0] = 56;
-    t[0xC1] = 57;
-    t[0xC2] = 58;
-    t[0xC3] = 59;
-    t[0xC4] = 60;
-    t[0xD0] = 61;
-    t[0xD1] = 62;
-    t[0xD2] = 63;
-    t[0xD3] = 64;
-    t[0xD4] = 65;
-    t[0xD5] = 66;
-    t[0xD6] = 67;
-    t[0xD7] = 68;
-    t[0xD8] = 69;
-    t[0xD9] = 70;
-    t[0xDA] = 71;
-    t[0xDB] = 72;
-    t[0xDC] = 73;
-    t[0xDD] = 74;
-    t[0xDE] = 75;
-    t[0xDF] = 76;
-    t[0xE0] = 77;
-    t[0xE1] = 78;
-    t[0xE2] = 79;
-    t[0xE3] = 80;
+    t[0x48] = 32;
+    t[0x49] = 33;
+    t[0x4A] = 34;
+    t[0x4B] = 35;
+    t[0x4C] = 36;
+    t[0x4D] = 37;
+    t[0x50] = 38;
+    t[0x51] = 39;
+    t[0x52] = 40;
+    t[0x53] = 41;
+    t[0x54] = 42;
+    t[0x55] = 43;
+    t[0x56] = 44;
+    t[0x60] = 45;
+    t[0x61] = 46;
+    t[0x62] = 47;
+    t[0x63] = 48;
+    t[0x64] = 49;
+    t[0x65] = 50;
+    t[0x66] = 51;
+    t[0x70] = 52;
+    t[0x80] = 53;
+    t[0x81] = 54;
+    t[0x82] = 55;
+    t[0x90] = 56;
+    t[0x91] = 57;
+    t[0x92] = 58;
+    t[0x93] = 59;
+    t[0xA0] = 60;
+    t[0xA1] = 61;
+    t[0xA2] = 62;
+    t[0xA3] = 63;
+    t[0xB0] = 64;
+    t[0xC0] = 65;
+    t[0xC1] = 66;
+    t[0xC2] = 67;
+    t[0xC3] = 68;
+    t[0xC4] = 69;
+    t[0xD0] = 70;
+    t[0xD1] = 71;
+    t[0xD2] = 72;
+    t[0xD3] = 73;
+    t[0xD4] = 74;
+    t[0xD5] = 75;
+    t[0xD6] = 76;
+    t[0xD7] = 77;
+    t[0xD8] = 78;
+    t[0xD9] = 79;
+    t[0xDA] = 80;
+    t[0xDB] = 81;
+    t[0xDC] = 82;
+    t[0xDD] = 83;
+    t[0xDE] = 84;
+    t[0xDF] = 85;
+    t[0xE0] = 86;
+    t[0xE1] = 87;
+    t[0xE2] = 88;
+    t[0xE3] = 89;
     t
 };
 
@@ -378,12 +396,13 @@ pub fn all() -> &'static [BuiltinDef] {
     BUILTINS
 }
 
-const INDEX_TO_ENCODED: [u8; 81] = [
+const INDEX_TO_ENCODED: [u8; 90] = [
     0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
     0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
     0x30, 0x31,
     0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
-    0x50, 0x51, 0x52, 0x53,
+    0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D,
+    0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56,
     0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
     0x70,
     0x80, 0x81, 0x82,

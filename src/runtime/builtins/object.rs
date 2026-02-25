@@ -80,3 +80,38 @@ pub fn property_is_enumerable(args: &[Value], heap: &mut Heap) -> Value {
     };
     Value::Bool(result)
 }
+
+pub fn get_prototype_of(args: &[Value], heap: &mut Heap) -> Value {
+    match args.first() {
+        Some(Value::Object(id)) => match heap.get_proto(*id) {
+            Some(proto_id) => Value::Object(proto_id),
+            None => Value::Null,
+        },
+        _ => Value::Null,
+    }
+}
+
+pub fn freeze(args: &[Value], _heap: &mut Heap) -> Value {
+    args.first().cloned().unwrap_or(Value::Undefined)
+}
+
+pub fn is_extensible(args: &[Value], _heap: &mut Heap) -> Value {
+    Value::Bool(args.first().map(|v| matches!(v, Value::Object(_))).unwrap_or(false))
+}
+
+pub fn is_frozen(_args: &[Value], _heap: &mut Heap) -> Value {
+    Value::Bool(false)
+}
+
+pub fn is_sealed(_args: &[Value], _heap: &mut Heap) -> Value {
+    Value::Bool(false)
+}
+
+pub fn has_own(args: &[Value], heap: &mut Heap) -> Value {
+    let key = args.get(1).map(to_prop_key).unwrap_or_default();
+    let result = match args.first() {
+        Some(Value::Object(id)) => heap.object_has_own_property(*id, &key),
+        _ => false,
+    };
+    Value::Bool(result)
+}

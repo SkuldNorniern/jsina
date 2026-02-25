@@ -1967,6 +1967,56 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 2,
                             span: e.span,
                         });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "getPrototypeOf" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object8,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "freeze" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object9,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "isExtensible" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object10,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "isFrozen" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object11,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "isSealed" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object12,
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object") && prop == "hasOwn" && e.args.len() == 2 {
+                        compile_expression(&e.args[0], ctx)?;
+                        compile_expression(&e.args[1], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Object13,
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Number") && prop == "isSafeInteger" && e.args.len() == 1 {
+                        compile_expression(&e.args[0], ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: crate::ir::hir::BuiltinId::Number0,
+                            argc: 1,
+                            span: e.span,
+                        });
                     } else if matches!(obj_name.as_deref(), Some(s) if s == "String") && prop == "fromCharCode" {
                         for arg in &e.args {
                             compile_expression(arg, ctx)?;
@@ -2526,6 +2576,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
+                Expression::Identifier(id) if id.name == "RegExp" => {
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::RegExp1,
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                }
                 Expression::Identifier(id) if id.name == "parseInt" => {
                     for arg in &e.args {
                         compile_expression(arg, ctx)?;
@@ -2715,6 +2775,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: crate::ir::hir::BuiltinId::ArrayBuffer0,
+                        argc: n.args.len() as u32,
+                        span: n.span,
+                    });
+                }
+                Expression::Identifier(id) if id.name == "RegExp" => {
+                    for arg in &n.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: crate::ir::hir::BuiltinId::RegExp1,
                         argc: n.args.len() as u32,
                         span: n.span,
                     });
