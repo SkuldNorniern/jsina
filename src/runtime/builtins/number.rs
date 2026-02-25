@@ -41,6 +41,16 @@ pub fn parse_int(args: &[Value], _heap: &mut Heap) -> Value {
     number_to_value((n * sign) as f64)
 }
 
+pub fn is_nan(args: &[Value], _heap: &mut Heap) -> Value {
+    let n = args.first().map(to_number).unwrap_or(f64::NAN);
+    Value::Bool(n.is_nan())
+}
+
+pub fn is_finite(args: &[Value], _heap: &mut Heap) -> Value {
+    let n = args.first().map(to_number).unwrap_or(f64::NAN);
+    Value::Bool(n.is_finite())
+}
+
 pub fn parse_float(args: &[Value], _heap: &mut Heap) -> Value {
     let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
     let s = s.trim_start();
@@ -88,4 +98,37 @@ pub fn primitive_to_string(args: &[Value], _heap: &mut Heap) -> Value {
 
 pub fn primitive_value_of(args: &[Value], _heap: &mut Heap) -> Value {
     args.first().cloned().unwrap_or(Value::Undefined)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_nan_returns_true_for_nan() {
+        let mut heap = Heap::new();
+        assert_eq!(is_nan(&[Value::Number(f64::NAN)], &mut heap), Value::Bool(true));
+        assert_eq!(is_nan(&[Value::Undefined], &mut heap), Value::Bool(true));
+    }
+
+    #[test]
+    fn is_nan_returns_false_for_number() {
+        let mut heap = Heap::new();
+        assert_eq!(is_nan(&[Value::Number(1.0)], &mut heap), Value::Bool(false));
+        assert_eq!(is_nan(&[Value::Int(0)], &mut heap), Value::Bool(false));
+    }
+
+    #[test]
+    fn is_finite_returns_true_for_finite() {
+        let mut heap = Heap::new();
+        assert_eq!(is_finite(&[Value::Number(1.0)], &mut heap), Value::Bool(true));
+        assert_eq!(is_finite(&[Value::Int(0)], &mut heap), Value::Bool(true));
+    }
+
+    #[test]
+    fn is_finite_returns_false_for_nan_or_infinity() {
+        let mut heap = Heap::new();
+        assert_eq!(is_finite(&[Value::Number(f64::NAN)], &mut heap), Value::Bool(false));
+        assert_eq!(is_finite(&[Value::Number(f64::INFINITY)], &mut heap), Value::Bool(false));
+    }
 }

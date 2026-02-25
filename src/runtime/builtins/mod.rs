@@ -21,6 +21,8 @@ mod typed_array;
 mod dollar262;
 mod encode;
 mod eval;
+mod function_ctor;
+mod reflect;
 
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -276,12 +278,17 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef { category: "Global", name: "encodeURIComponent", entry: BuiltinEntry::Normal(encode::encode_uri_component_builtin) },
     BuiltinDef { category: "Global", name: "parseInt", entry: BuiltinEntry::Normal(number::parse_int) },
     BuiltinDef { category: "Global", name: "parseFloat", entry: BuiltinEntry::Normal(number::parse_float) },
+    BuiltinDef { category: "Global", name: "isNaN", entry: BuiltinEntry::Normal(number::is_nan) },
+    BuiltinDef { category: "Global", name: "isFinite", entry: BuiltinEntry::Normal(number::is_finite) },
     BuiltinDef { category: "Global", name: "decodeURI", entry: BuiltinEntry::Throwing(encode::decode_uri_builtin) },
     BuiltinDef { category: "Global", name: "decodeURIComponent", entry: BuiltinEntry::Throwing(encode::decode_uri_component_builtin) },
     BuiltinDef { category: "TypedArray", name: "Int32Array", entry: BuiltinEntry::Normal(typed_array::int32_array) },
     BuiltinDef { category: "TypedArray", name: "Uint8Array", entry: BuiltinEntry::Normal(typed_array::uint8_array) },
     BuiltinDef { category: "TypedArray", name: "Uint8ClampedArray", entry: BuiltinEntry::Normal(typed_array::uint8_clamped_array) },
     BuiltinDef { category: "TypedArray", name: "ArrayBuffer", entry: BuiltinEntry::Normal(typed_array::array_buffer) },
+    BuiltinDef { category: "Global", name: "Function", entry: BuiltinEntry::Throwing(function_ctor::function_constructor) },
+    BuiltinDef { category: "Reflect", name: "apply", entry: BuiltinEntry::Throwing(reflect::reflect_apply) },
+    BuiltinDef { category: "Reflect", name: "construct", entry: BuiltinEntry::Throwing(reflect::reflect_construct) },
 ];
 
 const INVALID: u8 = 0xFF;
@@ -395,10 +402,15 @@ static ENCODED_TO_INDEX: [u8; 256] = {
     t[0xE1] = 104;
     t[0xE2] = 105;
     t[0xE3] = 106;
+    t[0xE4] = 107;
+    t[0xE5] = 108;
+    t[0xE6] = 109;
+    t[0xE7] = 110;
+    t[0xE8] = 111;
     t
 };
 
-pub const MAX_BUILTIN_ID: u8 = 0xE3;
+pub const MAX_BUILTIN_ID: u8 = 0xE8;
 
 fn index_for(id: u8) -> Option<usize> {
     let idx = ENCODED_TO_INDEX[id as usize];
@@ -431,7 +443,7 @@ pub fn all() -> &'static [BuiltinDef] {
     BUILTINS
 }
 
-const INDEX_TO_ENCODED: [u8; 107] = [
+const INDEX_TO_ENCODED: [u8; 112] = [
     0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
     0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
     0x30, 0x31,
@@ -451,7 +463,7 @@ const INDEX_TO_ENCODED: [u8; 107] = [
     0xD9, 0xDA, 0xDB,
     0xDC, 0xDD,
     0xDE, 0xDF,
-    0xE0, 0xE1, 0xE2, 0xE3,
+    0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8,
 ];
 
 pub fn by_category(cat: &str) -> impl Iterator<Item = (u8, &'static BuiltinDef)> {

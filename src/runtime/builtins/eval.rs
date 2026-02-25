@@ -42,6 +42,7 @@ pub fn eval(args: &[Value], heap: &mut Heap) -> Result<Value, super::BuiltinErro
         chunks,
         entry,
         init_entry: None,
+        global_funcs: Vec::new(),
     };
     match interpret_program_with_heap(&program, heap, false, None, None) {
         Ok(Completion::Return(v)) => Ok(v),
