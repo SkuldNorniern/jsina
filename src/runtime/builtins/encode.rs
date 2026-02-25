@@ -3,17 +3,25 @@ use crate::runtime::Value;
 use super::{to_prop_key, BuiltinError};
 
 const DECODE_URI_RESERVED: &[u8] = b";,/?:@&=+$#";
+const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+fn push_percent_encoded(out: &mut String, b: u8) {
+    out.push('%');
+    out.push(HEX[(b >> 4) as usize] as char);
+    out.push(HEX[(b & 0xf) as usize] as char);
+}
 
 fn encode_uri_component(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
+    let mut buf = [0u8; 4];
     for c in s.chars() {
         match c {
             'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')' => {
                 out.push(c);
             }
             _ => {
-                for b in c.to_string().as_bytes() {
-                    out.push_str(&format!("%{:02X}", b));
+                for b in c.encode_utf8(&mut buf).as_bytes() {
+                    push_percent_encoded(&mut out, *b);
                 }
             }
         }
@@ -23,6 +31,7 @@ fn encode_uri_component(s: &str) -> String {
 
 fn encode_uri(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
+    let mut buf = [0u8; 4];
     for c in s.chars() {
         match c {
             'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')' |
@@ -30,8 +39,8 @@ fn encode_uri(s: &str) -> String {
                 out.push(c);
             }
             _ => {
-                for b in c.to_string().as_bytes() {
-                    out.push_str(&format!("%{:02X}", b));
+                for b in c.encode_utf8(&mut buf).as_bytes() {
+                    push_percent_encoded(&mut out, *b);
                 }
             }
         }

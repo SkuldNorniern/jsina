@@ -1171,6 +1171,7 @@ fn primitive_string_method(key: &str) -> Value {
 fn primitive_date_method(key: &str) -> Value {
     match key {
         "getTime" => Value::Builtin(0xC2),
+        "valueOf" => Value::Builtin(0xC2),
         "toString" => Value::Builtin(0xC3),
         "toISOString" => Value::Builtin(0xC4),
         "getYear" => Value::Builtin(0xC5),
