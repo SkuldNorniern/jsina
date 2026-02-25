@@ -356,6 +356,7 @@ impl Heap {
         }
     }
 
+    #[inline(always)]
     pub fn get_prop(&self, obj_id: usize, key: &str) -> Value {
         let mut current = Some(obj_id);
         while let Some(id) = current {
@@ -377,9 +378,10 @@ impl Heap {
         }
     }
 
+    #[inline(always)]
     pub fn get_array_prop(&self, arr_id: usize, key: &str) -> Value {
         if let Some(elements) = self.arrays.get(arr_id) {
-            if key == "length" {
+            if key.as_bytes() == b"length" {
                 return Value::Int(elements.len() as i32);
             }
             if let Ok(idx) = key.parse::<usize>() {

@@ -12,6 +12,7 @@ enum BuiltinResult {
     Throw(Value),
 }
 
+#[inline(always)]
 fn execute_builtin(
     builtin_id: u8,
     argc: usize,
@@ -21,11 +22,25 @@ fn execute_builtin(
     if builtin_id > builtins::MAX_BUILTIN_ID {
         return Err(VmError::InvalidOpcode(builtin_id));
     }
-    let mut args: Vec<Value> = (0..argc)
-        .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
-        .collect::<Result<Vec<_>, _>>()?;
-    args.reverse();
-    match builtins::dispatch(builtin_id, &args, ctx) {
+    let result = if argc <= 16 {
+        let mut buf: [Value; 16] = [
+            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
+            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
+            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
+            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
+        ];
+        for i in (0..argc).rev() {
+            buf[i] = stack.pop().ok_or(VmError::StackUnderflow)?;
+        }
+        builtins::dispatch(builtin_id, &buf[..argc], ctx)
+    } else {
+        let mut args: Vec<Value> = (0..argc)
+            .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+            .collect::<Result<Vec<_>, _>>()?;
+        args.reverse();
+        builtins::dispatch(builtin_id, &args, ctx)
+    };
+    match result {
         Ok(v) => Ok(BuiltinResult::Push(v)),
         Err(builtins::BuiltinError::Throw(v)) => Ok(BuiltinResult::Throw(v)),
     }
@@ -36,6 +51,31 @@ fn read_u8(code: &[u8], pc: usize) -> u8 {
     debug_assert!(pc < code.len());
     // SAFETY: Loop exits when pc >= code.len(); each opcode consumes correct operand bytes.
     unsafe { *code.get_unchecked(pc) }
+}
+
+fn with_pop_args<T>(
+    stack: &mut Vec<Value>,
+    argc: usize,
+    f: impl FnOnce(&[Value]) -> Result<T, VmError>,
+) -> Result<T, VmError> {
+    if argc <= 16 {
+        let mut buf: [Value; 16] = [
+            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
+            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
+            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
+            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
+        ];
+        for i in (0..argc).rev() {
+            buf[i] = stack.pop().ok_or(VmError::StackUnderflow)?;
+        }
+        f(&buf[..argc])
+    } else {
+        let mut args: Vec<Value> = (0..argc)
+            .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
+            .collect::<Result<Vec<_>, _>>()?;
+        args.reverse();
+        f(&args)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -135,6 +175,7 @@ struct GetPropCache {
 }
 
 impl GetPropCache {
+    #[inline(always)]
     fn get(
         &mut self,
         obj_id: usize,
@@ -220,7 +261,7 @@ pub fn interpret_program_with_heap_and_entry(
     cancel: Option<&AtomicBool>,
 ) -> Result<Completion, VmError> {
     let mut steps_remaining = step_limit;
-    let mut stack: Vec<Value> = Vec::with_capacity(64);
+    let mut stack: Vec<Value> = Vec::with_capacity(256);
     let mut getprop_cache = GetPropCache {
         obj_id: usize::MAX,
         is_array: false,
@@ -243,10 +284,16 @@ pub fn interpret_program_with_heap_and_entry(
         new_object: None,
     }];
 
+    const CHECK_INTERVAL: u32 = 256;
+    let mut loop_counter: u32 = 0;
+
     loop {
-        if let Some(c) = cancel {
-            if c.load(Ordering::Relaxed) {
-                return Err(VmError::Cancelled);
+        loop_counter = loop_counter.wrapping_add(1);
+        if loop_counter % CHECK_INTERVAL == 0 {
+            if let Some(c) = cancel {
+                if c.load(Ordering::Relaxed) {
+                    return Err(VmError::Cancelled);
+                }
             }
         }
         if let Some(ref mut n) = steps_remaining {
@@ -362,7 +409,7 @@ pub fn interpret_program_with_heap_and_entry(
                 }
             }
             0x22 => {
-                let slot = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let slot = read_u8(code, *pc) as usize;
                 *pc += 1;
                 if frame.rethrow_after_finally {
                     frame.rethrow_after_finally = false;
@@ -372,37 +419,35 @@ pub fn interpret_program_with_heap_and_entry(
             }
             0x40 => {
                 let (func_idx, callee_locals) = {
-                    let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
-                    let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
+                    let func_idx = read_u8(code, *pc) as usize;
+                    let argc = read_u8(code, *pc + 1) as usize;
                     *pc += 2;
                     let callee = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
-                    let mut args: Vec<Value> = (0..argc)
-                        .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    args.reverse();
-                    let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
-                    if let Some(r) = callee.rest_param_index {
-                        let r = r as usize;
-                        for (i, v) in args.iter().take(r).cloned().enumerate() {
-                            if i < callee_locals.len() {
-                                callee_locals[i] = v;
+                    with_pop_args(&mut stack, argc, |args| {
+                        let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
+                        if let Some(r) = callee.rest_param_index {
+                            let r = r as usize;
+                            for (i, v) in args.iter().take(r).cloned().enumerate() {
+                                if i < callee_locals.len() {
+                                    callee_locals[i] = v;
+                                }
+                            }
+                            if r < callee_locals.len() {
+                                let rest_id = heap.alloc_array();
+                                if r < args.len() {
+                                    heap.array_push_values(rest_id, &args[r..]);
+                                }
+                                callee_locals[r] = Value::Array(rest_id);
+                            }
+                        } else {
+                            for (i, v) in args.iter().cloned().enumerate() {
+                                if i < callee_locals.len() {
+                                    callee_locals[i] = v;
+                                }
                             }
                         }
-                        if r < callee_locals.len() {
-                            let rest_id = heap.alloc_array();
-                            if r < args.len() {
-                                heap.array_push_values(rest_id, &args[r..]);
-                            }
-                            callee_locals[r] = Value::Array(rest_id);
-                        }
-                    } else {
-                        for (i, v) in args.into_iter().enumerate() {
-                            if i < callee_locals.len() {
-                                callee_locals[i] = v;
-                            }
-                        }
-                    }
-                    (func_idx, callee_locals)
+                        Ok((func_idx, callee_locals))
+                    })?
                 };
                 if frames.len() >= MAX_CALL_DEPTH {
                     return Err(VmError::CallDepthExceeded);
@@ -446,7 +491,7 @@ pub fn interpret_program_with_heap_and_entry(
                 }
             }
             0x42 => {
-                let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let argc = read_u8(code, *pc) as usize;
                 *pc += 1;
                 let call_pc = *pc - 2;
                 let mut args: Vec<Value> = (0..argc)
@@ -567,38 +612,36 @@ pub fn interpret_program_with_heap_and_entry(
             }
             0x43 => {
                 let (func_idx, callee_locals, obj_id) = {
-                    let func_idx = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
-                    let argc = *code.get(*pc + 1).ok_or(VmError::StackUnderflow)? as usize;
+                    let func_idx = read_u8(code, *pc) as usize;
+                    let argc = read_u8(code, *pc + 1) as usize;
                     *pc += 2;
-                    let mut args: Vec<Value> = (0..argc)
-                        .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    args.reverse();
                     let obj_id = heap.alloc_object();
                     let callee = program.chunks.get(func_idx).ok_or(VmError::InvalidConstIndex(func_idx))?;
-                    let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
-                    if let Some(r) = callee.rest_param_index {
-                        let r = r as usize;
-                        for (i, v) in args.iter().take(r).cloned().enumerate() {
-                            if i < callee_locals.len() {
-                                callee_locals[i] = v;
+                    with_pop_args(&mut stack, argc, |args| {
+                        let mut callee_locals: Vec<Value> = (0..callee.num_locals).map(|_| Value::Undefined).collect();
+                        if let Some(r) = callee.rest_param_index {
+                            let r = r as usize;
+                            for (i, v) in args.iter().take(r).cloned().enumerate() {
+                                if i < callee_locals.len() {
+                                    callee_locals[i] = v;
+                                }
+                            }
+                            if r < callee_locals.len() {
+                                let rest_id = heap.alloc_array();
+                                if r < args.len() {
+                                    heap.array_push_values(rest_id, &args[r..]);
+                                }
+                                callee_locals[r] = Value::Array(rest_id);
+                            }
+                        } else {
+                            for (i, v) in args.iter().cloned().enumerate() {
+                                if i < callee_locals.len() {
+                                    callee_locals[i] = v;
+                                }
                             }
                         }
-                        if r < callee_locals.len() {
-                            let rest_id = heap.alloc_array();
-                            if r < args.len() {
-                                heap.array_push_values(rest_id, &args[r..]);
-                            }
-                            callee_locals[r] = Value::Array(rest_id);
-                        }
-                    } else {
-                        for (i, v) in args.into_iter().enumerate() {
-                            if i < callee_locals.len() {
-                                callee_locals[i] = v;
-                            }
-                        }
-                    }
-                    (func_idx, callee_locals, obj_id)
+                        Ok((func_idx, callee_locals, obj_id))
+                    })?
                 };
                 if frames.len() >= MAX_CALL_DEPTH {
                     return Err(VmError::CallDepthExceeded);
@@ -614,7 +657,7 @@ pub fn interpret_program_with_heap_and_entry(
                 });
             }
             0x44 => {
-                let argc = *code.get(*pc).ok_or(VmError::StackUnderflow)? as usize;
+                let argc = read_u8(code, *pc) as usize;
                 *pc += 1;
                 let mut args: Vec<Value> = (0..argc)
                     .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
