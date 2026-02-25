@@ -124,27 +124,56 @@ impl TokenType {
     pub fn is_keyword(&self) -> bool {
         matches!(
             self,
-            TokenType::Break | TokenType::Case | TokenType::Catch | TokenType::Class
-                | TokenType::Const | TokenType::Continue | TokenType::Debugger
-                | TokenType::Default | TokenType::Delete | TokenType::Do
-                | TokenType::Else | TokenType::Export | TokenType::Extends
-                | TokenType::Finally | TokenType::For | TokenType::Function
-                | TokenType::If | TokenType::Import | TokenType::In
-                | TokenType::Instanceof | TokenType::Let | TokenType::New | TokenType::Of
+            TokenType::Break
+                | TokenType::Case
+                | TokenType::Catch
+                | TokenType::Class
+                | TokenType::Const
+                | TokenType::Continue
+                | TokenType::Debugger
+                | TokenType::Default
+                | TokenType::Delete
+                | TokenType::Do
+                | TokenType::Else
+                | TokenType::Export
+                | TokenType::Extends
+                | TokenType::Finally
+                | TokenType::For
+                | TokenType::Function
+                | TokenType::If
+                | TokenType::Import
+                | TokenType::In
+                | TokenType::Instanceof
+                | TokenType::Let
+                | TokenType::New
+                | TokenType::Of
                 | TokenType::Return
-                | TokenType::Super | TokenType::Switch | TokenType::This
-                | TokenType::Throw | TokenType::Try | TokenType::Typeof
-                | TokenType::Var | TokenType::Void | TokenType::While
-                | TokenType::With | TokenType::Yield
-                | TokenType::Null | TokenType::True | TokenType::False
+                | TokenType::Super
+                | TokenType::Switch
+                | TokenType::This
+                | TokenType::Throw
+                | TokenType::Try
+                | TokenType::Typeof
+                | TokenType::Var
+                | TokenType::Void
+                | TokenType::While
+                | TokenType::With
+                | TokenType::Yield
+                | TokenType::Null
+                | TokenType::True
+                | TokenType::False
         )
     }
 
     pub fn is_literal(&self) -> bool {
         matches!(
             self,
-            TokenType::Null | TokenType::True | TokenType::False
-                | TokenType::Number | TokenType::String | TokenType::RegExpLiteral { .. }
+            TokenType::Null
+                | TokenType::True
+                | TokenType::False
+                | TokenType::Number
+                | TokenType::String
+                | TokenType::RegExpLiteral { .. }
                 | TokenType::TemplateLiteral
         )
     }
@@ -152,23 +181,51 @@ impl TokenType {
     pub fn is_operator(&self) -> bool {
         matches!(
             self,
-            TokenType::Assign | TokenType::PlusAssign | TokenType::MinusAssign
-                | TokenType::MultiplyAssign | TokenType::DivideAssign
-                | TokenType::ModuloAssign | TokenType::ExponentAssign
-                | TokenType::LeftShiftAssign | TokenType::RightShiftAssign
-                | TokenType::UnsignedRightShiftAssign | TokenType::BitwiseAndAssign
-                | TokenType::BitwiseXorAssign | TokenType::BitwiseOrAssign
-                | TokenType::Plus | TokenType::Minus | TokenType::Multiply
-                | TokenType::Divide | TokenType::Modulo | TokenType::Exponent
-                | TokenType::BitwiseAnd | TokenType::BitwiseOr | TokenType::BitwiseXor
-                | TokenType::BitwiseNot | TokenType::LeftShift | TokenType::RightShift
-                | TokenType::UnsignedRightShift | TokenType::LogicalAnd
-                | TokenType::LogicalOr | TokenType::LogicalNot | TokenType::Equal
-                | TokenType::NotEqual | TokenType::StrictEqual | TokenType::StrictNotEqual
-                | TokenType::LessThan | TokenType::GreaterThan | TokenType::LessEqual
-                | TokenType::GreaterEqual | TokenType::Increment | TokenType::Decrement
-                | TokenType::Question | TokenType::Colon | TokenType::Dot
-                | TokenType::Spread | TokenType::Arrow | TokenType::OptionalChaining
+            TokenType::Assign
+                | TokenType::PlusAssign
+                | TokenType::MinusAssign
+                | TokenType::MultiplyAssign
+                | TokenType::DivideAssign
+                | TokenType::ModuloAssign
+                | TokenType::ExponentAssign
+                | TokenType::LeftShiftAssign
+                | TokenType::RightShiftAssign
+                | TokenType::UnsignedRightShiftAssign
+                | TokenType::BitwiseAndAssign
+                | TokenType::BitwiseXorAssign
+                | TokenType::BitwiseOrAssign
+                | TokenType::Plus
+                | TokenType::Minus
+                | TokenType::Multiply
+                | TokenType::Divide
+                | TokenType::Modulo
+                | TokenType::Exponent
+                | TokenType::BitwiseAnd
+                | TokenType::BitwiseOr
+                | TokenType::BitwiseXor
+                | TokenType::BitwiseNot
+                | TokenType::LeftShift
+                | TokenType::RightShift
+                | TokenType::UnsignedRightShift
+                | TokenType::LogicalAnd
+                | TokenType::LogicalOr
+                | TokenType::LogicalNot
+                | TokenType::Equal
+                | TokenType::NotEqual
+                | TokenType::StrictEqual
+                | TokenType::StrictNotEqual
+                | TokenType::LessThan
+                | TokenType::GreaterThan
+                | TokenType::LessEqual
+                | TokenType::GreaterEqual
+                | TokenType::Increment
+                | TokenType::Decrement
+                | TokenType::Question
+                | TokenType::Colon
+                | TokenType::Dot
+                | TokenType::Spread
+                | TokenType::Arrow
+                | TokenType::OptionalChaining
                 | TokenType::NullishCoalescing
         )
     }
@@ -176,12 +233,23 @@ impl TokenType {
     pub fn precedence(&self) -> Option<u8> {
         match self {
             TokenType::Exponent => Some(14),
-            TokenType::Increment | TokenType::Decrement | TokenType::LogicalNot | TokenType::BitwiseNot => Some(13),
+            TokenType::Increment
+            | TokenType::Decrement
+            | TokenType::LogicalNot
+            | TokenType::BitwiseNot => Some(13),
             TokenType::Multiply | TokenType::Divide | TokenType::Modulo => Some(12),
             TokenType::Plus | TokenType::Minus => Some(11),
-            TokenType::LeftShift | TokenType::RightShift | TokenType::UnsignedRightShift => Some(10),
-            TokenType::LessThan | TokenType::GreaterThan | TokenType::LessEqual | TokenType::GreaterEqual => Some(9),
-            TokenType::Equal | TokenType::NotEqual | TokenType::StrictEqual | TokenType::StrictNotEqual => Some(8),
+            TokenType::LeftShift | TokenType::RightShift | TokenType::UnsignedRightShift => {
+                Some(10)
+            }
+            TokenType::LessThan
+            | TokenType::GreaterThan
+            | TokenType::LessEqual
+            | TokenType::GreaterEqual => Some(9),
+            TokenType::Equal
+            | TokenType::NotEqual
+            | TokenType::StrictEqual
+            | TokenType::StrictNotEqual => Some(8),
             TokenType::BitwiseAnd => Some(7),
             TokenType::BitwiseXor => Some(6),
             TokenType::BitwiseOr => Some(5),
@@ -190,11 +258,18 @@ impl TokenType {
             TokenType::NullishCoalescing => Some(2),
             TokenType::Question => Some(1),
             TokenType::Assign
-                | TokenType::PlusAssign | TokenType::MinusAssign | TokenType::MultiplyAssign
-                | TokenType::DivideAssign | TokenType::ModuloAssign | TokenType::ExponentAssign
-                | TokenType::LeftShiftAssign | TokenType::RightShiftAssign
-                | TokenType::UnsignedRightShiftAssign | TokenType::BitwiseAndAssign
-                | TokenType::BitwiseXorAssign | TokenType::BitwiseOrAssign => Some(0),
+            | TokenType::PlusAssign
+            | TokenType::MinusAssign
+            | TokenType::MultiplyAssign
+            | TokenType::DivideAssign
+            | TokenType::ModuloAssign
+            | TokenType::ExponentAssign
+            | TokenType::LeftShiftAssign
+            | TokenType::RightShiftAssign
+            | TokenType::UnsignedRightShiftAssign
+            | TokenType::BitwiseAndAssign
+            | TokenType::BitwiseXorAssign
+            | TokenType::BitwiseOrAssign => Some(0),
             _ => None,
         }
     }
@@ -202,12 +277,19 @@ impl TokenType {
     pub fn is_left_associative(&self) -> bool {
         match self {
             TokenType::Exponent
-                | TokenType::Assign | TokenType::PlusAssign | TokenType::MinusAssign
-                | TokenType::MultiplyAssign | TokenType::DivideAssign | TokenType::ModuloAssign
-                | TokenType::ExponentAssign | TokenType::LeftShiftAssign
-                | TokenType::RightShiftAssign | TokenType::UnsignedRightShiftAssign
-                | TokenType::BitwiseAndAssign | TokenType::BitwiseXorAssign
-                | TokenType::BitwiseOrAssign => false,
+            | TokenType::Assign
+            | TokenType::PlusAssign
+            | TokenType::MinusAssign
+            | TokenType::MultiplyAssign
+            | TokenType::DivideAssign
+            | TokenType::ModuloAssign
+            | TokenType::ExponentAssign
+            | TokenType::LeftShiftAssign
+            | TokenType::RightShiftAssign
+            | TokenType::UnsignedRightShiftAssign
+            | TokenType::BitwiseAndAssign
+            | TokenType::BitwiseXorAssign
+            | TokenType::BitwiseOrAssign => false,
             _ => self.precedence().is_some(),
         }
     }

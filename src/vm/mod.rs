@@ -1,8 +1,8 @@
 mod calls;
+pub mod interpreter;
 mod ops;
 mod props;
 mod types;
-pub mod interpreter;
 
 pub use interpreter::{
     interpret, interpret_program, interpret_program_with_heap, interpret_program_with_limit,

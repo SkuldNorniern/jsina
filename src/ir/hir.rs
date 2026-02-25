@@ -30,49 +30,149 @@ pub struct HirBlock {
 
 #[derive(Debug, Clone)]
 pub enum HirOp {
-    LoadConst { value: HirConst, span: Span },
-    LoadLocal { id: u32, span: Span },
-    StoreLocal { id: u32, span: Span },
-    LoadThis { span: Span },
-    Add { span: Span },
-    Sub { span: Span },
-    Mul { span: Span },
-    Div { span: Span },
-    Mod { span: Span },
-    Pow { span: Span },
-    Lt { span: Span },
-    Lte { span: Span },
-    Gt { span: Span },
-    Gte { span: Span },
-    StrictEq { span: Span },
-    StrictNotEq { span: Span },
-    LeftShift { span: Span },
-    RightShift { span: Span },
-    UnsignedRightShift { span: Span },
-    BitwiseAnd { span: Span },
-    BitwiseOr { span: Span },
-    BitwiseXor { span: Span },
-    Instanceof { span: Span },
-    Not { span: Span },
-    BitwiseNot { span: Span },
-    Typeof { span: Span },
-    Delete { span: Span },
-    NewObject { span: Span },
-    NewObjectWithProto { span: Span },
-    NewArray { span: Span },
-    GetProp { key: String, span: Span },
-    SetProp { key: String, span: Span },
-    GetPropDyn { span: Span },
-    SetPropDyn { span: Span },
-    Pop { span: Span },
-    Dup { span: Span },
-    Swap { span: Span },
-    Call { func_index: u32, argc: u32, span: Span },
-    CallBuiltin { builtin: BuiltinId, argc: u32, span: Span },
-    CallMethod { argc: u32, span: Span },
-    New { func_index: u32, argc: u32, span: Span },
-    NewMethod { argc: u32, span: Span },
-    Rethrow { slot: u32, span: Span },
+    LoadConst {
+        value: HirConst,
+        span: Span,
+    },
+    LoadLocal {
+        id: u32,
+        span: Span,
+    },
+    StoreLocal {
+        id: u32,
+        span: Span,
+    },
+    LoadThis {
+        span: Span,
+    },
+    Add {
+        span: Span,
+    },
+    Sub {
+        span: Span,
+    },
+    Mul {
+        span: Span,
+    },
+    Div {
+        span: Span,
+    },
+    Mod {
+        span: Span,
+    },
+    Pow {
+        span: Span,
+    },
+    Lt {
+        span: Span,
+    },
+    Lte {
+        span: Span,
+    },
+    Gt {
+        span: Span,
+    },
+    Gte {
+        span: Span,
+    },
+    StrictEq {
+        span: Span,
+    },
+    StrictNotEq {
+        span: Span,
+    },
+    LeftShift {
+        span: Span,
+    },
+    RightShift {
+        span: Span,
+    },
+    UnsignedRightShift {
+        span: Span,
+    },
+    BitwiseAnd {
+        span: Span,
+    },
+    BitwiseOr {
+        span: Span,
+    },
+    BitwiseXor {
+        span: Span,
+    },
+    Instanceof {
+        span: Span,
+    },
+    Not {
+        span: Span,
+    },
+    BitwiseNot {
+        span: Span,
+    },
+    Typeof {
+        span: Span,
+    },
+    Delete {
+        span: Span,
+    },
+    NewObject {
+        span: Span,
+    },
+    NewObjectWithProto {
+        span: Span,
+    },
+    NewArray {
+        span: Span,
+    },
+    GetProp {
+        key: String,
+        span: Span,
+    },
+    SetProp {
+        key: String,
+        span: Span,
+    },
+    GetPropDyn {
+        span: Span,
+    },
+    SetPropDyn {
+        span: Span,
+    },
+    Pop {
+        span: Span,
+    },
+    Dup {
+        span: Span,
+    },
+    Swap {
+        span: Span,
+    },
+    Call {
+        func_index: u32,
+        argc: u32,
+        span: Span,
+    },
+    CallBuiltin {
+        builtin: BuiltinId,
+        argc: u32,
+        span: Span,
+    },
+    CallMethod {
+        argc: u32,
+        span: Span,
+    },
+    New {
+        func_index: u32,
+        argc: u32,
+        span: Span,
+    },
+    NewMethod {
+        argc: u32,
+        span: Span,
+    },
+    Rethrow {
+        slot: u32,
+        span: Span,
+    },
 }
 
 /// Builtin call IDs: (category << 4) | index. Bytecode stores this u8.
@@ -185,11 +285,25 @@ pub enum HirConst {
 
 #[derive(Debug, Clone)]
 pub enum HirTerminator {
-    Return { span: Span },
-    Throw { span: Span },
-    Jump { target: HirBlockId },
-    Branch { cond: u32, then_block: HirBlockId, else_block: HirBlockId },
-    BranchNullish { cond: u32, then_block: HirBlockId, else_block: HirBlockId },
+    Return {
+        span: Span,
+    },
+    Throw {
+        span: Span,
+    },
+    Jump {
+        target: HirBlockId,
+    },
+    Branch {
+        cond: u32,
+        then_block: HirBlockId,
+        else_block: HirBlockId,
+    },
+    BranchNullish {
+        cond: u32,
+        then_block: HirBlockId,
+        else_block: HirBlockId,
+    },
 }
 
 #[cfg(test)]

@@ -6,24 +6,24 @@
 mod array;
 mod boolean;
 mod date;
+mod dollar262;
+mod encode;
 mod error;
-mod map;
-mod set;
+mod eval;
+mod function_ctor;
 mod host;
 mod json;
+mod map;
 mod math;
 mod number;
 mod object;
+mod reflect;
 mod regexp;
+mod set;
 mod string;
 mod symbol;
-mod typed_array;
-mod dollar262;
-mod encode;
-mod eval;
-mod function_ctor;
-mod reflect;
 mod timeout;
+mod typed_array;
 
 use crate::ir::bytecode::BytecodeChunk;
 use crate::runtime::{Heap, Value};
@@ -43,11 +43,25 @@ pub(crate) fn to_number(v: &Value) -> f64 {
     match v {
         Value::Int(n) => *n as f64,
         Value::Number(n) => *n,
-        Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+        Value::Bool(b) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
         Value::Null => 0.0,
         Value::Undefined => f64::NAN,
         Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
-        Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => f64::NAN,
+        Value::Symbol(_)
+        | Value::Object(_)
+        | Value::Array(_)
+        | Value::Map(_)
+        | Value::Set(_)
+        | Value::Date(_)
+        | Value::Function(_)
+        | Value::DynamicFunction(_)
+        | Value::Builtin(_) => f64::NAN,
     }
 }
 
@@ -57,7 +71,16 @@ pub(crate) fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Number(n) => *n != 0.0 && !n.is_nan(),
-        Value::String(_) | Value::Symbol(_) | Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) | Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => true,
+        Value::String(_)
+        | Value::Symbol(_)
+        | Value::Object(_)
+        | Value::Array(_)
+        | Value::Map(_)
+        | Value::Set(_)
+        | Value::Date(_)
+        | Value::Function(_)
+        | Value::DynamicFunction(_)
+        | Value::Builtin(_) => true,
     }
 }
 
@@ -70,8 +93,12 @@ pub(crate) fn to_prop_key(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
         Value::Symbol(_) => "Symbol()".to_string(),
-        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => "[object Object]".to_string(),
-        Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => "function".to_string(),
+        Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => {
+            "[object Object]".to_string()
+        }
+        Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => {
+            "function".to_string()
+        }
     }
 }
 
@@ -174,133 +201,589 @@ pub struct BuiltinDef {
 
 const BUILTINS: &[BuiltinDef] = &[
     // Host
-    BuiltinDef { category: "Host", name: "print", entry: BuiltinEntry::Normal(host::print) },
+    BuiltinDef {
+        category: "Host",
+        name: "print",
+        entry: BuiltinEntry::Normal(host::print),
+    },
     // Array 0..11
-    BuiltinDef { category: "Array", name: "push", entry: BuiltinEntry::Normal(array::push) },
-    BuiltinDef { category: "Array", name: "pop", entry: BuiltinEntry::Normal(array::pop) },
-    BuiltinDef { category: "Array", name: "isArray", entry: BuiltinEntry::Normal(array::is_array) },
-    BuiltinDef { category: "Array", name: "slice", entry: BuiltinEntry::Normal(array::slice) },
-    BuiltinDef { category: "Array", name: "concat", entry: BuiltinEntry::Normal(array::concat) },
-    BuiltinDef { category: "Array", name: "indexOf", entry: BuiltinEntry::Normal(array::index_of) },
-    BuiltinDef { category: "Array", name: "join", entry: BuiltinEntry::Normal(array::join) },
-    BuiltinDef { category: "Array", name: "shift", entry: BuiltinEntry::Normal(array::shift) },
-    BuiltinDef { category: "Array", name: "unshift", entry: BuiltinEntry::Normal(array::unshift) },
-    BuiltinDef { category: "Array", name: "reverse", entry: BuiltinEntry::Normal(array::reverse) },
-    BuiltinDef { category: "Array", name: "includes", entry: BuiltinEntry::Normal(array::includes) },
-    BuiltinDef { category: "Array", name: "fill", entry: BuiltinEntry::Normal(array::fill) },
+    BuiltinDef {
+        category: "Array",
+        name: "push",
+        entry: BuiltinEntry::Normal(array::push),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "pop",
+        entry: BuiltinEntry::Normal(array::pop),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "isArray",
+        entry: BuiltinEntry::Normal(array::is_array),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "slice",
+        entry: BuiltinEntry::Normal(array::slice),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "concat",
+        entry: BuiltinEntry::Normal(array::concat),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "indexOf",
+        entry: BuiltinEntry::Normal(array::index_of),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "join",
+        entry: BuiltinEntry::Normal(array::join),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "shift",
+        entry: BuiltinEntry::Normal(array::shift),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "unshift",
+        entry: BuiltinEntry::Normal(array::unshift),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "reverse",
+        entry: BuiltinEntry::Normal(array::reverse),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "includes",
+        entry: BuiltinEntry::Normal(array::includes),
+    },
+    BuiltinDef {
+        category: "Array",
+        name: "fill",
+        entry: BuiltinEntry::Normal(array::fill),
+    },
     // Math 0..8
-    BuiltinDef { category: "Math", name: "floor", entry: BuiltinEntry::Normal(math::floor) },
-    BuiltinDef { category: "Math", name: "abs", entry: BuiltinEntry::Normal(math::abs) },
-    BuiltinDef { category: "Math", name: "min", entry: BuiltinEntry::Normal(math::min) },
-    BuiltinDef { category: "Math", name: "max", entry: BuiltinEntry::Normal(math::max) },
-    BuiltinDef { category: "Math", name: "pow", entry: BuiltinEntry::Normal(math::pow) },
-    BuiltinDef { category: "Math", name: "ceil", entry: BuiltinEntry::Normal(math::ceil) },
-    BuiltinDef { category: "Math", name: "round", entry: BuiltinEntry::Normal(math::round) },
-    BuiltinDef { category: "Math", name: "sqrt", entry: BuiltinEntry::Normal(math::sqrt) },
-    BuiltinDef { category: "Math", name: "random", entry: BuiltinEntry::Normal(math::random) },
+    BuiltinDef {
+        category: "Math",
+        name: "floor",
+        entry: BuiltinEntry::Normal(math::floor),
+    },
+    BuiltinDef {
+        category: "Math",
+        name: "abs",
+        entry: BuiltinEntry::Normal(math::abs),
+    },
+    BuiltinDef {
+        category: "Math",
+        name: "min",
+        entry: BuiltinEntry::Normal(math::min),
+    },
+    BuiltinDef {
+        category: "Math",
+        name: "max",
+        entry: BuiltinEntry::Normal(math::max),
+    },
+    BuiltinDef {
+        category: "Math",
+        name: "pow",
+        entry: BuiltinEntry::Normal(math::pow),
+    },
+    BuiltinDef {
+        category: "Math",
+        name: "ceil",
+        entry: BuiltinEntry::Normal(math::ceil),
+    },
+    BuiltinDef {
+        category: "Math",
+        name: "round",
+        entry: BuiltinEntry::Normal(math::round),
+    },
+    BuiltinDef {
+        category: "Math",
+        name: "sqrt",
+        entry: BuiltinEntry::Normal(math::sqrt),
+    },
+    BuiltinDef {
+        category: "Math",
+        name: "random",
+        entry: BuiltinEntry::Normal(math::random),
+    },
     // Json 0..1
-    BuiltinDef { category: "Json", name: "parse", entry: BuiltinEntry::Throwing(json::parse) },
-    BuiltinDef { category: "Json", name: "stringify", entry: BuiltinEntry::Normal(json::stringify) },
+    BuiltinDef {
+        category: "Json",
+        name: "parse",
+        entry: BuiltinEntry::Throwing(json::parse),
+    },
+    BuiltinDef {
+        category: "Json",
+        name: "stringify",
+        entry: BuiltinEntry::Normal(json::stringify),
+    },
     // Object 0..7
-    BuiltinDef { category: "Object", name: "create", entry: BuiltinEntry::Normal(object::create) },
-    BuiltinDef { category: "Object", name: "keys", entry: BuiltinEntry::Normal(object::keys) },
-    BuiltinDef { category: "Object", name: "assign", entry: BuiltinEntry::Normal(object::assign) },
-    BuiltinDef { category: "Object", name: "hasOwnProperty", entry: BuiltinEntry::Normal(object::has_own_property) },
-    BuiltinDef { category: "Object", name: "preventExtensions", entry: BuiltinEntry::Normal(object::prevent_extensions) },
-    BuiltinDef { category: "Object", name: "seal", entry: BuiltinEntry::Normal(object::seal) },
-    BuiltinDef { category: "Object", name: "setPrototypeOf", entry: BuiltinEntry::Normal(object::set_prototype_of) },
-    BuiltinDef { category: "Object", name: "propertyIsEnumerable", entry: BuiltinEntry::Normal(object::property_is_enumerable) },
-    BuiltinDef { category: "Object", name: "getPrototypeOf", entry: BuiltinEntry::Normal(object::get_prototype_of) },
-    BuiltinDef { category: "Object", name: "freeze", entry: BuiltinEntry::Normal(object::freeze) },
-    BuiltinDef { category: "Object", name: "isExtensible", entry: BuiltinEntry::Normal(object::is_extensible) },
-    BuiltinDef { category: "Object", name: "isFrozen", entry: BuiltinEntry::Normal(object::is_frozen) },
-    BuiltinDef { category: "Object", name: "isSealed", entry: BuiltinEntry::Normal(object::is_sealed) },
-    BuiltinDef { category: "Object", name: "hasOwn", entry: BuiltinEntry::Normal(object::has_own) },
-    BuiltinDef { category: "Object", name: "is", entry: BuiltinEntry::Normal(object::is_same_value) },
+    BuiltinDef {
+        category: "Object",
+        name: "create",
+        entry: BuiltinEntry::Normal(object::create),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "keys",
+        entry: BuiltinEntry::Normal(object::keys),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "assign",
+        entry: BuiltinEntry::Normal(object::assign),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "hasOwnProperty",
+        entry: BuiltinEntry::Normal(object::has_own_property),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "preventExtensions",
+        entry: BuiltinEntry::Normal(object::prevent_extensions),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "seal",
+        entry: BuiltinEntry::Normal(object::seal),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "setPrototypeOf",
+        entry: BuiltinEntry::Normal(object::set_prototype_of),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "propertyIsEnumerable",
+        entry: BuiltinEntry::Normal(object::property_is_enumerable),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "getPrototypeOf",
+        entry: BuiltinEntry::Normal(object::get_prototype_of),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "freeze",
+        entry: BuiltinEntry::Normal(object::freeze),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "isExtensible",
+        entry: BuiltinEntry::Normal(object::is_extensible),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "isFrozen",
+        entry: BuiltinEntry::Normal(object::is_frozen),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "isSealed",
+        entry: BuiltinEntry::Normal(object::is_sealed),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "hasOwn",
+        entry: BuiltinEntry::Normal(object::has_own),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "is",
+        entry: BuiltinEntry::Normal(object::is_same_value),
+    },
     // Type 0..3 (String, Error, Number, Boolean constructors)
-    BuiltinDef { category: "Type", name: "String", entry: BuiltinEntry::Normal(string::string) },
-    BuiltinDef { category: "Type", name: "Error", entry: BuiltinEntry::Normal(error::error) },
-    BuiltinDef { category: "Type", name: "Number", entry: BuiltinEntry::Normal(number::number) },
-    BuiltinDef { category: "Type", name: "Boolean", entry: BuiltinEntry::Normal(boolean::boolean) },
-    BuiltinDef { category: "Number", name: "isSafeInteger", entry: BuiltinEntry::Normal(number::is_safe_integer) },
-    BuiltinDef { category: "Number", name: "primitiveToString", entry: BuiltinEntry::Normal(number::primitive_to_string) },
-    BuiltinDef { category: "Number", name: "primitiveValueOf", entry: BuiltinEntry::Normal(number::primitive_value_of) },
+    BuiltinDef {
+        category: "Type",
+        name: "String",
+        entry: BuiltinEntry::Normal(string::string),
+    },
+    BuiltinDef {
+        category: "Type",
+        name: "Error",
+        entry: BuiltinEntry::Normal(error::error),
+    },
+    BuiltinDef {
+        category: "Type",
+        name: "Number",
+        entry: BuiltinEntry::Normal(number::number),
+    },
+    BuiltinDef {
+        category: "Type",
+        name: "Boolean",
+        entry: BuiltinEntry::Normal(boolean::boolean),
+    },
+    BuiltinDef {
+        category: "Number",
+        name: "isSafeInteger",
+        entry: BuiltinEntry::Normal(number::is_safe_integer),
+    },
+    BuiltinDef {
+        category: "Number",
+        name: "primitiveToString",
+        entry: BuiltinEntry::Normal(number::primitive_to_string),
+    },
+    BuiltinDef {
+        category: "Number",
+        name: "primitiveValueOf",
+        entry: BuiltinEntry::Normal(number::primitive_value_of),
+    },
     // String 0..6 (methods)
-    BuiltinDef { category: "String", name: "split", entry: BuiltinEntry::Normal(string::split) },
-    BuiltinDef { category: "String", name: "trim", entry: BuiltinEntry::Normal(string::trim) },
-    BuiltinDef { category: "String", name: "toLowerCase", entry: BuiltinEntry::Normal(string::to_lower_case) },
-    BuiltinDef { category: "String", name: "toUpperCase", entry: BuiltinEntry::Normal(string::to_upper_case) },
-    BuiltinDef { category: "String", name: "charAt", entry: BuiltinEntry::Normal(string::char_at) },
-    BuiltinDef { category: "String", name: "repeat", entry: BuiltinEntry::Normal(string::repeat) },
-    BuiltinDef { category: "String", name: "fromCharCode", entry: BuiltinEntry::Normal(string::from_char_code) },
-    BuiltinDef { category: "String", name: "anchor", entry: BuiltinEntry::Normal(string::anchor) },
-    BuiltinDef { category: "String", name: "big", entry: BuiltinEntry::Normal(string::big) },
-    BuiltinDef { category: "String", name: "blink", entry: BuiltinEntry::Normal(string::blink) },
-    BuiltinDef { category: "String", name: "bold", entry: BuiltinEntry::Normal(string::bold) },
-    BuiltinDef { category: "String", name: "fixed", entry: BuiltinEntry::Normal(string::fixed) },
-    BuiltinDef { category: "String", name: "fontcolor", entry: BuiltinEntry::Normal(string::fontcolor) },
-    BuiltinDef { category: "String", name: "fontsize", entry: BuiltinEntry::Normal(string::fontsize) },
-    BuiltinDef { category: "String", name: "italics", entry: BuiltinEntry::Normal(string::italics) },
-    BuiltinDef { category: "String", name: "link", entry: BuiltinEntry::Normal(string::link) },
+    BuiltinDef {
+        category: "String",
+        name: "split",
+        entry: BuiltinEntry::Normal(string::split),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "trim",
+        entry: BuiltinEntry::Normal(string::trim),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "toLowerCase",
+        entry: BuiltinEntry::Normal(string::to_lower_case),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "toUpperCase",
+        entry: BuiltinEntry::Normal(string::to_upper_case),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "charAt",
+        entry: BuiltinEntry::Normal(string::char_at),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "repeat",
+        entry: BuiltinEntry::Normal(string::repeat),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "fromCharCode",
+        entry: BuiltinEntry::Normal(string::from_char_code),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "anchor",
+        entry: BuiltinEntry::Normal(string::anchor),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "big",
+        entry: BuiltinEntry::Normal(string::big),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "blink",
+        entry: BuiltinEntry::Normal(string::blink),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "bold",
+        entry: BuiltinEntry::Normal(string::bold),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "fixed",
+        entry: BuiltinEntry::Normal(string::fixed),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "fontcolor",
+        entry: BuiltinEntry::Normal(string::fontcolor),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "fontsize",
+        entry: BuiltinEntry::Normal(string::fontsize),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "italics",
+        entry: BuiltinEntry::Normal(string::italics),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "link",
+        entry: BuiltinEntry::Normal(string::link),
+    },
     // Error 0 (isError)
-    BuiltinDef { category: "Error", name: "isError", entry: BuiltinEntry::Normal(error::is_error) },
+    BuiltinDef {
+        category: "Error",
+        name: "isError",
+        entry: BuiltinEntry::Normal(error::is_error),
+    },
     // RegExp 0..2
-    BuiltinDef { category: "RegExp", name: "escape", entry: BuiltinEntry::Normal(regexp::escape) },
-    BuiltinDef { category: "RegExp", name: "create", entry: BuiltinEntry::Normal(regexp::create) },
-    BuiltinDef { category: "RegExp", name: "test", entry: BuiltinEntry::Normal(regexp::test) },
+    BuiltinDef {
+        category: "RegExp",
+        name: "escape",
+        entry: BuiltinEntry::Normal(regexp::escape),
+    },
+    BuiltinDef {
+        category: "RegExp",
+        name: "create",
+        entry: BuiltinEntry::Normal(regexp::create),
+    },
+    BuiltinDef {
+        category: "RegExp",
+        name: "test",
+        entry: BuiltinEntry::Normal(regexp::test),
+    },
     // Map 0..3
-    BuiltinDef { category: "Map", name: "create", entry: BuiltinEntry::Normal(map::create) },
-    BuiltinDef { category: "Map", name: "set", entry: BuiltinEntry::Normal(map::set) },
-    BuiltinDef { category: "Map", name: "get", entry: BuiltinEntry::Normal(map::get) },
-    BuiltinDef { category: "Map", name: "has", entry: BuiltinEntry::Normal(map::has) },
+    BuiltinDef {
+        category: "Map",
+        name: "create",
+        entry: BuiltinEntry::Normal(map::create),
+    },
+    BuiltinDef {
+        category: "Map",
+        name: "set",
+        entry: BuiltinEntry::Normal(map::set),
+    },
+    BuiltinDef {
+        category: "Map",
+        name: "get",
+        entry: BuiltinEntry::Normal(map::get),
+    },
+    BuiltinDef {
+        category: "Map",
+        name: "has",
+        entry: BuiltinEntry::Normal(map::has),
+    },
     // Set 0..3
-    BuiltinDef { category: "Set", name: "create", entry: BuiltinEntry::Normal(set::create) },
-    BuiltinDef { category: "Set", name: "add", entry: BuiltinEntry::Normal(set::add) },
-    BuiltinDef { category: "Set", name: "has", entry: BuiltinEntry::Normal(set::has) },
-    BuiltinDef { category: "Set", name: "size", entry: BuiltinEntry::Normal(set::size) },
+    BuiltinDef {
+        category: "Set",
+        name: "create",
+        entry: BuiltinEntry::Normal(set::create),
+    },
+    BuiltinDef {
+        category: "Set",
+        name: "add",
+        entry: BuiltinEntry::Normal(set::add),
+    },
+    BuiltinDef {
+        category: "Set",
+        name: "has",
+        entry: BuiltinEntry::Normal(set::has),
+    },
+    BuiltinDef {
+        category: "Set",
+        name: "size",
+        entry: BuiltinEntry::Normal(set::size),
+    },
     // Collection 0 (Map/Set .has shared)
-    BuiltinDef { category: "Collection", name: "has", entry: BuiltinEntry::Normal(collection_has) },
+    BuiltinDef {
+        category: "Collection",
+        name: "has",
+        entry: BuiltinEntry::Normal(collection_has),
+    },
     // String annex B HTML (small, strike, sub, sup) 0xB1..0xB4
-    BuiltinDef { category: "String", name: "small", entry: BuiltinEntry::Normal(string::small) },
-    BuiltinDef { category: "String", name: "strike", entry: BuiltinEntry::Normal(string::strike) },
-    BuiltinDef { category: "String", name: "sub", entry: BuiltinEntry::Normal(string::sub) },
-    BuiltinDef { category: "String", name: "sup", entry: BuiltinEntry::Normal(string::sup) },
+    BuiltinDef {
+        category: "String",
+        name: "small",
+        entry: BuiltinEntry::Normal(string::small),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "strike",
+        entry: BuiltinEntry::Normal(string::strike),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "sub",
+        entry: BuiltinEntry::Normal(string::sub),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "sup",
+        entry: BuiltinEntry::Normal(string::sup),
+    },
     // Date 0..4
-    BuiltinDef { category: "Date", name: "create", entry: BuiltinEntry::Normal(date::create) },
-    BuiltinDef { category: "Date", name: "now", entry: BuiltinEntry::Normal(date::now) },
-    BuiltinDef { category: "Date", name: "getTime", entry: BuiltinEntry::Normal(date::get_time) },
-    BuiltinDef { category: "Date", name: "toString", entry: BuiltinEntry::Normal(date::to_string) },
-    BuiltinDef { category: "Date", name: "toISOString", entry: BuiltinEntry::Normal(date::to_iso_string) },
-    BuiltinDef { category: "Date", name: "getYear", entry: BuiltinEntry::Normal(date::get_year) },
-    BuiltinDef { category: "Date", name: "setYear", entry: BuiltinEntry::Normal(date::set_year) },
-    BuiltinDef { category: "Date", name: "toGMTString", entry: BuiltinEntry::Normal(date::to_gmt_string) },
-    BuiltinDef { category: "Symbol", name: "create", entry: BuiltinEntry::Normal(symbol::symbol) },
-    BuiltinDef { category: "Error", name: "ReferenceError", entry: BuiltinEntry::Normal(error::reference_error) },
-    BuiltinDef { category: "Error", name: "TypeError", entry: BuiltinEntry::Normal(error::type_error) },
-    BuiltinDef { category: "Error", name: "RangeError", entry: BuiltinEntry::Normal(error::range_error) },
-    BuiltinDef { category: "Error", name: "SyntaxError", entry: BuiltinEntry::Normal(error::syntax_error) },
-    BuiltinDef { category: "$262", name: "createRealm", entry: BuiltinEntry::Throwing(dollar262::create_realm) },
-    BuiltinDef { category: "$262", name: "evalScript", entry: BuiltinEntry::Throwing(dollar262::eval_script) },
-    BuiltinDef { category: "$262", name: "gc", entry: BuiltinEntry::Throwing(dollar262::gc) },
-    BuiltinDef { category: "$262", name: "detachArrayBuffer", entry: BuiltinEntry::Throwing(dollar262::detach_array_buffer) },
-    BuiltinDef { category: "Global", name: "eval", entry: BuiltinEntry::Throwing(eval::eval) },
-    BuiltinDef { category: "Global", name: "encodeURI", entry: BuiltinEntry::Normal(encode::encode_uri_builtin) },
-    BuiltinDef { category: "Global", name: "encodeURIComponent", entry: BuiltinEntry::Normal(encode::encode_uri_component_builtin) },
-    BuiltinDef { category: "Global", name: "parseInt", entry: BuiltinEntry::Normal(number::parse_int) },
-    BuiltinDef { category: "Global", name: "parseFloat", entry: BuiltinEntry::Normal(number::parse_float) },
-    BuiltinDef { category: "Global", name: "decodeURI", entry: BuiltinEntry::Throwing(encode::decode_uri_builtin) },
-    BuiltinDef { category: "Global", name: "decodeURIComponent", entry: BuiltinEntry::Throwing(encode::decode_uri_component_builtin) },
-    BuiltinDef { category: "TypedArray", name: "Int32Array", entry: BuiltinEntry::Normal(typed_array::int32_array) },
-    BuiltinDef { category: "TypedArray", name: "Uint8Array", entry: BuiltinEntry::Normal(typed_array::uint8_array) },
-    BuiltinDef { category: "TypedArray", name: "Uint8ClampedArray", entry: BuiltinEntry::Normal(typed_array::uint8_clamped_array) },
-    BuiltinDef { category: "TypedArray", name: "ArrayBuffer", entry: BuiltinEntry::Normal(typed_array::array_buffer) },
-    BuiltinDef { category: "Global", name: "Function", entry: BuiltinEntry::Throwing(function_ctor::function_constructor) },
-    BuiltinDef { category: "Global", name: "isNaN", entry: BuiltinEntry::Normal(number::is_nan) },
-    BuiltinDef { category: "Global", name: "isFinite", entry: BuiltinEntry::Normal(number::is_finite) },
-    BuiltinDef { category: "TypedArray", name: "DataView", entry: BuiltinEntry::Throwing(typed_array::data_view) },
-    BuiltinDef { category: "Reflect", name: "apply", entry: BuiltinEntry::Throwing(reflect::reflect_apply) },
-    BuiltinDef { category: "Reflect", name: "construct", entry: BuiltinEntry::Throwing(reflect::reflect_construct) },
-    BuiltinDef { category: "Host", name: "timeout", entry: BuiltinEntry::Throwing(timeout::timeout) },
+    BuiltinDef {
+        category: "Date",
+        name: "create",
+        entry: BuiltinEntry::Normal(date::create),
+    },
+    BuiltinDef {
+        category: "Date",
+        name: "now",
+        entry: BuiltinEntry::Normal(date::now),
+    },
+    BuiltinDef {
+        category: "Date",
+        name: "getTime",
+        entry: BuiltinEntry::Normal(date::get_time),
+    },
+    BuiltinDef {
+        category: "Date",
+        name: "toString",
+        entry: BuiltinEntry::Normal(date::to_string),
+    },
+    BuiltinDef {
+        category: "Date",
+        name: "toISOString",
+        entry: BuiltinEntry::Normal(date::to_iso_string),
+    },
+    BuiltinDef {
+        category: "Date",
+        name: "getYear",
+        entry: BuiltinEntry::Normal(date::get_year),
+    },
+    BuiltinDef {
+        category: "Date",
+        name: "setYear",
+        entry: BuiltinEntry::Normal(date::set_year),
+    },
+    BuiltinDef {
+        category: "Date",
+        name: "toGMTString",
+        entry: BuiltinEntry::Normal(date::to_gmt_string),
+    },
+    BuiltinDef {
+        category: "Symbol",
+        name: "create",
+        entry: BuiltinEntry::Normal(symbol::symbol),
+    },
+    BuiltinDef {
+        category: "Error",
+        name: "ReferenceError",
+        entry: BuiltinEntry::Normal(error::reference_error),
+    },
+    BuiltinDef {
+        category: "Error",
+        name: "TypeError",
+        entry: BuiltinEntry::Normal(error::type_error),
+    },
+    BuiltinDef {
+        category: "Error",
+        name: "RangeError",
+        entry: BuiltinEntry::Normal(error::range_error),
+    },
+    BuiltinDef {
+        category: "Error",
+        name: "SyntaxError",
+        entry: BuiltinEntry::Normal(error::syntax_error),
+    },
+    BuiltinDef {
+        category: "$262",
+        name: "createRealm",
+        entry: BuiltinEntry::Throwing(dollar262::create_realm),
+    },
+    BuiltinDef {
+        category: "$262",
+        name: "evalScript",
+        entry: BuiltinEntry::Throwing(dollar262::eval_script),
+    },
+    BuiltinDef {
+        category: "$262",
+        name: "gc",
+        entry: BuiltinEntry::Throwing(dollar262::gc),
+    },
+    BuiltinDef {
+        category: "$262",
+        name: "detachArrayBuffer",
+        entry: BuiltinEntry::Throwing(dollar262::detach_array_buffer),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "eval",
+        entry: BuiltinEntry::Throwing(eval::eval),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "encodeURI",
+        entry: BuiltinEntry::Normal(encode::encode_uri_builtin),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "encodeURIComponent",
+        entry: BuiltinEntry::Normal(encode::encode_uri_component_builtin),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "parseInt",
+        entry: BuiltinEntry::Normal(number::parse_int),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "parseFloat",
+        entry: BuiltinEntry::Normal(number::parse_float),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "decodeURI",
+        entry: BuiltinEntry::Throwing(encode::decode_uri_builtin),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "decodeURIComponent",
+        entry: BuiltinEntry::Throwing(encode::decode_uri_component_builtin),
+    },
+    BuiltinDef {
+        category: "TypedArray",
+        name: "Int32Array",
+        entry: BuiltinEntry::Normal(typed_array::int32_array),
+    },
+    BuiltinDef {
+        category: "TypedArray",
+        name: "Uint8Array",
+        entry: BuiltinEntry::Normal(typed_array::uint8_array),
+    },
+    BuiltinDef {
+        category: "TypedArray",
+        name: "Uint8ClampedArray",
+        entry: BuiltinEntry::Normal(typed_array::uint8_clamped_array),
+    },
+    BuiltinDef {
+        category: "TypedArray",
+        name: "ArrayBuffer",
+        entry: BuiltinEntry::Normal(typed_array::array_buffer),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "Function",
+        entry: BuiltinEntry::Throwing(function_ctor::function_constructor),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "isNaN",
+        entry: BuiltinEntry::Normal(number::is_nan),
+    },
+    BuiltinDef {
+        category: "Global",
+        name: "isFinite",
+        entry: BuiltinEntry::Normal(number::is_finite),
+    },
+    BuiltinDef {
+        category: "TypedArray",
+        name: "DataView",
+        entry: BuiltinEntry::Throwing(typed_array::data_view),
+    },
+    BuiltinDef {
+        category: "Reflect",
+        name: "apply",
+        entry: BuiltinEntry::Throwing(reflect::reflect_apply),
+    },
+    BuiltinDef {
+        category: "Reflect",
+        name: "construct",
+        entry: BuiltinEntry::Throwing(reflect::reflect_construct),
+    },
+    BuiltinDef {
+        category: "Host",
+        name: "timeout",
+        entry: BuiltinEntry::Throwing(timeout::timeout),
+    },
 ];
 
 const INVALID: u8 = 0xFF;
@@ -458,26 +941,14 @@ pub fn all() -> &'static [BuiltinDef] {
 }
 
 const INDEX_TO_ENCODED: [u8; 114] = [
-    0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
-    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
-    0x30, 0x31,
-    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
-    0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E,
-    0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56,
-    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
-    0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
-    0x70,
-    0x80, 0x81, 0x82,
-    0x90, 0x91, 0x92, 0x93,
-    0xA0, 0xA1, 0xA2, 0xA3,
-    0xB0, 0xB1, 0xB2, 0xB3, 0xB4,
-    0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7,
-    0xD0, 0xD1, 0xD2, 0xD3, 0xD4,
-    0xD5, 0xD6, 0xD7, 0xD8,
-    0xD9, 0xDA, 0xDB,
-    0xDC, 0xDD,
-    0xDE, 0xDF,
-    0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA,
+    0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x20, 0x21, 0x22,
+    0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x30, 0x31, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+    0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x60, 0x61,
+    0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x80,
+    0x81, 0x82, 0x90, 0x91, 0x92, 0x93, 0xA0, 0xA1, 0xA2, 0xA3, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xC0,
+    0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8,
+    0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8,
+    0xE9, 0xEA,
 ];
 
 pub fn by_category(cat: &str) -> impl Iterator<Item = (u8, &'static BuiltinDef)> {
@@ -518,7 +989,10 @@ mod tests {
     fn dispatch_regexp_escape() {
         let mut heap = Heap::new();
         let mut dynamic_chunks = Vec::new();
-        let mut ctx = BuiltinContext { heap: &mut heap, dynamic_chunks: &mut dynamic_chunks };
+        let mut ctx = BuiltinContext {
+            heap: &mut heap,
+            dynamic_chunks: &mut dynamic_chunks,
+        };
         let args = [crate::runtime::Value::String(".".to_string())];
         let r = dispatch(0x80, &args, &mut ctx);
         assert!(r.is_ok(), "dispatch failed: {:?}", r);

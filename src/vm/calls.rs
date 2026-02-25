@@ -1,7 +1,7 @@
+use super::types::{BuiltinResult, VmError};
 use crate::ir::bytecode::BytecodeChunk;
 use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
-use super::types::{BuiltinResult, VmError};
 
 #[inline(always)]
 pub(crate) fn read_u8(code: &[u8], pc: usize) -> u8 {
@@ -27,10 +27,22 @@ pub(crate) fn execute_builtin(
     }
     let result = if argc <= 16 {
         let mut buf: [Value; 16] = [
-            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
-            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
-            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
-            Value::Undefined, Value::Undefined, Value::Undefined, Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
+            Value::Undefined,
         ];
         for i in (0..argc).rev() {
             buf[i] = stack.pop().ok_or(VmError::StackUnderflow)?;
@@ -53,7 +65,10 @@ pub(crate) fn execute_builtin(
 /// Uses `split_off` to avoid individual pops and reversal.
 #[inline]
 pub(crate) fn pop_args(stack: &mut Vec<Value>, argc: usize) -> Result<Vec<Value>, VmError> {
-    let start = stack.len().checked_sub(argc).ok_or(VmError::StackUnderflow)?;
+    let start = stack
+        .len()
+        .checked_sub(argc)
+        .ok_or(VmError::StackUnderflow)?;
     Ok(stack.split_off(start))
 }
 

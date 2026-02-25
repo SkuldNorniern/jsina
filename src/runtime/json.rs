@@ -60,10 +60,7 @@ fn parse_string(s: &str, i: &mut usize) -> Result<String, JsonParseError> {
                             offset: *i,
                         });
                     }
-                    let hex: String = bytes[*i..*i + 4]
-                        .iter()
-                        .map(|&b| b as char)
-                        .collect();
+                    let hex: String = bytes[*i..*i + 4].iter().map(|&b| b as char).collect();
                     *i += 4;
                     let code = u32::from_str_radix(&hex, 16).map_err(|_| JsonParseError {
                         message: "invalid unicode escape".to_string(),
@@ -341,7 +338,11 @@ fn escape_string(s: &str) -> String {
 
 pub fn json_stringify(v: &Value, heap: &Heap) -> Option<String> {
     match v {
-        Value::Undefined | Value::Symbol(_) | Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => None,
+        Value::Undefined
+        | Value::Symbol(_)
+        | Value::Function(_)
+        | Value::DynamicFunction(_)
+        | Value::Builtin(_) => None,
         Value::Null => Some("null".to_string()),
         Value::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
         Value::Int(n) => Some(n.to_string()),

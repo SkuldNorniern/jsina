@@ -1,8 +1,8 @@
 use crate::backend::translate_to_lamina_ir;
 use crate::diagnostics::Diagnostic;
-use crate::frontend::{check_early_errors, Lexer, Parser};
-use crate::host::{with_host, CliHost, HostHooks};
 use crate::diagnostics::ErrorCode;
+use crate::frontend::{Lexer, Parser, check_early_errors};
+use crate::host::{CliHost, HostHooks, with_host};
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::vm::{Completion, Program};
 use std::sync::atomic::AtomicBool;
@@ -89,11 +89,13 @@ impl Driver {
             .iter()
             .find(|f| f.name.as_deref() == Some("main"))
             .or(funcs.first())
-            .ok_or_else(|| DriverError::Diagnostic(vec![Diagnostic::error(
-                ErrorCode::BcNoFunction,
-                "no function to compile",
-                None,
-            )]))?;
+            .ok_or_else(|| {
+                DriverError::Diagnostic(vec![Diagnostic::error(
+                    ErrorCode::BcNoFunction,
+                    "no function to compile",
+                    None,
+                )])
+            })?;
         let cf = hir_to_bytecode(main);
         Ok(crate::ir::disassemble(&cf.chunk))
     }
@@ -123,13 +125,17 @@ impl Driver {
         trace: bool,
         enable_jit: bool,
     ) -> Result<i64, DriverError> {
-        with_host(host, || Self::run_with_host_inner(source, trace, enable_jit))
+        with_host(host, || {
+            Self::run_with_host_inner(source, trace, enable_jit)
+        })
     }
 
     /// Run with step limit. Use for test262 to prevent infinite loops from exhausting memory.
     pub fn run_with_step_limit(source: &str, step_limit: u64) -> Result<i64, DriverError> {
         let host = CliHost;
-        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, Some(step_limit), None, false))
+        with_host(&host, || {
+            Self::run_with_host_and_limit_inner(source, false, Some(step_limit), None, false)
+        })
     }
 
     /// Run with step limit and cancellation flag. When cancel is set, execution stops.
@@ -140,17 +146,28 @@ impl Driver {
         cancel: Option<&AtomicBool>,
     ) -> Result<i64, DriverError> {
         let host = CliHost;
-        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, Some(step_limit), cancel, false))
+        with_host(&host, || {
+            Self::run_with_host_and_limit_inner(source, false, Some(step_limit), cancel, false)
+        })
     }
 
     /// Run with no step limit, only wall-clock timeout via cancel.
     /// Use for test262 when step limit is not desired.
-    pub fn run_with_timeout_and_cancel(source: &str, cancel: Option<&AtomicBool>) -> Result<i64, DriverError> {
+    pub fn run_with_timeout_and_cancel(
+        source: &str,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<i64, DriverError> {
         let host = CliHost;
-        with_host(&host, || Self::run_with_host_and_limit_inner(source, false, None, cancel, false))
+        with_host(&host, || {
+            Self::run_with_host_and_limit_inner(source, false, None, cancel, false)
+        })
     }
 
-    fn run_with_host_inner(source: &str, trace: bool, enable_jit: bool) -> Result<i64, DriverError> {
+    fn run_with_host_inner(
+        source: &str,
+        trace: bool,
+        enable_jit: bool,
+    ) -> Result<i64, DriverError> {
         Self::run_with_host_and_limit_inner(source, trace, None, None, enable_jit)
     }
 
@@ -166,11 +183,13 @@ impl Driver {
         let entry = funcs
             .iter()
             .position(|f| f.name.as_deref() == Some("main"))
-            .ok_or_else(|| DriverError::Diagnostic(vec![Diagnostic::error(
-                ErrorCode::RunNoMain,
-                "no main function found",
-                None,
-            )]))?;
+            .ok_or_else(|| {
+                DriverError::Diagnostic(vec![Diagnostic::error(
+                    ErrorCode::RunNoMain,
+                    "no main function found",
+                    None,
+                )])
+            })?;
         let chunks: Vec<_> = funcs.iter().map(|f| hir_to_bytecode(f).chunk).collect();
         let init_entry = funcs
             .iter()
@@ -188,7 +207,10 @@ impl Driver {
             .iter()
             .enumerate()
             .filter_map(|(i, f)| {
-                f.name.as_ref().filter(|n| *n != "__init__").map(|n| (n.clone(), i))
+                f.name
+                    .as_ref()
+                    .filter(|n| *n != "__init__")
+                    .map(|n| (n.clone(), i))
             })
             .collect();
         let program = Program {
@@ -246,7 +268,12 @@ mod tests {
     fn run_with_host_custom_print() {
         let captured = Rc::new(RefCell::new(Vec::new()));
         let host = CaptureHost(captured.clone());
-        let r = Driver::run_with_host(&host, "function main() { print(\"hi\"); return 0; }", false, false);
+        let r = Driver::run_with_host(
+            &host,
+            "function main() { print(\"hi\"); return 0; }",
+            false,
+            false,
+        );
         assert!(r.is_ok());
         let v = captured.borrow();
         assert_eq!(v.as_slice(), &["hi"]);

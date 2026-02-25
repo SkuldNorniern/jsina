@@ -18,7 +18,11 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn error(code: impl std::fmt::Display, message: impl Into<String>, primary_span: Option<Span>) -> Self {
+    pub fn error(
+        code: impl std::fmt::Display,
+        message: impl Into<String>,
+        primary_span: Option<Span>,
+    ) -> Self {
         Self {
             code: code.to_string(),
             severity: Severity::Error,
@@ -40,7 +44,13 @@ impl Diagnostic {
             .primary_span
             .map(|s| format!(" at {}", s))
             .unwrap_or_default();
-        out.push_str(&format!("{}: {} ({}){}\n", self.severity_label(), self.message, self.code, loc));
+        out.push_str(&format!(
+            "{}: {} ({}){}\n",
+            self.severity_label(),
+            self.message,
+            self.code,
+            loc
+        ));
 
         if let (Some(span), Some(src)) = (self.primary_span, source)
             && let Some(snippet) = self.extract_snippet(src, span)
@@ -77,7 +87,12 @@ impl Diagnostic {
         let end_col = span.end.column.min(line.len() + 1);
         let underline_len = end_col.saturating_sub(col).max(1);
         let pad = " ".repeat(span.start.line.to_string().len());
-        out.push_str(&format!("  {} | {}{}\n", pad, " ".repeat(col), "^".repeat(underline_len)));
+        out.push_str(&format!(
+            "  {} | {}{}\n",
+            pad,
+            " ".repeat(col),
+            "^".repeat(underline_len)
+        ));
 
         Some(out)
     }
@@ -124,9 +139,14 @@ mod tests {
     #[test]
     fn callee_not_function_diagnostic_has_code_and_note() {
         use super::super::codes::ErrorCode;
-        let d = super::callee_not_function_diagnostic("TypeError: callee is not a function (got number)");
+        let d = super::callee_not_function_diagnostic(
+            "TypeError: callee is not a function (got number)",
+        );
         assert_eq!(d.code, ErrorCode::RunCalleeNotFunction.as_str());
-        assert_eq!(d.message, "TypeError: callee is not a function (got number)");
+        assert_eq!(
+            d.message,
+            "TypeError: callee is not a function (got number)"
+        );
         assert_eq!(d.notes.len(), 1);
         assert_eq!(d.notes[0], "received type: number");
     }

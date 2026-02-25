@@ -114,8 +114,16 @@ impl Heap {
         let num_id = self.alloc_object();
         self.set_prop(num_id, "__call__", Value::Builtin(0x52));
         self.set_prop(num_id, "EPSILON", Value::Number(2.0_f64.powi(-52)));
-        self.set_prop(num_id, "MIN_SAFE_INTEGER", Value::Number(-9007199254740991.0));
-        self.set_prop(num_id, "MAX_SAFE_INTEGER", Value::Number(9007199254740991.0));
+        self.set_prop(
+            num_id,
+            "MIN_SAFE_INTEGER",
+            Value::Number(-9007199254740991.0),
+        );
+        self.set_prop(
+            num_id,
+            "MAX_SAFE_INTEGER",
+            Value::Number(9007199254740991.0),
+        );
         self.set_prop(num_id, "isSafeInteger", Value::Builtin(0x54));
         self.set_prop(global_id, "Number", Value::Object(num_id));
 
@@ -127,7 +135,11 @@ impl Heap {
         self.set_prop(global_id, "Error", Value::Object(err_id));
 
         let ref_err_id = self.alloc_object();
-        self.set_prop(ref_err_id, "name", Value::String("ReferenceError".to_string()));
+        self.set_prop(
+            ref_err_id,
+            "name",
+            Value::String("ReferenceError".to_string()),
+        );
         self.set_prop(ref_err_id, "__call__", Value::Builtin(0x51));
         self.set_prop(global_id, "ReferenceError", Value::Object(ref_err_id));
 
@@ -137,12 +149,20 @@ impl Heap {
         self.set_prop(global_id, "TypeError", Value::Object(type_err_id));
 
         let range_err_id = self.alloc_object();
-        self.set_prop(range_err_id, "name", Value::String("RangeError".to_string()));
+        self.set_prop(
+            range_err_id,
+            "name",
+            Value::String("RangeError".to_string()),
+        );
         self.set_prop(range_err_id, "__call__", Value::Builtin(0x51));
         self.set_prop(global_id, "RangeError", Value::Object(range_err_id));
 
         let syntax_err_id = self.alloc_object();
-        self.set_prop(syntax_err_id, "name", Value::String("SyntaxError".to_string()));
+        self.set_prop(
+            syntax_err_id,
+            "name",
+            Value::String("SyntaxError".to_string()),
+        );
         self.set_prop(syntax_err_id, "__call__", Value::Builtin(0x51));
         self.set_prop(global_id, "SyntaxError", Value::Object(syntax_err_id));
 
@@ -538,7 +558,11 @@ impl Heap {
                     _ => String::new(),
                 };
                 if self.is_error_object(*id) || !name.is_empty() || !message.is_empty() {
-                    let n = if name.is_empty() { "Error" } else { name.as_str() };
+                    let n = if name.is_empty() {
+                        "Error"
+                    } else {
+                        name.as_str()
+                    };
                     if message.is_empty() {
                         n.to_string()
                     } else {

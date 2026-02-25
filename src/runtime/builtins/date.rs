@@ -5,12 +5,10 @@ use super::{number_to_value, to_number};
 
 pub fn create(args: &[Value], heap: &mut Heap) -> Value {
     let ms = match args.first() {
-        None => {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as f64)
-                .unwrap_or(0.0)
-        }
+        None => SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as f64)
+            .unwrap_or(0.0),
         Some(Value::Int(n)) => *n as f64,
         Some(Value::Number(n)) => *n,
         Some(v) => to_number(v),

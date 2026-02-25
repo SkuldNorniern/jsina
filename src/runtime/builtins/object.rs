@@ -96,7 +96,11 @@ pub fn freeze(args: &[Value], _heap: &mut Heap) -> Value {
 }
 
 pub fn is_extensible(args: &[Value], _heap: &mut Heap) -> Value {
-    Value::Bool(args.first().map(|v| matches!(v, Value::Object(_))).unwrap_or(false))
+    Value::Bool(
+        args.first()
+            .map(|v| matches!(v, Value::Object(_)))
+            .unwrap_or(false),
+    )
 }
 
 pub fn is_frozen(_args: &[Value], _heap: &mut Heap) -> Value {

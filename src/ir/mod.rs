@@ -5,7 +5,7 @@ pub mod hir;
 pub mod lower;
 
 pub use bytecode::{BytecodeChunk, ConstEntry, Opcode};
+pub use compile::{CompiledFunction, hir_to_bytecode};
 pub use disasm::disassemble;
-pub use compile::{hir_to_bytecode, CompiledFunction};
 pub use hir::HirFunction;
-pub use lower::{script_to_hir, LowerError};
+pub use lower::{LowerError, script_to_hir};

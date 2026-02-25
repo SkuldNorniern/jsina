@@ -84,10 +84,8 @@ pub fn parse_float(args: &[Value], _heap: &mut Heap) -> Value {
 
 pub fn is_safe_integer(args: &[Value], _heap: &mut Heap) -> Value {
     let n = args.first().map(to_number).unwrap_or(f64::NAN);
-    let ok = n.is_finite()
-        && n.fract() == 0.0
-        && n >= -9007199254740991.0
-        && n <= 9007199254740991.0;
+    let ok =
+        n.is_finite() && n.fract() == 0.0 && n >= -9007199254740991.0 && n <= 9007199254740991.0;
     Value::Bool(ok)
 }
 
@@ -107,7 +105,10 @@ mod tests {
     #[test]
     fn is_nan_returns_true_for_nan() {
         let mut heap = Heap::new();
-        assert_eq!(is_nan(&[Value::Number(f64::NAN)], &mut heap), Value::Bool(true));
+        assert_eq!(
+            is_nan(&[Value::Number(f64::NAN)], &mut heap),
+            Value::Bool(true)
+        );
         assert_eq!(is_nan(&[Value::Undefined], &mut heap), Value::Bool(true));
     }
 
@@ -121,14 +122,23 @@ mod tests {
     #[test]
     fn is_finite_returns_true_for_finite() {
         let mut heap = Heap::new();
-        assert_eq!(is_finite(&[Value::Number(1.0)], &mut heap), Value::Bool(true));
+        assert_eq!(
+            is_finite(&[Value::Number(1.0)], &mut heap),
+            Value::Bool(true)
+        );
         assert_eq!(is_finite(&[Value::Int(0)], &mut heap), Value::Bool(true));
     }
 
     #[test]
     fn is_finite_returns_false_for_nan_or_infinity() {
         let mut heap = Heap::new();
-        assert_eq!(is_finite(&[Value::Number(f64::NAN)], &mut heap), Value::Bool(false));
-        assert_eq!(is_finite(&[Value::Number(f64::INFINITY)], &mut heap), Value::Bool(false));
+        assert_eq!(
+            is_finite(&[Value::Number(f64::NAN)], &mut heap),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            is_finite(&[Value::Number(f64::INFINITY)], &mut heap),
+            Value::Bool(false)
+        );
     }
 }

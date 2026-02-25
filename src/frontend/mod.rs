@@ -6,7 +6,7 @@ pub mod token_type;
 pub mod trie;
 
 pub use ast::*;
-pub use early_errors::{check as check_early_errors, EarlyError};
+pub use early_errors::{EarlyError, check as check_early_errors};
 pub use lexer::Lexer;
 pub use parser::{ParseError, Parser};
 pub use token_type::{Token, TokenType};

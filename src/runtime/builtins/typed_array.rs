@@ -47,7 +47,10 @@ pub fn array_buffer(args: &[Value], heap: &mut Heap) -> Value {
     Value::Object(id)
 }
 
-pub fn data_view(args: &[Value], ctx: &mut super::BuiltinContext) -> Result<Value, super::BuiltinError> {
+pub fn data_view(
+    args: &[Value],
+    ctx: &mut super::BuiltinContext,
+) -> Result<Value, super::BuiltinError> {
     let _ = (args, ctx);
     Err(super::BuiltinError::Throw(Value::String(
         "DataView is not implemented".to_string(),
@@ -63,7 +66,10 @@ mod tests {
     fn data_view_throws_not_implemented() {
         let mut heap = Heap::new();
         let mut dynamic_chunks = Vec::new();
-        let mut ctx = super::super::BuiltinContext { heap: &mut heap, dynamic_chunks: &mut dynamic_chunks };
+        let mut ctx = super::super::BuiltinContext {
+            heap: &mut heap,
+            dynamic_chunks: &mut dynamic_chunks,
+        };
         let r = data_view(&[], &mut ctx);
         assert!(r.is_err());
         if let Err(super::super::BuiltinError::Throw(Value::String(s))) = r {

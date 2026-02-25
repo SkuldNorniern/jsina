@@ -115,13 +115,20 @@ pub fn slice(args: &[Value], heap: &mut Heap) -> Value {
         let end = end.max(start);
         Value::String(s[start..end].to_string())
     } else if let Value::Array(id) = receiver {
-        let elements: Vec<Value> = heap.array_elements(*id).map(|s| s.to_vec()).unwrap_or_default();
+        let elements: Vec<Value> = heap
+            .array_elements(*id)
+            .map(|s| s.to_vec())
+            .unwrap_or_default();
         let len = elements.len() as i32;
         let start = start_val.map(|v| to_number(v) as i32).unwrap_or(0);
         let end = end_val
             .map(|v| {
                 let n = to_number(v);
-                if n.is_nan() || n.is_infinite() { len } else { n as i32 }
+                if n.is_nan() || n.is_infinite() {
+                    len
+                } else {
+                    n as i32
+                }
             })
             .unwrap_or(len);
         let start = start.max(0).min(len) as usize;
@@ -151,7 +158,10 @@ pub fn concat(args: &[Value], heap: &mut Heap) -> Value {
         }
         Value::String(out)
     } else if let Value::Array(arr_id) = receiver {
-        let mut to_push: Vec<Value> = heap.array_elements(*arr_id).map(|s| s.to_vec()).unwrap_or_default();
+        let mut to_push: Vec<Value> = heap
+            .array_elements(*arr_id)
+            .map(|s| s.to_vec())
+            .unwrap_or_default();
         for v in args.iter().skip(1) {
             if let Value::Array(id) = v {
                 if let Some(elems) = heap.array_elements(*id) {
@@ -183,18 +193,30 @@ fn index_of_impl(args: &[Value], heap: &Heap) -> Value {
         let from = from_val
             .map(|v| {
                 let n = to_number(&v) as i32;
-                if n < 0 { ((s.len() as i32) + n).max(0) as usize }
-                else { n.min(s.len() as i32) as usize }
+                if n < 0 {
+                    ((s.len() as i32) + n).max(0) as usize
+                } else {
+                    n.min(s.len() as i32) as usize
+                }
             })
             .unwrap_or(0);
-        s[from..].find(&search_str).map(|i| (from + i) as i32).unwrap_or(-1)
+        s[from..]
+            .find(&search_str)
+            .map(|i| (from + i) as i32)
+            .unwrap_or(-1)
     } else if let Value::Array(id) = receiver {
-        let elements: Vec<Value> = heap.array_elements(*id).map(|s| s.to_vec()).unwrap_or_default();
+        let elements: Vec<Value> = heap
+            .array_elements(*id)
+            .map(|s| s.to_vec())
+            .unwrap_or_default();
         let from = from_val
             .map(|v| {
                 let n = to_number(v) as i32;
-                if n < 0 { ((elements.len() as i32) + n).max(0) as usize }
-                else { n.min(elements.len() as i32) as usize }
+                if n < 0 {
+                    ((elements.len() as i32) + n).max(0) as usize
+                } else {
+                    n.min(elements.len() as i32) as usize
+                }
             })
             .unwrap_or(0);
         let mut found = -1i32;
@@ -229,9 +251,15 @@ pub fn join(args: &[Value], heap: &mut Heap) -> Value {
         Some(v) => v,
         None => return Value::Undefined,
     };
-    let sep = args.get(1).map(|v| v.to_string()).unwrap_or_else(|| ",".to_string());
+    let sep = args
+        .get(1)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| ",".to_string());
     let elements: Vec<Value> = match arr {
-        Value::Array(id) => heap.array_elements(*id).map(|s| s.to_vec()).unwrap_or_default(),
+        Value::Array(id) => heap
+            .array_elements(*id)
+            .map(|s| s.to_vec())
+            .unwrap_or_default(),
         _ => return Value::Undefined,
     };
     let parts: Vec<String> = elements.iter().map(|v| v.to_string()).collect();

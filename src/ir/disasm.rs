@@ -66,7 +66,11 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             x if x == Opcode::PushConst as u8 => {
                 let idx = code.get(pc).copied().unwrap_or(0) as usize;
                 pc += 1;
-                let const_val = chunk.constants.get(idx).map(format_const).unwrap_or_else(|| "?".to_string());
+                let const_val = chunk
+                    .constants
+                    .get(idx)
+                    .map(format_const)
+                    .unwrap_or_else(|| "?".to_string());
                 format!("  {:04}  PushConst  {}  ; {}", line_start, idx, const_val)
             }
             x if x == Opcode::Pop as u8 => format!("  {:04}  Pop", line_start),
@@ -97,7 +101,9 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             x if x == Opcode::StrictNotEq as u8 => format!("  {:04}  StrictNotEq", line_start),
             x if x == Opcode::LeftShift as u8 => format!("  {:04}  LeftShift", line_start),
             x if x == Opcode::RightShift as u8 => format!("  {:04}  RightShift", line_start),
-            x if x == Opcode::UnsignedRightShift as u8 => format!("  {:04}  UnsignedRightShift", line_start),
+            x if x == Opcode::UnsignedRightShift as u8 => {
+                format!("  {:04}  UnsignedRightShift", line_start)
+            }
             x if x == Opcode::BitwiseAnd as u8 => format!("  {:04}  BitwiseAnd", line_start),
             x if x == Opcode::BitwiseOr as u8 => format!("  {:04}  BitwiseOr", line_start),
             x if x == Opcode::BitwiseXor as u8 => format!("  {:04}  BitwiseXor", line_start),
@@ -105,18 +111,28 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             x if x == Opcode::BitwiseNot as u8 => format!("  {:04}  BitwiseNot", line_start),
             x if x == Opcode::Typeof as u8 => format!("  {:04}  Typeof", line_start),
             x if x == Opcode::NewObject as u8 => format!("  {:04}  NewObject", line_start),
-            x if x == Opcode::NewObjectWithProto as u8 => format!("  {:04}  NewObjectWithProto", line_start),
+            x if x == Opcode::NewObjectWithProto as u8 => {
+                format!("  {:04}  NewObjectWithProto", line_start)
+            }
             x if x == Opcode::NewArray as u8 => format!("  {:04}  NewArray", line_start),
             x if x == Opcode::GetProp as u8 => {
                 let idx = code.get(pc).copied().unwrap_or(0) as usize;
                 pc += 1;
-                let key = chunk.constants.get(idx).map(format_const).unwrap_or_else(|| "?".to_string());
+                let key = chunk
+                    .constants
+                    .get(idx)
+                    .map(format_const)
+                    .unwrap_or_else(|| "?".to_string());
                 format!("  {:04}  GetProp  {}  ; {}", line_start, idx, key)
             }
             x if x == Opcode::SetProp as u8 => {
                 let idx = code.get(pc).copied().unwrap_or(0) as usize;
                 pc += 1;
-                let key = chunk.constants.get(idx).map(format_const).unwrap_or_else(|| "?".to_string());
+                let key = chunk
+                    .constants
+                    .get(idx)
+                    .map(format_const)
+                    .unwrap_or_else(|| "?".to_string());
                 format!("  {:04}  SetProp  {}  ; {}", line_start, idx, key)
             }
             x if x == Opcode::GetPropDyn as u8 => format!("  {:04}  GetPropDyn", line_start),
@@ -133,7 +149,10 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 pc += 2;
                 let name = crate::runtime::builtins::name(builtin_id);
                 let cat = crate::runtime::builtins::category(builtin_id);
-                format!("  {:04}  CallBuiltin  0x{:02X}  {}  ; {}.{}", line_start, builtin_id, argc, cat, name)
+                format!(
+                    "  {:04}  CallBuiltin  0x{:02X}  {}  ; {}.{}",
+                    line_start, builtin_id, argc, cat, name
+                )
             }
             x if x == Opcode::NewMethod as u8 => {
                 let argc = code.get(pc).copied().unwrap_or(0);
@@ -141,21 +160,24 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                 format!("  {:04}  NewMethod  {}", line_start, argc)
             }
             x if x == Opcode::JumpIfFalse as u8 => {
-                let offset = code.get(pc..pc + 2)
+                let offset = code
+                    .get(pc..pc + 2)
                     .map(|b| i16::from_le_bytes([b[0], b[1]]) as i32)
                     .unwrap_or(0);
                 pc += 2;
                 format!("  {:04}  JumpIfFalse  {}", line_start, offset)
             }
             x if x == Opcode::JumpIfNullish as u8 => {
-                let offset = code.get(pc..pc + 2)
+                let offset = code
+                    .get(pc..pc + 2)
                     .map(|b| i16::from_le_bytes([b[0], b[1]]) as i32)
                     .unwrap_or(0);
                 pc += 2;
                 format!("  {:04}  JumpIfNullish  {}", line_start, offset)
             }
             x if x == Opcode::Jump as u8 => {
-                let offset = code.get(pc..pc + 2)
+                let offset = code
+                    .get(pc..pc + 2)
                     .map(|b| i16::from_le_bytes([b[0], b[1]]) as i32)
                     .unwrap_or(0);
                 pc += 2;

@@ -2,20 +2,25 @@ use super::{number_to_value, random_f64, to_number};
 use crate::runtime::{Heap, Value};
 
 pub fn floor(args: &[Value], _heap: &mut Heap) -> Value {
-    let n = args.first().map(|x| match x {
-        Value::Int(i) => *i as f64,
-        Value::Number(n) => *n,
-        _ => f64::NAN,
-    }).unwrap_or(f64::NAN);
+    let n = args
+        .first()
+        .map(|x| match x {
+            Value::Int(i) => *i as f64,
+            Value::Number(n) => *n,
+            _ => f64::NAN,
+        })
+        .unwrap_or(f64::NAN);
     number_to_value(n.floor())
 }
 
 pub fn abs(args: &[Value], _heap: &mut Heap) -> Value {
-    args.first().map(|x| match x {
-        Value::Int(i) => Value::Int(if *i < 0 { -(*i) } else { *i }),
-        Value::Number(n) => Value::Number(n.abs()),
-        _ => Value::Number(f64::NAN),
-    }).unwrap_or(Value::Number(f64::NAN))
+    args.first()
+        .map(|x| match x {
+            Value::Int(i) => Value::Int(if *i < 0 { -(*i) } else { *i }),
+            Value::Number(n) => Value::Number(n.abs()),
+            _ => Value::Number(f64::NAN),
+        })
+        .unwrap_or(Value::Number(f64::NAN))
 }
 
 pub fn min(args: &[Value], _heap: &mut Heap) -> Value {

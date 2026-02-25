@@ -2,13 +2,16 @@
 //! Uses eval internally. Last argument is body, preceding are param names.
 //! Returns Value::DynamicFunction so the created function can be invoked in the caller's context.
 
-use crate::frontend::{check_early_errors, Parser};
+use super::{BuiltinContext, BuiltinError, to_prop_key};
+use crate::frontend::{Parser, check_early_errors};
 use crate::ir::{hir_to_bytecode, script_to_hir};
-use crate::vm::{interpret_program_with_heap, Completion, Program};
-use super::{to_prop_key, BuiltinContext, BuiltinError};
 use crate::runtime::Value;
+use crate::vm::{Completion, Program, interpret_program_with_heap};
 
-pub fn function_constructor(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
+pub fn function_constructor(
+    args: &[Value],
+    ctx: &mut BuiltinContext,
+) -> Result<Value, BuiltinError> {
     if args.is_empty() {
         return Ok(Value::Undefined);
     }
@@ -24,9 +27,11 @@ pub fn function_constructor(args: &[Value], ctx: &mut BuiltinContext) -> Result<
     );
     let script = match Parser::new(&wrapped).parse() {
         Ok(s) => s,
-        Err(_) => return Err(BuiltinError::Throw(Value::String(
-            "SyntaxError: Invalid function body".to_string(),
-        ))),
+        Err(_) => {
+            return Err(BuiltinError::Throw(Value::String(
+                "SyntaxError: Invalid function body".to_string(),
+            )));
+        }
     };
     if check_early_errors(&script).is_err() {
         return Err(BuiltinError::Throw(Value::String(
@@ -35,9 +40,11 @@ pub fn function_constructor(args: &[Value], ctx: &mut BuiltinContext) -> Result<
     }
     let funcs = match script_to_hir(&script) {
         Ok(f) => f,
-        Err(_) => return Err(BuiltinError::Throw(Value::String(
-            "SyntaxError: Invalid function body".to_string(),
-        ))),
+        Err(_) => {
+            return Err(BuiltinError::Throw(Value::String(
+                "SyntaxError: Invalid function body".to_string(),
+            )));
+        }
     };
     let entry = funcs.iter().position(|f| f.name.as_deref() == Some("main"));
     let entry = match entry {
@@ -48,7 +55,12 @@ pub fn function_constructor(args: &[Value], ctx: &mut BuiltinContext) -> Result<
     let global_funcs: Vec<(String, usize)> = funcs
         .iter()
         .enumerate()
-        .filter_map(|(i, f)| f.name.as_ref().filter(|n| *n != "__init__").map(|n| (n.clone(), i)))
+        .filter_map(|(i, f)| {
+            f.name
+                .as_ref()
+                .filter(|n| *n != "__init__")
+                .map(|n| (n.clone(), i))
+        })
         .collect();
     let program = Program {
         chunks,

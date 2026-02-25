@@ -138,7 +138,10 @@ fn check_statement(
                 if fn_strict && is_strict_reserved(name) {
                     errors.push(EarlyError {
                         code: ErrorCode::EarlyStrictReserved,
-                        message: format!("'{}' may not be used as parameter name in strict mode", name),
+                        message: format!(
+                            "'{}' may not be used as parameter name in strict mode",
+                            name
+                        ),
                         span: f.span,
                     });
                 }
@@ -210,7 +213,10 @@ fn check_statement(
                     if ctx.strict && is_strict_reserved(name) {
                         errors.push(EarlyError {
                             code: ErrorCode::EarlyStrictReserved,
-                            message: format!("'{}' may not be used as binding in strict mode", name),
+                            message: format!(
+                                "'{}' may not be used as binding in strict mode",
+                                name
+                            ),
                             span: decl.span,
                         });
                     }
@@ -230,7 +236,10 @@ fn check_statement(
                     if ctx.strict && is_strict_reserved(name) {
                         errors.push(EarlyError {
                             code: ErrorCode::EarlyStrictReserved,
-                            message: format!("'{}' may not be used as binding in strict mode", name),
+                            message: format!(
+                                "'{}' may not be used as binding in strict mode",
+                                name
+                            ),
                             span: decl.span,
                         });
                     }
@@ -250,7 +259,10 @@ fn check_statement(
                     if ctx.strict && is_strict_reserved(name) {
                         errors.push(EarlyError {
                             code: ErrorCode::EarlyStrictReserved,
-                            message: format!("'{}' may not be used as binding in strict mode", name),
+                            message: format!(
+                                "'{}' may not be used as binding in strict mode",
+                                name
+                            ),
                             span: decl.span,
                         });
                     }
@@ -425,11 +437,7 @@ impl Scope {
 
 impl EarlyError {
     pub fn to_diagnostic(&self) -> Diagnostic {
-        Diagnostic::error(
-            self.code,
-            self.message.clone(),
-            Some(self.span),
-        )
+        Diagnostic::error(self.code, self.message.clone(), Some(self.span))
     }
 }
 

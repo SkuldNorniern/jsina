@@ -1,6 +1,6 @@
-use crate::diagnostics::{Position, Span};
 use super::token_type::{Token, TokenType};
 use super::trie::Trie;
+use crate::diagnostics::{Position, Span};
 
 pub struct Lexer<'a> {
     source: String,
@@ -29,14 +29,17 @@ impl Lexer<'_> {
     }
 
     fn peek(&self) -> Option<char> {
-        self.source.get(self.position.byte_offset + 1..)
+        self.source
+            .get(self.position.byte_offset + 1..)
             .and_then(|s| s.chars().next())
     }
 
     fn advance(&mut self) {
         if let Some(ch) = self.current_char {
             self.position.advance(ch);
-            self.current_char = self.source.get(self.position.byte_offset..)
+            self.current_char = self
+                .source
+                .get(self.position.byte_offset..)
                 .and_then(|s| s.chars().next());
         }
     }
@@ -131,7 +134,9 @@ impl Lexer<'_> {
                             if ch.is_ascii_hexdigit() {
                                 lexeme.push(ch);
                                 self.advance();
-                            } else { break; }
+                            } else {
+                                break;
+                            }
                         }
                     }
                     'b' | 'B' => {
@@ -141,7 +146,9 @@ impl Lexer<'_> {
                             if ch == '0' || ch == '1' {
                                 lexeme.push(ch);
                                 self.advance();
-                            } else { break; }
+                            } else {
+                                break;
+                            }
                         }
                     }
                     'o' | 'O' => {
@@ -151,7 +158,9 @@ impl Lexer<'_> {
                             if ch.is_ascii_digit() && ch < '8' {
                                 lexeme.push(ch);
                                 self.advance();
-                            } else { break; }
+                            } else {
+                                break;
+                            }
                         }
                     }
                     _ => {
@@ -159,7 +168,9 @@ impl Lexer<'_> {
                             if ch.is_ascii_digit() {
                                 lexeme.push(ch);
                                 self.advance();
-                            } else { break; }
+                            } else {
+                                break;
+                            }
                         }
                     }
                 }
@@ -169,7 +180,9 @@ impl Lexer<'_> {
                 if ch.is_ascii_digit() {
                     lexeme.push(ch);
                     self.advance();
-                } else { break; }
+                } else {
+                    break;
+                }
             }
         }
 
@@ -180,14 +193,20 @@ impl Lexer<'_> {
                 if ch.is_ascii_digit() {
                     lexeme.push(ch);
                     self.advance();
-                } else { break; }
+                } else {
+                    break;
+                }
             }
         }
 
-        if let Some(ch) = self.current_char && (ch == 'e' || ch == 'E') {
+        if let Some(ch) = self.current_char
+            && (ch == 'e' || ch == 'E')
+        {
             lexeme.push(ch);
             self.advance();
-            if let Some(ch) = self.current_char && (ch == '+' || ch == '-') {
+            if let Some(ch) = self.current_char
+                && (ch == '+' || ch == '-')
+            {
                 lexeme.push(ch);
                 self.advance();
             }
@@ -218,10 +237,14 @@ impl Lexer<'_> {
                 break;
             }
         }
-        if let Some(ch) = self.current_char && (ch == 'e' || ch == 'E') {
+        if let Some(ch) = self.current_char
+            && (ch == 'e' || ch == 'E')
+        {
             lexeme.push(ch);
             self.advance();
-            if let Some(ch) = self.current_char && (ch == '+' || ch == '-') {
+            if let Some(ch) = self.current_char
+                && (ch == '+' || ch == '-')
+            {
                 lexeme.push(ch);
                 self.advance();
             }
@@ -296,9 +319,13 @@ impl Lexer<'_> {
                 while let Some(ch) = self.current_char {
                     lexeme.push(ch);
                     self.advance();
-                    if ch == '{' { brace_count += 1; } else if ch == '}' {
+                    if ch == '{' {
+                        brace_count += 1;
+                    } else if ch == '}' {
                         brace_count -= 1;
-                        if brace_count == 0 { break; }
+                        if brace_count == 0 {
+                            break;
+                        }
                     }
                 }
             } else {
@@ -315,10 +342,18 @@ impl Lexer<'_> {
         use TokenType::*;
         matches!(
             self.prev_token_type.as_ref(),
-            Some(RightParen) | Some(RightBracket) | Some(RightBrace)
-                | Some(Identifier) | Some(Number) | Some(String)
-                | Some(RegExpLiteral { .. }) | Some(True) | Some(False)
-                | Some(Null) | Some(This) | Some(TemplateLiteral)
+            Some(RightParen)
+                | Some(RightBracket)
+                | Some(RightBrace)
+                | Some(Identifier)
+                | Some(Number)
+                | Some(String)
+                | Some(RegExpLiteral { .. })
+                | Some(True)
+                | Some(False)
+                | Some(Null)
+                | Some(This)
+                | Some(TemplateLiteral)
         )
     }
 
@@ -362,25 +397,22 @@ impl Lexer<'_> {
         }
         let lexeme = format!("/{}/{}", pattern, flags);
         let span = Span::from_text(start_pos, &lexeme);
-        Token::new(
-            TokenType::RegExpLiteral {
-                pattern,
-                flags,
-            },
-            lexeme,
-            span,
-        )
+        Token::new(TokenType::RegExpLiteral { pattern, flags }, lexeme, span)
     }
 
     fn scan_comment(&mut self) -> bool {
-        if self.current_char != Some('/') { return false; }
+        if self.current_char != Some('/') {
+            return false;
+        }
         let start_pos = self.position;
         self.advance();
 
         if self.current_char == Some('/') {
             self.advance();
             while let Some(ch) = self.current_char {
-                if ch == '\n' { break; }
+                if ch == '\n' {
+                    break;
+                }
                 self.advance();
             }
             true
@@ -420,60 +452,115 @@ impl Lexer<'_> {
         match ch {
             '(' => {
                 self.advance();
-                Token::new(TokenType::LeftParen, "(".to_string(), Span::from_text(start_pos, "("))
+                Token::new(
+                    TokenType::LeftParen,
+                    "(".to_string(),
+                    Span::from_text(start_pos, "("),
+                )
             }
             ')' => {
                 self.advance();
-                Token::new(TokenType::RightParen, ")".to_string(), Span::from_text(start_pos, ")"))
+                Token::new(
+                    TokenType::RightParen,
+                    ")".to_string(),
+                    Span::from_text(start_pos, ")"),
+                )
             }
             '[' => {
                 self.advance();
-                Token::new(TokenType::LeftBracket, "[".to_string(), Span::from_text(start_pos, "["))
+                Token::new(
+                    TokenType::LeftBracket,
+                    "[".to_string(),
+                    Span::from_text(start_pos, "["),
+                )
             }
             ']' => {
                 self.advance();
-                Token::new(TokenType::RightBracket, "]".to_string(), Span::from_text(start_pos, "]"))
+                Token::new(
+                    TokenType::RightBracket,
+                    "]".to_string(),
+                    Span::from_text(start_pos, "]"),
+                )
             }
             '{' => {
                 self.advance();
-                Token::new(TokenType::LeftBrace, "{".to_string(), Span::from_text(start_pos, "{"))
+                Token::new(
+                    TokenType::LeftBrace,
+                    "{".to_string(),
+                    Span::from_text(start_pos, "{"),
+                )
             }
             '}' => {
                 self.advance();
-                Token::new(TokenType::RightBrace, "}".to_string(), Span::from_text(start_pos, "}"))
+                Token::new(
+                    TokenType::RightBrace,
+                    "}".to_string(),
+                    Span::from_text(start_pos, "}"),
+                )
             }
             ';' => {
                 self.advance();
-                Token::new(TokenType::Semicolon, ";".to_string(), Span::from_text(start_pos, ";"))
+                Token::new(
+                    TokenType::Semicolon,
+                    ";".to_string(),
+                    Span::from_text(start_pos, ";"),
+                )
             }
             ',' => {
                 self.advance();
-                Token::new(TokenType::Comma, ",".to_string(), Span::from_text(start_pos, ","))
+                Token::new(
+                    TokenType::Comma,
+                    ",".to_string(),
+                    Span::from_text(start_pos, ","),
+                )
             }
             '.' => {
-                if self.peek() == Some('.') && self.source.get(self.position.byte_offset + 2..).and_then(|s| s.chars().next()) == Some('.') {
+                if self.peek() == Some('.')
+                    && self
+                        .source
+                        .get(self.position.byte_offset + 2..)
+                        .and_then(|s| s.chars().next())
+                        == Some('.')
+                {
                     self.advance();
                     self.advance();
                     self.advance();
-                    Token::new(TokenType::Spread, "...".to_string(), Span::from_text(start_pos, "..."))
+                    Token::new(
+                        TokenType::Spread,
+                        "...".to_string(),
+                        Span::from_text(start_pos, "..."),
+                    )
                 } else if self.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
                     self.scan_decimal_literal()
                 } else {
                     self.advance();
-                    Token::new(TokenType::Dot, ".".to_string(), Span::from_text(start_pos, "."))
+                    Token::new(
+                        TokenType::Dot,
+                        ".".to_string(),
+                        Span::from_text(start_pos, "."),
+                    )
                 }
             }
             '~' => {
                 self.advance();
-                Token::new(TokenType::BitwiseNot, "~".to_string(), Span::from_text(start_pos, "~"))
+                Token::new(
+                    TokenType::BitwiseNot,
+                    "~".to_string(),
+                    Span::from_text(start_pos, "~"),
+                )
             }
             '"' | '\'' => self.scan_string(),
             '`' => self.scan_template_literal(),
             '0'..='9' => self.scan_number(),
             '/' => {
-                if let Some((token_type, length)) = self.keywords_trie.find_longest_match(&self.source, self.position.byte_offset) {
+                if let Some((token_type, length)) = self
+                    .keywords_trie
+                    .find_longest_match(&self.source, self.position.byte_offset)
+                {
                     if matches!(token_type, TokenType::DivideAssign) {
-                        let lexeme = self.source[self.position.byte_offset..self.position.byte_offset + length].to_string();
+                        let lexeme = self.source
+                            [self.position.byte_offset..self.position.byte_offset + length]
+                            .to_string();
                         let mut end_pos = start_pos;
                         end_pos.advance_by(&lexeme);
                         let span = Span::new(start_pos, end_pos);
@@ -483,21 +570,34 @@ impl Lexer<'_> {
                         Token::new(token_type, lexeme, span)
                     } else if self.prev_could_end_expression() {
                         self.advance();
-                        Token::new(TokenType::Divide, "/".to_string(), Span::from_text(start_pos, "/"))
+                        Token::new(
+                            TokenType::Divide,
+                            "/".to_string(),
+                            Span::from_text(start_pos, "/"),
+                        )
                     } else {
                         self.scan_regex_literal()
                     }
                 } else if self.prev_could_end_expression() {
                     self.advance();
-                    Token::new(TokenType::Divide, "/".to_string(), Span::from_text(start_pos, "/"))
+                    Token::new(
+                        TokenType::Divide,
+                        "/".to_string(),
+                        Span::from_text(start_pos, "/"),
+                    )
                 } else {
                     self.scan_regex_literal()
                 }
             }
             'a'..='z' | 'A'..='Z' | '_' | '$' => self.scan_identifier(),
             _ => {
-                if let Some((token_type, length)) = self.keywords_trie.find_longest_match(&self.source, self.position.byte_offset) {
-                    let lexeme = self.source[self.position.byte_offset..self.position.byte_offset + length].to_string();
+                if let Some((token_type, length)) = self
+                    .keywords_trie
+                    .find_longest_match(&self.source, self.position.byte_offset)
+                {
+                    let lexeme = self.source
+                        [self.position.byte_offset..self.position.byte_offset + length]
+                        .to_string();
                     let mut end_pos = start_pos;
                     end_pos.advance_by(&lexeme);
                     let span = Span::new(start_pos, end_pos);
@@ -508,7 +608,11 @@ impl Lexer<'_> {
                 } else {
                     self.advance();
                     let span = Span::from_text(start_pos, &ch.to_string());
-                    Token::new(TokenType::Error(format!("Unexpected character: {}", ch)), ch.to_string(), span)
+                    Token::new(
+                        TokenType::Error(format!("Unexpected character: {}", ch)),
+                        ch.to_string(),
+                        span,
+                    )
                 }
             }
         }
@@ -527,7 +631,9 @@ impl Lexer<'_> {
         let mut tokens = Vec::new();
         loop {
             let token = self.next_token();
-            if token.token_type == TokenType::Eof { break; }
+            if token.token_type == TokenType::Eof {
+                break;
+            }
             self.prev_token_type = Some(token.token_type.clone());
             tokens.push(token);
         }

@@ -4,11 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use lamina::ir::{builder::i64, IRBuilder, PrimitiveType, Type};
+use lamina::LaminaError;
+use lamina::ir::{IRBuilder, PrimitiveType, Type, builder::i64};
 use lamina::mir::codegen::from_ir;
 use lamina::mir_codegen::generate_mir_to_target;
 use lamina::target::Target;
-use lamina::LaminaError;
 
 use crate::frontend::Lexer;
 use crate::frontend::TokenType;
@@ -83,9 +83,9 @@ pub fn extract_constant_return(js_source: &str) -> Result<i64, BackendError> {
         }
     }
 
-    return_value.ok_or_else(|| BackendError::Parse(
-        "Could not find main function with numeric return".to_string(),
-    ))
+    return_value.ok_or_else(|| {
+        BackendError::Parse("Could not find main function with numeric return".to_string())
+    })
 }
 
 fn build_constant_main_module(value: i64) -> lamina::ir::Module<'static> {
@@ -129,7 +129,11 @@ pub fn translate_to_lamina_ir(js_source: &str) -> Result<String, BackendError> {
 }
 
 fn assemble_object(asm_path: &Path, obj_path: &Path) -> Result<(), BackendError> {
-    let compiler = if cfg!(target_os = "macos") { "clang" } else { "gcc" };
+    let compiler = if cfg!(target_os = "macos") {
+        "clang"
+    } else {
+        "gcc"
+    };
     let status = Command::new(compiler)
         .arg("-c")
         .arg("-fPIC")
@@ -138,13 +142,19 @@ fn assemble_object(asm_path: &Path, obj_path: &Path) -> Result<(), BackendError>
         .arg(obj_path)
         .status()?;
     if !status.success() {
-        return Err(BackendError::Process("failed to assemble object".to_string()));
+        return Err(BackendError::Process(
+            "failed to assemble object".to_string(),
+        ));
     }
     Ok(())
 }
 
 fn link_shared(obj_path: &Path, so_path: &Path) -> Result<(), BackendError> {
-    let compiler = if cfg!(target_os = "macos") { "clang" } else { "gcc" };
+    let compiler = if cfg!(target_os = "macos") {
+        "clang"
+    } else {
+        "gcc"
+    };
     let mut cmd = Command::new(compiler);
     if cfg!(target_os = "macos") {
         cmd.arg("-dynamiclib");
@@ -153,7 +163,9 @@ fn link_shared(obj_path: &Path, so_path: &Path) -> Result<(), BackendError> {
     }
     let status = cmd.arg(obj_path).arg("-o").arg(so_path).status()?;
     if !status.success() {
-        return Err(BackendError::Process("failed to link shared library".to_string()));
+        return Err(BackendError::Process(
+            "failed to link shared library".to_string(),
+        ));
     }
     Ok(())
 }
@@ -163,7 +175,10 @@ fn link_shared(obj_path: &Path, so_path: &Path) -> Result<(), BackendError> {
 #[allow(dead_code)]
 unsafe extern "C" {
     fn dlopen(filename: *const core::ffi::c_char, flag: i32) -> *mut core::ffi::c_void;
-    fn dlsym(handle: *mut core::ffi::c_void, symbol: *const core::ffi::c_char) -> *mut core::ffi::c_void;
+    fn dlsym(
+        handle: *mut core::ffi::c_void,
+        symbol: *const core::ffi::c_char,
+    ) -> *mut core::ffi::c_void;
     fn dlclose(handle: *mut core::ffi::c_void) -> i32;
     fn dlerror() -> *const core::ffi::c_char;
 }
@@ -172,7 +187,10 @@ unsafe extern "C" {
 #[allow(dead_code)]
 unsafe extern "C" {
     fn dlopen(filename: *const core::ffi::c_char, flag: i32) -> *mut core::ffi::c_void;
-    fn dlsym(handle: *mut core::ffi::c_void, symbol: *const core::ffi::c_char) -> *mut core::ffi::c_void;
+    fn dlsym(
+        handle: *mut core::ffi::c_void,
+        symbol: *const core::ffi::c_char,
+    ) -> *mut core::ffi::c_void;
     fn dlclose(handle: *mut core::ffi::c_void) -> i32;
     fn dlerror() -> *const core::ffi::c_char;
 }
@@ -194,8 +212,10 @@ fn jit_invoke(so_path: &Path, symbol: &str) -> Result<i64, BackendError> {
     let so_str = so_path
         .to_str()
         .ok_or_else(|| BackendError::Parse("library path is not valid UTF-8".to_string()))?;
-    let so_c = CString::new(so_str).map_err(|_| BackendError::Parse("invalid library path".to_string()))?;
-    let sym_c = CString::new(symbol).map_err(|_| BackendError::Parse("invalid symbol".to_string()))?;
+    let so_c = CString::new(so_str)
+        .map_err(|_| BackendError::Parse("invalid library path".to_string()))?;
+    let sym_c =
+        CString::new(symbol).map_err(|_| BackendError::Parse("invalid symbol".to_string()))?;
 
     let handle = unsafe { dlopen(so_c.as_ptr(), RTLD_NOW) };
     if handle.is_null() {
@@ -224,7 +244,8 @@ fn jit_invoke_any(so_path: &Path, symbols: &[&str]) -> Result<i64, BackendError>
             Err(e) => last = Some(e),
         }
     }
-    Err(last.unwrap_or_else(|| BackendError::Process("dlsym failed for all candidates".to_string())))
+    Err(last
+        .unwrap_or_else(|| BackendError::Process("dlsym failed for all candidates".to_string())))
 }
 
 pub fn run_via_jit(js_source: &str) -> Result<i64, BackendError> {
@@ -393,9 +414,7 @@ mod tests {
     #[test]
     fn jit_session_trivial_add() {
         let chunk = BytecodeChunk {
-            code: vec![
-                0x01, 0, 0x01, 1, 0x10, 0x20,
-            ],
+            code: vec![0x01, 0, 0x01, 1, 0x10, 0x20],
             constants: vec![ConstEntry::Int(10), ConstEntry::Int(32)],
             num_locals: 0,
             rest_param_index: None,

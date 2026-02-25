@@ -1,9 +1,9 @@
 //! eval(x) - Execute code string in global scope. Minimal implementation for test262.
-use crate::runtime::Value;
-use crate::frontend::{check_early_errors, Parser};
-use crate::ir::{hir_to_bytecode, script_to_hir};
-use crate::vm::{interpret_program_with_heap, Completion, Program};
 use super::BuiltinContext;
+use crate::frontend::{Parser, check_early_errors};
+use crate::ir::{hir_to_bytecode, script_to_hir};
+use crate::runtime::Value;
+use crate::vm::{Completion, Program, interpret_program_with_heap};
 
 pub fn eval(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, super::BuiltinError> {
     let code = match args.first() {
@@ -14,9 +14,11 @@ pub fn eval(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, super::Bu
     let wrapped = format!("function main() {{\n{}\n}}\n", code);
     let script = match Parser::new(&wrapped).parse() {
         Ok(s) => s,
-        Err(_) => return Err(super::BuiltinError::Throw(Value::String(
-            "SyntaxError: Invalid eval code".to_string(),
-        ))),
+        Err(_) => {
+            return Err(super::BuiltinError::Throw(Value::String(
+                "SyntaxError: Invalid eval code".to_string(),
+            )));
+        }
     };
     if check_early_errors(&script).is_err() {
         return Err(super::BuiltinError::Throw(Value::String(
@@ -25,9 +27,11 @@ pub fn eval(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, super::Bu
     }
     let funcs = match script_to_hir(&script) {
         Ok(f) => f,
-        Err(_) => return Err(super::BuiltinError::Throw(Value::String(
-            "SyntaxError: Invalid eval code".to_string(),
-        ))),
+        Err(_) => {
+            return Err(super::BuiltinError::Throw(Value::String(
+                "SyntaxError: Invalid eval code".to_string(),
+            )));
+        }
     };
     let entry = funcs.iter().position(|f| f.name.as_deref() == Some("main"));
     let entry = match entry {

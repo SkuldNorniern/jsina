@@ -101,7 +101,10 @@ pub fn char_at(args: &[Value], _heap: &mut Heap) -> Value {
     let chars: Vec<char> = s.chars().collect();
     let len = chars.len() as i32;
     let pos = if i < 0 { (len + i).max(0) } else { i.min(len) };
-    let ch = chars.get(pos as usize).map(|c| c.to_string()).unwrap_or_default();
+    let ch = chars
+        .get(pos as usize)
+        .map(|c| c.to_string())
+        .unwrap_or_default();
     Value::String(ch)
 }
 
@@ -122,7 +125,9 @@ pub fn split(args: &[Value], heap: &mut Heap) -> Value {
             if sep.is_empty() {
                 s.chars().map(|c| Value::String(c.to_string())).collect()
             } else {
-                s.split(&sep).map(|p| Value::String(p.to_string())).collect()
+                s.split(&sep)
+                    .map(|p| Value::String(p.to_string()))
+                    .collect()
             }
         }
     };
@@ -135,7 +140,10 @@ pub fn split(args: &[Value], heap: &mut Heap) -> Value {
 
 pub fn anchor(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
-    let name = args.get(1).map(|v| html_escape(&to_prop_key(v))).unwrap_or_default();
+    let name = args
+        .get(1)
+        .map(|v| html_escape(&to_prop_key(v)))
+        .unwrap_or_default();
     Value::String(format!(r#"<a name="{}">{}</a>"#, name, s))
 }
 
@@ -161,13 +169,19 @@ pub fn fixed(args: &[Value], _heap: &mut Heap) -> Value {
 
 pub fn fontcolor(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
-    let color = args.get(1).map(|v| html_escape(&to_prop_key(v))).unwrap_or_default();
+    let color = args
+        .get(1)
+        .map(|v| html_escape(&to_prop_key(v)))
+        .unwrap_or_default();
     Value::String(format!(r#"<font color="{}">{}</font>"#, color, s))
 }
 
 pub fn fontsize(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
-    let size = args.get(1).map(|v| html_escape(&to_prop_key(v))).unwrap_or_default();
+    let size = args
+        .get(1)
+        .map(|v| html_escape(&to_prop_key(v)))
+        .unwrap_or_default();
     Value::String(format!(r#"<font size="{}">{}</font>"#, size, s))
 }
 
@@ -178,7 +192,10 @@ pub fn italics(args: &[Value], _heap: &mut Heap) -> Value {
 
 pub fn link(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
-    let url = args.get(1).map(|v| html_escape(&to_prop_key(v))).unwrap_or_default();
+    let url = args
+        .get(1)
+        .map(|v| html_escape(&to_prop_key(v)))
+        .unwrap_or_default();
     Value::String(format!(r#"<a href="{}">{}</a>"#, url, s))
 }
 

@@ -221,7 +221,9 @@ impl Binding {
         match self {
             Binding::Ident(n) => vec![n.as_str()],
             Binding::ObjectPattern(props) => props.iter().map(|p| p.binding.as_str()).collect(),
-            Binding::ArrayPattern(elems) => elems.iter().filter_map(|e| e.binding.as_deref()).collect(),
+            Binding::ArrayPattern(elems) => {
+                elems.iter().filter_map(|e| e.binding.as_deref()).collect()
+            }
         }
     }
 }
@@ -324,7 +326,19 @@ pub enum ArrowBody {
 pub struct ObjectLiteralExpr {
     pub id: NodeId,
     pub span: Span,
-    pub properties: Vec<(String, Expression)>,
+    pub properties: Vec<ObjectProperty>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ObjectProperty {
+    pub key: ObjectPropertyKey,
+    pub value: Expression,
+}
+
+#[derive(Debug, Clone)]
+pub enum ObjectPropertyKey {
+    Static(String),
+    Computed(Expression),
 }
 
 #[derive(Debug, Clone)]

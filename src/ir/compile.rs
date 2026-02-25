@@ -15,13 +15,32 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
             HirOp::Pop { .. } | HirOp::Dup { .. } | HirOp::Swap { .. } => 1,
             HirOp::LoadLocal { .. } | HirOp::StoreLocal { .. } => 2,
             HirOp::LoadThis { .. } => 1,
-            HirOp::Add { .. } | HirOp::Sub { .. } | HirOp::Mul { .. } | HirOp::Div { .. } | HirOp::Mod { .. } | HirOp::Pow { .. }
-            | HirOp::Lt { .. } | HirOp::Lte { .. } | HirOp::Gt { .. } | HirOp::Gte { .. } | HirOp::StrictEq { .. } | HirOp::StrictNotEq { .. }
-            | HirOp::LeftShift { .. } | HirOp::RightShift { .. } | HirOp::UnsignedRightShift { .. }
-            | HirOp::BitwiseAnd { .. } | HirOp::BitwiseOr { .. } | HirOp::BitwiseXor { .. }
+            HirOp::Add { .. }
+            | HirOp::Sub { .. }
+            | HirOp::Mul { .. }
+            | HirOp::Div { .. }
+            | HirOp::Mod { .. }
+            | HirOp::Pow { .. }
+            | HirOp::Lt { .. }
+            | HirOp::Lte { .. }
+            | HirOp::Gt { .. }
+            | HirOp::Gte { .. }
+            | HirOp::StrictEq { .. }
+            | HirOp::StrictNotEq { .. }
+            | HirOp::LeftShift { .. }
+            | HirOp::RightShift { .. }
+            | HirOp::UnsignedRightShift { .. }
+            | HirOp::BitwiseAnd { .. }
+            | HirOp::BitwiseOr { .. }
+            | HirOp::BitwiseXor { .. }
             | HirOp::Instanceof { .. }
-            | HirOp::Not { .. } | HirOp::BitwiseNot { .. } | HirOp::Typeof { .. } | HirOp::Delete { .. } => 1,
-            HirOp::NewObject { .. } | HirOp::NewObjectWithProto { .. } | HirOp::NewArray { .. } => 1,
+            | HirOp::Not { .. }
+            | HirOp::BitwiseNot { .. }
+            | HirOp::Typeof { .. }
+            | HirOp::Delete { .. } => 1,
+            HirOp::NewObject { .. } | HirOp::NewObjectWithProto { .. } | HirOp::NewArray { .. } => {
+                1
+            }
             HirOp::GetProp { .. } | HirOp::SetProp { .. } => 2,
             HirOp::GetPropDyn { .. } | HirOp::SetPropDyn { .. } => 1,
             HirOp::Call { .. } | HirOp::CallBuiltin { .. } | HirOp::New { .. } => 3,
@@ -108,7 +127,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 HirOp::Delete { .. } => code.push(Opcode::Delete as u8),
                 HirOp::Not { .. } => code.push(Opcode::Not as u8),
                 HirOp::BitwiseNot { .. } => code.push(Opcode::BitwiseNot as u8),
-            HirOp::Typeof { .. } => code.push(Opcode::Typeof as u8),
+                HirOp::Typeof { .. } => code.push(Opcode::Typeof as u8),
                 HirOp::NewObject { .. } => code.push(Opcode::NewObject as u8),
                 HirOp::NewObjectWithProto { .. } => code.push(Opcode::NewObjectWithProto as u8),
                 HirOp::NewArray { .. } => code.push(Opcode::NewArray as u8),
@@ -126,7 +145,9 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 }
                 HirOp::GetPropDyn { .. } => code.push(Opcode::GetPropDyn as u8),
                 HirOp::SetPropDyn { .. } => code.push(Opcode::SetPropDyn as u8),
-                HirOp::Call { func_index, argc, .. } => {
+                HirOp::Call {
+                    func_index, argc, ..
+                } => {
                     code.push(Opcode::Call as u8);
                     code.push((*func_index).min(255) as u8);
                     code.push((*argc).min(255) as u8);
@@ -144,7 +165,9 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                     code.push(Opcode::NewMethod as u8);
                     code.push((*argc).min(255) as u8);
                 }
-                HirOp::New { func_index, argc, .. } => {
+                HirOp::New {
+                    func_index, argc, ..
+                } => {
                     code.push(Opcode::New as u8);
                     code.push((*func_index).min(255) as u8);
                     code.push((*argc).min(255) as u8);
@@ -177,11 +200,17 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 code.push(Opcode::LoadLocal as u8);
                 code.push(slot);
                 code.push(Opcode::JumpIfFalse as u8);
-                let else_offset = block_offsets.get(*else_block as usize).copied().unwrap_or(0);
+                let else_offset = block_offsets
+                    .get(*else_block as usize)
+                    .copied()
+                    .unwrap_or(0);
                 let pc_after = code.len() + 2;
                 let rel_else = else_offset as i32 - pc_after as i32;
                 code.extend_from_slice(&(rel_else as i16).to_le_bytes());
-                let then_offset = block_offsets.get(*then_block as usize).copied().unwrap_or(0);
+                let then_offset = block_offsets
+                    .get(*then_block as usize)
+                    .copied()
+                    .unwrap_or(0);
                 let pc_after_jump = code.len();
                 let rel_then = then_offset as i32 - pc_after_jump as i32 - 3;
                 code.push(Opcode::Jump as u8);
@@ -196,11 +225,17 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 code.push(Opcode::LoadLocal as u8);
                 code.push(slot);
                 code.push(Opcode::JumpIfNullish as u8);
-                let then_offset = block_offsets.get(*then_block as usize).copied().unwrap_or(0);
+                let then_offset = block_offsets
+                    .get(*then_block as usize)
+                    .copied()
+                    .unwrap_or(0);
                 let pc_after = code.len() + 2;
                 let rel_then = then_offset as i32 - pc_after as i32;
                 code.extend_from_slice(&(rel_then as i16).to_le_bytes());
-                let else_offset = block_offsets.get(*else_block as usize).copied().unwrap_or(0);
+                let else_offset = block_offsets
+                    .get(*else_block as usize)
+                    .copied()
+                    .unwrap_or(0);
                 let pc_after_jump = code.len();
                 let rel_else = else_offset as i32 - pc_after_jump as i32 - 3;
                 code.push(Opcode::Jump as u8);
@@ -209,18 +244,28 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
         }
     }
 
-    let handlers: Vec<ExceptionHandler> = func.exception_regions.iter().map(|r| {
-        let try_start = block_offsets.get(r.try_entry_block as usize).copied().unwrap_or(0) as u32;
-        let try_end = block_offsets.get(r.handler_block as usize).copied().unwrap_or(code.len()) as u32;
-        let handler_pc = try_end;
-        ExceptionHandler {
-            try_start,
-            try_end,
-            handler_pc,
-            catch_slot: (r.catch_slot).min(255) as u8,
-            is_finally: r.is_finally,
-        }
-    }).collect();
+    let handlers: Vec<ExceptionHandler> = func
+        .exception_regions
+        .iter()
+        .map(|r| {
+            let try_start = block_offsets
+                .get(r.try_entry_block as usize)
+                .copied()
+                .unwrap_or(0) as u32;
+            let try_end = block_offsets
+                .get(r.handler_block as usize)
+                .copied()
+                .unwrap_or(code.len()) as u32;
+            let handler_pc = try_end;
+            ExceptionHandler {
+                try_start,
+                try_end,
+                handler_pc,
+                catch_slot: (r.catch_slot).min(255) as u8,
+                is_finally: r.is_finally,
+            }
+        })
+        .collect();
 
     CompiledFunction {
         name: func.name.clone(),

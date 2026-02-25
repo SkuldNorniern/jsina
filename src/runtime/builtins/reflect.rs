@@ -1,7 +1,7 @@
 //! Reflect builtin stubs for test262. apply/construct throw; improves error over "callee is not a function".
 
-use crate::runtime::Value;
 use super::{BuiltinContext, BuiltinError};
+use crate::runtime::Value;
 
 pub fn reflect_apply(args: &[Value], _ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
     let _ = args;
@@ -26,7 +26,10 @@ mod tests {
     fn reflect_apply_throws_not_implemented() {
         let mut heap = Heap::new();
         let mut dynamic_chunks = Vec::new();
-        let mut ctx = BuiltinContext { heap: &mut heap, dynamic_chunks: &mut dynamic_chunks };
+        let mut ctx = BuiltinContext {
+            heap: &mut heap,
+            dynamic_chunks: &mut dynamic_chunks,
+        };
         let r = reflect_apply(&[], &mut ctx);
         assert!(r.is_err());
         if let Err(BuiltinError::Throw(Value::String(s))) = r {
@@ -40,7 +43,10 @@ mod tests {
     fn reflect_construct_throws_not_implemented() {
         let mut heap = Heap::new();
         let mut dynamic_chunks = Vec::new();
-        let mut ctx = BuiltinContext { heap: &mut heap, dynamic_chunks: &mut dynamic_chunks };
+        let mut ctx = BuiltinContext {
+            heap: &mut heap,
+            dynamic_chunks: &mut dynamic_chunks,
+        };
         let r = reflect_construct(&[], &mut ctx);
         assert!(r.is_err());
         if let Err(BuiltinError::Throw(Value::String(s))) = r {
