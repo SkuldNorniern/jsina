@@ -1,4 +1,3 @@
-use crate::backend::JitSession;
 #[cfg(test)]
 use crate::ir::bytecode::Opcode;
 use crate::ir::bytecode::{BytecodeChunk, ConstEntry};
@@ -12,8 +11,9 @@ use super::ops::{
     lt_values, lte_values, mod_values, mul_values, pow_values, strict_eq, sub_values,
     value_to_prop_key,
 };
-use super::props::{resolve_get_prop, GetPropCache};
-use super::types::{BuiltinResult, Completion, Program, VmError, MAX_CALL_DEPTH};
+use super::props::{GetPropCache, resolve_get_prop};
+use super::tiering::JitTiering;
+use super::types::{BuiltinResult, Completion, MAX_CALL_DEPTH, Program, VmError};
 
 struct Frame {
     chunk_index: usize,
@@ -34,11 +34,9 @@ struct RunState {
     dynamic_captures: Vec<Vec<(u32, Value)>>,
     chunks_stack: Vec<BytecodeChunk>,
     getprop_cache: GetPropCache,
-    jit: Option<JitSession>,
-    call_hot_counts: Vec<u32>,
+    tiering: JitTiering,
 }
 
-const JIT_HOT_CALL_THRESHOLD: u32 = 32;
 const CHECK_INTERVAL_MASK: u32 = CHECK_INTERVAL - 1;
 
 pub fn interpret(chunk: &BytecodeChunk) -> Result<Completion, VmError> {
@@ -84,11 +82,6 @@ pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Co
 fn trace_op(pc: usize, op: u8) {
     let opname = crate::ir::disasm::opcode_name(op);
     eprintln!("  {:04}  {}", pc, opname);
-}
-
-#[inline(always)]
-fn jit_i64_to_value(result: i64) -> Value {
-    Value::Int(result.clamp(i32::MIN as i64, i32::MAX as i64) as i32)
 }
 
 fn interpret_program_with_trace_and_limit(
@@ -158,12 +151,10 @@ pub fn interpret_program_with_heap_and_entry(
         dynamic_captures: Vec::new(),
         chunks_stack: Vec::new(),
         getprop_cache: GetPropCache::new(),
-        jit: if trace || step_limit.is_some() || cancel.is_some() {
-            None
-        } else {
-            Some(JitSession::new())
-        },
-        call_hot_counts: vec![0; program.chunks.len()],
+        tiering: JitTiering::new(
+            program.chunks.len(),
+            !trace && step_limit.is_none() && cancel.is_none(),
+        ),
     };
 
     let mut loop_counter: u32 = 0;
@@ -549,26 +540,9 @@ pub fn interpret_program_with_heap_and_entry(
                     .ok_or(VmError::InvalidConstIndex(func_idx))?;
                 let args = pop_args(&mut state.stack, argc)?;
 
-                if let Some(jit) = state.jit.as_ref()
-                    && let Some(result) = jit.try_invoke_compiled(func_idx)
-                {
-                    state.stack.push(jit_i64_to_value(result));
+                if let Some(value) = state.tiering.maybe_execute(func_idx, callee) {
+                    state.stack.push(value);
                     continue;
-                }
-
-                if let Some(hot_count) = state.call_hot_counts.get_mut(func_idx) {
-                    *hot_count = hot_count.saturating_add(1);
-                    if *hot_count >= JIT_HOT_CALL_THRESHOLD {
-                        if let Some(jit) = state.jit.as_mut() {
-                            match jit.try_compile(func_idx, callee) {
-                                Ok(Some(result)) => {
-                                    state.stack.push(jit_i64_to_value(result));
-                                    continue;
-                                }
-                                Ok(None) | Err(_) => {}
-                            }
-                        }
-                    }
                 }
 
                 let callee_locals = setup_callee_locals(callee, &args, heap);
@@ -688,26 +662,9 @@ pub fn interpret_program_with_heap_and_entry(
                             .get(func_idx)
                             .ok_or(VmError::InvalidConstIndex(func_idx))?;
 
-                        if let Some(jit) = state.jit.as_ref()
-                            && let Some(result) = jit.try_invoke_compiled(func_idx)
-                        {
-                            state.stack.push(jit_i64_to_value(result));
+                        if let Some(value) = state.tiering.maybe_execute(func_idx, callee_chunk) {
+                            state.stack.push(value);
                             continue;
-                        }
-
-                        if let Some(hot_count) = state.call_hot_counts.get_mut(func_idx) {
-                            *hot_count = hot_count.saturating_add(1);
-                            if *hot_count >= JIT_HOT_CALL_THRESHOLD {
-                                if let Some(jit) = state.jit.as_mut() {
-                                    match jit.try_compile(func_idx, callee_chunk) {
-                                        Ok(Some(result)) => {
-                                            state.stack.push(jit_i64_to_value(result));
-                                            continue;
-                                        }
-                                        Ok(None) | Err(_) => {}
-                                    }
-                                }
-                            }
                         }
 
                         let callee_locals = setup_callee_locals(callee_chunk, &args, heap);

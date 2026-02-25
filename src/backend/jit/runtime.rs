@@ -1,6 +1,6 @@
-use lamina::ir::{builder::i64, IRBuilder, PrimitiveType, Type};
+use lamina::ir::{IRBuilder, PrimitiveType, Type, builder::i64};
 use lamina::mir::codegen::from_ir;
-use lamina::runtime::{compile_to_runtime, RuntimeResult};
+use lamina::runtime::{RuntimeResult, compile_to_runtime};
 use lamina::target::Target;
 
 use super::error::BackendError;

@@ -65,6 +65,9 @@ pub(crate) fn execute_builtin(
 /// Uses `split_off` to avoid individual pops and reversal.
 #[inline]
 pub(crate) fn pop_args(stack: &mut Vec<Value>, argc: usize) -> Result<Vec<Value>, VmError> {
+    if argc == 0 {
+        return Ok(Vec::new());
+    }
     let start = stack
         .len()
         .checked_sub(argc)
@@ -83,10 +86,9 @@ pub(crate) fn setup_callee_locals(
     match chunk.rest_param_index {
         Some(r) => {
             let r = r as usize;
-            for (i, v) in args.iter().take(r).enumerate() {
-                if i < locals.len() {
-                    locals[i] = v.clone();
-                }
+            let copy_len = args.len().min(r).min(locals.len());
+            if copy_len > 0 {
+                locals[..copy_len].clone_from_slice(&args[..copy_len]);
             }
             if r < locals.len() {
                 let rest_id = heap.alloc_array();
@@ -97,10 +99,9 @@ pub(crate) fn setup_callee_locals(
             }
         }
         None => {
-            for (i, v) in args.iter().enumerate() {
-                if i < locals.len() {
-                    locals[i] = v.clone();
-                }
+            let copy_len = args.len().min(locals.len());
+            if copy_len > 0 {
+                locals[..copy_len].clone_from_slice(&args[..copy_len]);
             }
         }
     }

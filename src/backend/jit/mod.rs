@@ -35,4 +35,36 @@ mod tests {
         let result = jit.try_compile(0, &chunk).expect("compile");
         assert_eq!(result, Some(42));
     }
+
+    #[test]
+    fn jit_session_trivial_compare() {
+        let chunk = BytecodeChunk {
+            code: vec![0x01, 0, 0x01, 1, 0x1a, 0x20],
+            constants: vec![ConstEntry::Int(10), ConstEntry::Int(2)],
+            num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
+            rest_param_index: None,
+            handlers: vec![],
+        };
+        let mut jit = JitSession::new();
+        let result = jit.try_compile(0, &chunk).expect("compile");
+        assert_eq!(result, Some(1));
+    }
+
+    #[test]
+    fn jit_session_trivial_bitwise() {
+        let chunk = BytecodeChunk {
+            code: vec![0x01, 0, 0x01, 1, 0x24, 0x20],
+            constants: vec![ConstEntry::Int(42), ConstEntry::Int(15)],
+            num_locals: 0,
+            named_locals: vec![],
+            captured_names: vec![],
+            rest_param_index: None,
+            handlers: vec![],
+        };
+        let mut jit = JitSession::new();
+        let result = jit.try_compile(0, &chunk).expect("compile");
+        assert_eq!(result, Some(10));
+    }
 }

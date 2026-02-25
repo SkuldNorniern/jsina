@@ -2,6 +2,7 @@ mod calls;
 pub mod interpreter;
 mod ops;
 mod props;
+mod tiering;
 mod types;
 
 pub use interpreter::{
