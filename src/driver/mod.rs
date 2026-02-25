@@ -13,7 +13,7 @@ pub enum DriverError {
     Diagnostic(Vec<Diagnostic>),
     Parse(crate::frontend::ParseError),
     Lower(crate::ir::LowerError),
-    Vm(crate::vm::interpreter::VmError),
+    Vm(crate::vm::VmError),
 }
 
 impl std::fmt::Display for DriverError {
@@ -53,8 +53,8 @@ impl From<crate::ir::LowerError> for DriverError {
     }
 }
 
-impl From<crate::vm::interpreter::VmError> for DriverError {
-    fn from(e: crate::vm::interpreter::VmError) -> Self {
+impl From<crate::vm::VmError> for DriverError {
+    fn from(e: crate::vm::VmError) -> Self {
         DriverError::Vm(e)
     }
 }
