@@ -51,17 +51,25 @@ impl JitTiering {
     }
 
     #[inline(always)]
-    pub fn maybe_execute(&mut self, func_idx: usize, chunk: &BytecodeChunk) -> Option<Value> {
+    pub fn maybe_execute(
+        &mut self,
+        func_idx: usize,
+        chunk: &BytecodeChunk,
+        args: &[Value],
+        program_chunks: &[BytecodeChunk],
+    ) -> Option<Value> {
         let jit = self.session.as_mut()?;
         let chunk_state = self.chunk_states.get_mut(func_idx)?;
 
         match chunk_state {
             ChunkTierState::Compiled => {
-                if let Some(result) = jit.try_invoke_compiled(func_idx) {
+                if let Some(result) =
+                    jit.try_invoke_compiled_for_call(func_idx, args, program_chunks)
+                {
                     self.stats.jit_invocations = self.stats.jit_invocations.saturating_add(1);
                     return Some(Self::jit_i64_to_value(result));
                 }
-                *chunk_state = ChunkTierState::Interpreting;
+                return None;
             }
             ChunkTierState::Rejected => {
                 return None;
@@ -84,7 +92,7 @@ impl JitTiering {
         }
 
         self.stats.compile_attempts = self.stats.compile_attempts.saturating_add(1);
-        match jit.try_compile(func_idx, chunk) {
+        match jit.try_compile_for_call(func_idx, chunk, args, program_chunks) {
             Ok(Some(result)) => {
                 *chunk_state = ChunkTierState::Compiled;
                 self.stats.compile_successes = self.stats.compile_successes.saturating_add(1);
@@ -115,7 +123,7 @@ impl JitTiering {
 
     #[inline(always)]
     fn is_potentially_jittable(chunk: &BytecodeChunk) -> bool {
-        chunk.num_locals == 0 && chunk.handlers.is_empty() && chunk.rest_param_index.is_none()
+        chunk.handlers.is_empty() && chunk.rest_param_index.is_none()
     }
 
     #[inline(always)]
@@ -138,10 +146,10 @@ mod tests {
     use crate::ir::bytecode::{ConstEntry, Opcode};
 
     #[test]
-    fn rejects_non_trivial_chunks_without_jit_attempt() {
+    fn rejects_unsupported_chunks_after_attempt() {
         let mut tiering = JitTiering::new(1, true);
-        let non_trivial_chunk = BytecodeChunk {
-            code: vec![Opcode::LoadLocal as u8, 0, Opcode::Return as u8],
+        let unsupported_chunk = BytecodeChunk {
+            code: vec![Opcode::LoadThis as u8, Opcode::Return as u8],
             constants: vec![],
             num_locals: 1,
             named_locals: vec![],
@@ -149,17 +157,22 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
         };
+        let program_chunks = vec![unsupported_chunk.clone()];
 
-        for _ in 0..256 {
-            assert!(tiering.maybe_execute(0, &non_trivial_chunk).is_none());
+        for _ in 0..tiering.hot_call_threshold {
+            assert!(
+                tiering
+                    .maybe_execute(0, &unsupported_chunk, &[], &program_chunks)
+                    .is_none()
+            );
         }
 
         assert_eq!(tiering.chunk_states[0], ChunkTierState::Rejected);
-        assert_eq!(tiering.call_hot_counts[0], 0);
+        assert!(tiering.call_hot_counts[0] >= tiering.hot_call_threshold);
         let Some(session) = tiering.session.as_ref() else {
             panic!("jit session should be initialized when tiering is enabled");
         };
-        assert_eq!(session.compilation_attempt_count(), 0);
+        assert_eq!(session.compilation_attempt_count(), 1);
     }
 
     #[test]
@@ -174,16 +187,21 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
         };
+        let program_chunks = vec![trivial_chunk.clone()];
 
         for _ in 0..(tiering.hot_call_threshold - 1) {
-            assert!(tiering.maybe_execute(0, &trivial_chunk).is_none());
+            assert!(
+                tiering
+                    .maybe_execute(0, &trivial_chunk, &[], &program_chunks)
+                    .is_none()
+            );
         }
 
-        let compiled_result = tiering.maybe_execute(0, &trivial_chunk);
+        let compiled_result = tiering.maybe_execute(0, &trivial_chunk, &[], &program_chunks);
         assert_eq!(compiled_result, Some(Value::Int(7)));
         assert_eq!(tiering.chunk_states[0], ChunkTierState::Compiled);
 
-        let cached_result = tiering.maybe_execute(0, &trivial_chunk);
+        let cached_result = tiering.maybe_execute(0, &trivial_chunk, &[], &program_chunks);
         assert_eq!(cached_result, Some(Value::Int(7)));
         let Some(session) = tiering.session.as_ref() else {
             panic!("jit session should be initialized when tiering is enabled");

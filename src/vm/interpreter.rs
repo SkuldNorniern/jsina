@@ -606,7 +606,11 @@ pub fn interpret_program_with_heap_and_entry(
                     .ok_or(VmError::InvalidConstIndex(func_idx))?;
                 let args = pop_args(&mut state.stack, argc)?;
 
-                if let Some(value) = state.tiering.maybe_execute(func_idx, callee) {
+                if let Some(value) =
+                    state
+                        .tiering
+                        .maybe_execute(func_idx, callee, &args, &program.chunks)
+                {
                     state.stack.push(value);
                     continue;
                 }
@@ -728,7 +732,12 @@ pub fn interpret_program_with_heap_and_entry(
                             .get(func_idx)
                             .ok_or(VmError::InvalidConstIndex(func_idx))?;
 
-                        if let Some(value) = state.tiering.maybe_execute(func_idx, callee_chunk) {
+                        if let Some(value) = state.tiering.maybe_execute(
+                            func_idx,
+                            callee_chunk,
+                            &args,
+                            &program.chunks,
+                        ) {
                             state.stack.push(value);
                             continue;
                         }

@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn jit_session_reuses_rejected_cache_entry() {
         let chunk = BytecodeChunk {
-            code: vec![0x03, 0, 0x20],
+            code: vec![0x05, 0x20],
             constants: vec![],
             num_locals: 1,
             named_locals: vec![],
