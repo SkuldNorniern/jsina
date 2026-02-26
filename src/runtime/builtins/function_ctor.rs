@@ -68,7 +68,7 @@ pub fn function_constructor(
         init_entry: None,
         global_funcs,
     };
-    match interpret_program_with_heap(&program, ctx.heap, false, None, None) {
+    match interpret_program_with_heap(&program, ctx.heap, false, None, None, false, None) {
         Ok(Completion::Return(v)) => {
             if let Value::Function(inner_idx) = v {
                 if let Some(inner_chunk) = program.chunks.get(inner_idx) {

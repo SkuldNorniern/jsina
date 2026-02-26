@@ -107,4 +107,21 @@ mod tests {
         assert_eq!(jit.compilation_attempt_count(), 1);
         assert!(!jit.has_compiled(0));
     }
+
+    #[test]
+    fn jit_session_supports_locals_in_trivial_lowering() {
+        let chunk = BytecodeChunk {
+            code: vec![0x01, 0, 0x04, 0, 0x03, 0, 0x20],
+            constants: vec![ConstEntry::Int(12)],
+            num_locals: 1,
+            named_locals: vec![],
+            captured_names: vec![],
+            rest_param_index: None,
+            handlers: vec![],
+        };
+        let mut jit = JitSession::new();
+        let result = jit.try_compile(0, &chunk).expect("compile");
+        assert_eq!(result, Some(12));
+        assert!(jit.has_compiled(0));
+    }
 }

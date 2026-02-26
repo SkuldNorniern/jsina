@@ -12,7 +12,7 @@ use super::ops::{
     value_to_prop_key,
 };
 use super::props::{GetPropCache, resolve_get_prop};
-use super::tiering::JitTiering;
+use super::tiering::{JitTiering, JitTieringStats};
 use super::types::{BuiltinResult, Completion, MAX_CALL_DEPTH, Program, VmError};
 
 struct Frame {
@@ -27,7 +27,7 @@ struct Frame {
 
 /// Mutable execution state for one run. Shared boundary for interpreter and (future) JIT:
 /// same heap + program + state so JIT can run a chunk and return into this state.
-struct RunState {
+struct RunState<'a> {
     stack: Vec<Value>,
     frames: Vec<Frame>,
     dynamic_chunks: Vec<BytecodeChunk>,
@@ -35,6 +35,15 @@ struct RunState {
     chunks_stack: Vec<BytecodeChunk>,
     getprop_cache: GetPropCache,
     tiering: JitTiering,
+    jit_report: Option<&'a mut JitTieringStats>,
+}
+
+impl<'a> Drop for RunState<'a> {
+    fn drop(&mut self) {
+        if let Some(report) = self.jit_report.take() {
+            *report = self.tiering.stats();
+        }
+    }
 }
 
 const CHECK_INTERVAL_MASK: u32 = CHECK_INTERVAL - 1;
@@ -58,8 +67,8 @@ pub fn interpret_program_with_limit(
     trace: bool,
     step_limit: Option<u64>,
 ) -> Result<Completion, VmError> {
-    let (result, _) =
-        interpret_program_with_trace_and_limit(program, trace, step_limit, None, false);
+    let (result, _, _) =
+        interpret_program_with_trace_and_limit(program, trace, step_limit, None, false, true);
     result
 }
 
@@ -70,11 +79,38 @@ pub fn interpret_program_with_limit_and_cancel(
     cancel: Option<&AtomicBool>,
     test262_mode: bool,
 ) -> (Result<Completion, VmError>, Heap) {
-    interpret_program_with_trace_and_limit(program, trace, step_limit, cancel, test262_mode)
+    let (result, heap, _) = interpret_program_with_trace_and_limit(
+        program,
+        trace,
+        step_limit,
+        cancel,
+        test262_mode,
+        true,
+    );
+    (result, heap)
+}
+
+pub fn interpret_program_with_limit_and_cancel_and_stats(
+    program: &Program,
+    trace: bool,
+    step_limit: Option<u64>,
+    cancel: Option<&AtomicBool>,
+    test262_mode: bool,
+    enable_jit: bool,
+) -> (Result<Completion, VmError>, Heap, Option<JitTieringStats>) {
+    interpret_program_with_trace_and_limit(
+        program,
+        trace,
+        step_limit,
+        cancel,
+        test262_mode,
+        enable_jit,
+    )
 }
 
 pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Completion, VmError> {
-    let (result, _) = interpret_program_with_trace_and_limit(program, trace, None, None, false);
+    let (result, _, _) =
+        interpret_program_with_trace_and_limit(program, trace, None, None, false, true);
     result
 }
 
@@ -90,7 +126,8 @@ fn interpret_program_with_trace_and_limit(
     step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
     test262_mode: bool,
-) -> (Result<Completion, VmError>, Heap) {
+    enable_jit: bool,
+) -> (Result<Completion, VmError>, Heap, Option<JitTieringStats>) {
     let mut heap = Heap::new();
     if test262_mode {
         heap.init_test262_globals();
@@ -101,8 +138,21 @@ fn interpret_program_with_trace_and_limit(
             heap.set_prop(global_id, name, Value::Function(*chunk_idx));
         }
     }
-    let result = interpret_program_with_heap(program, &mut heap, trace, step_limit, cancel);
-    (result, heap)
+    let mut jit_stats = if enable_jit {
+        Some(JitTieringStats::default())
+    } else {
+        None
+    };
+    let result = interpret_program_with_heap(
+        program,
+        &mut heap,
+        trace,
+        step_limit,
+        cancel,
+        enable_jit,
+        jit_stats.as_mut(),
+    );
+    (result, heap, jit_stats)
 }
 
 pub fn interpret_program_with_heap(
@@ -111,11 +161,24 @@ pub fn interpret_program_with_heap(
     trace: bool,
     step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
+    enable_jit: bool,
+    jit_stats: Option<&mut JitTieringStats>,
 ) -> Result<Completion, VmError> {
     if let Some(init_idx) = program.init_entry {
-        interpret_program_with_heap_and_entry(program, heap, init_idx, trace, step_limit, cancel)?;
+        interpret_program_with_heap_and_entry(
+            program, heap, init_idx, trace, step_limit, cancel, enable_jit, None,
+        )?;
     }
-    interpret_program_with_heap_and_entry(program, heap, program.entry, trace, step_limit, cancel)
+    interpret_program_with_heap_and_entry(
+        program,
+        heap,
+        program.entry,
+        trace,
+        step_limit,
+        cancel,
+        enable_jit,
+        jit_stats,
+    )
 }
 
 /// Throttle (cancel/step check) runs only when timeout or step limit is in use.
@@ -129,6 +192,8 @@ pub fn interpret_program_with_heap_and_entry(
     trace: bool,
     step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
+    enable_jit: bool,
+    jit_report: Option<&mut JitTieringStats>,
 ) -> Result<Completion, VmError> {
     let needs_throttle = cancel.is_some() || step_limit.is_some();
     let mut steps_remaining = step_limit;
@@ -153,8 +218,9 @@ pub fn interpret_program_with_heap_and_entry(
         getprop_cache: GetPropCache::new(),
         tiering: JitTiering::new(
             program.chunks.len(),
-            !trace && step_limit.is_none() && cancel.is_none(),
+            enable_jit && !trace && step_limit.is_none() && cancel.is_none(),
         ),
+        jit_report,
     };
 
     let mut loop_counter: u32 = 0;

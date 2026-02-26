@@ -118,6 +118,17 @@ impl Driver {
         Self::run_with_host(&host, source, trace, true)
     }
 
+    pub fn run_with_host_and_jit_stats<H: HostHooks + 'static>(
+        host: &H,
+        source: &str,
+        trace: bool,
+        enable_jit: bool,
+    ) -> Result<i64, DriverError> {
+        with_host(host, || {
+            Self::run_with_host_and_limit_inner(source, trace, None, None, enable_jit, true)
+        })
+    }
+
     /// Run with custom host. Use for browser embedding (provide HostHooks impl).
     pub fn run_with_host<H: HostHooks + 'static>(
         host: &H,
@@ -134,7 +145,7 @@ impl Driver {
     pub fn run_with_step_limit(source: &str, step_limit: u64) -> Result<i64, DriverError> {
         let host = CliHost;
         with_host(&host, || {
-            Self::run_with_host_and_limit_inner(source, false, Some(step_limit), None, false)
+            Self::run_with_host_and_limit_inner(source, false, Some(step_limit), None, false, false)
         })
     }
 
@@ -147,7 +158,14 @@ impl Driver {
     ) -> Result<i64, DriverError> {
         let host = CliHost;
         with_host(&host, || {
-            Self::run_with_host_and_limit_inner(source, false, Some(step_limit), cancel, false)
+            Self::run_with_host_and_limit_inner(
+                source,
+                false,
+                Some(step_limit),
+                cancel,
+                false,
+                false,
+            )
         })
     }
 
@@ -159,7 +177,7 @@ impl Driver {
     ) -> Result<i64, DriverError> {
         let host = CliHost;
         with_host(&host, || {
-            Self::run_with_host_and_limit_inner(source, false, None, cancel, false)
+            Self::run_with_host_and_limit_inner(source, false, None, cancel, false, false)
         })
     }
 
@@ -168,7 +186,7 @@ impl Driver {
         trace: bool,
         enable_jit: bool,
     ) -> Result<i64, DriverError> {
-        Self::run_with_host_and_limit_inner(source, trace, None, None, enable_jit)
+        Self::run_with_host_and_limit_inner(source, trace, None, None, enable_jit, false)
     }
 
     fn run_with_host_and_limit_inner(
@@ -177,6 +195,7 @@ impl Driver {
         step_limit: Option<u64>,
         cancel: Option<&AtomicBool>,
         enable_jit: bool,
+        emit_jit_stats: bool,
     ) -> Result<i64, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
@@ -199,7 +218,19 @@ impl Driver {
             let mut jit = crate::backend::JitSession::new();
             let chunk = &chunks[entry];
             if let Ok(Some(result)) = jit.try_compile(entry, chunk) {
+                if emit_jit_stats {
+                    eprintln!(
+                        "jit-stats: mode=eager attempts={} compiled=1 rejected=0 hits=1 threshold=1",
+                        jit.compilation_attempt_count()
+                    );
+                }
                 return Ok(result);
+            }
+            if emit_jit_stats {
+                eprintln!(
+                    "jit-stats: mode=eager attempts={} compiled=0 rejected=1 hits=0 threshold=1",
+                    jit.compilation_attempt_count()
+                );
             }
         }
 
@@ -219,13 +250,32 @@ impl Driver {
             init_entry,
             global_funcs,
         };
-        let (result, heap) = crate::vm::interpret_program_with_limit_and_cancel(
-            &program,
-            trace,
-            step_limit,
-            cancel,
-            step_limit.is_some(),
-        );
+        let (result, heap, jit_stats) =
+            crate::vm::interpret_program_with_limit_and_cancel_and_stats(
+                &program,
+                trace,
+                step_limit,
+                cancel,
+                step_limit.is_some(),
+                enable_jit,
+            );
+        if emit_jit_stats {
+            if let Some(stats) = jit_stats {
+                eprintln!(
+                    "jit-stats: mode=tiering threshold={} attempts={} compiled={} rejected={} precheck_rejected={} hits={} compiled_chunks={} rejected_chunks={}",
+                    stats.hot_call_threshold,
+                    stats.compile_attempts,
+                    stats.compile_successes,
+                    stats.compile_rejections,
+                    stats.precheck_rejections,
+                    stats.jit_invocations,
+                    stats.compiled_chunk_count,
+                    stats.rejected_chunk_count,
+                );
+            } else {
+                eprintln!("jit-stats: mode=tiering disabled");
+            }
+        }
         let completion = result?;
         let value = match completion {
             Completion::Return(v) => v,

@@ -49,7 +49,7 @@ pub fn eval(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, super::Bu
         init_entry: None,
         global_funcs: Vec::new(),
     };
-    match interpret_program_with_heap(&program, ctx.heap, false, None, None) {
+    match interpret_program_with_heap(&program, ctx.heap, false, None, None, false, None) {
         Ok(Completion::Return(v)) => Ok(v),
         Ok(Completion::Throw(v)) => Err(super::BuiltinError::Throw(v)),
         Ok(Completion::Normal(v)) => Ok(v),

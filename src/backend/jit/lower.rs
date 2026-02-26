@@ -3,6 +3,8 @@ use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
 use super::runtime::build_constant_main_module;
 
 const OP_PUSH_CONST: u8 = Opcode::PushConst as u8;
+const OP_LOAD_LOCAL: u8 = Opcode::LoadLocal as u8;
+const OP_STORE_LOCAL: u8 = Opcode::StoreLocal as u8;
 const OP_POP: u8 = Opcode::Pop as u8;
 const OP_DUP: u8 = Opcode::Dup as u8;
 const OP_SWAP: u8 = Opcode::Swap as u8;
@@ -77,12 +79,13 @@ pub fn bytecode_to_lamina_trivial(chunk: &BytecodeChunk) -> Option<lamina::ir::M
     let code = &chunk.code;
     let constants = &chunk.constants;
 
-    if chunk.num_locals != 0 || !chunk.handlers.is_empty() || chunk.rest_param_index.is_some() {
+    if !chunk.handlers.is_empty() || chunk.rest_param_index.is_some() {
         return None;
     }
 
     let mut pc = 0usize;
     let mut stack: Vec<EvalValue> = Vec::with_capacity(8);
+    let mut locals: Vec<Option<EvalValue>> = vec![None; chunk.num_locals as usize];
 
     while pc < code.len() {
         let op = *code.get(pc)?;
@@ -97,6 +100,19 @@ pub fn bytecode_to_lamina_trivial(chunk: &BytecodeChunk) -> Option<lamina::ir::M
                     _ => return None,
                 };
                 stack.push(value);
+            }
+            OP_LOAD_LOCAL => {
+                let slot = *code.get(pc)? as usize;
+                pc += 1;
+                let value = *locals.get(slot)?.as_ref()?;
+                stack.push(value);
+            }
+            OP_STORE_LOCAL => {
+                let slot = *code.get(pc)? as usize;
+                pc += 1;
+                let value = stack.pop()?;
+                let local = locals.get_mut(slot)?;
+                *local = Some(value);
             }
             OP_POP => {
                 stack.pop()?;
