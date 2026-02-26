@@ -1,8 +1,8 @@
 use crate::backend::JitSession;
-use crate::ir::bytecode::BytecodeChunk;
+use crate::ir::bytecode::{BytecodeChunk, Opcode};
 use crate::runtime::Value;
 
-const DEFAULT_JIT_HOT_CALL_THRESHOLD: u32 = 16;
+const DEFAULT_JIT_HOT_CALL_THRESHOLD: u32 = 8;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct JitTieringStats {
@@ -87,7 +87,9 @@ impl JitTiering {
 
         let hot_count = self.call_hot_counts.get_mut(func_idx)?;
         *hot_count = hot_count.saturating_add(1);
-        if *hot_count < self.hot_call_threshold {
+        let should_attempt_compile = *hot_count >= self.hot_call_threshold
+            || (*hot_count == 1 && Self::should_attempt_early_compile(chunk));
+        if !should_attempt_compile {
             return None;
         }
 
@@ -127,6 +129,17 @@ impl JitTiering {
     }
 
     #[inline(always)]
+    fn should_attempt_early_compile(chunk: &BytecodeChunk) -> bool {
+        if chunk.code.len() < 64 {
+            return false;
+        }
+        chunk
+            .code
+            .iter()
+            .any(|op| *op == Opcode::Jump as u8 || *op == Opcode::JumpIfFalse as u8)
+    }
+
+    #[inline(always)]
     fn jit_i64_to_value(result: i64) -> Value {
         Value::Int(result.clamp(i32::MIN as i64, i32::MAX as i64) as i32)
     }
@@ -160,11 +173,9 @@ mod tests {
         let program_chunks = vec![unsupported_chunk.clone()];
 
         for _ in 0..tiering.hot_call_threshold {
-            assert!(
-                tiering
-                    .maybe_execute(0, &unsupported_chunk, &[], &program_chunks)
-                    .is_none()
-            );
+            assert!(tiering
+                .maybe_execute(0, &unsupported_chunk, &[], &program_chunks)
+                .is_none());
         }
 
         assert_eq!(tiering.chunk_states[0], ChunkTierState::Rejected);
@@ -190,11 +201,9 @@ mod tests {
         let program_chunks = vec![trivial_chunk.clone()];
 
         for _ in 0..(tiering.hot_call_threshold - 1) {
-            assert!(
-                tiering
-                    .maybe_execute(0, &trivial_chunk, &[], &program_chunks)
-                    .is_none()
-            );
+            assert!(tiering
+                .maybe_execute(0, &trivial_chunk, &[], &program_chunks)
+                .is_none());
         }
 
         let compiled_result = tiering.maybe_execute(0, &trivial_chunk, &[], &program_chunks);
@@ -207,5 +216,46 @@ mod tests {
             panic!("jit session should be initialized when tiering is enabled");
         };
         assert_eq!(session.compilation_attempt_count(), 1);
+    }
+
+    #[test]
+    fn early_compile_for_loop_heavy_chunk() {
+        let mut tiering = JitTiering::new(1, true);
+        let mut code = vec![Opcode::PushConst as u8, 0, Opcode::StoreLocal as u8, 0];
+        for _ in 0..18 {
+            code.extend_from_slice(&[
+                Opcode::LoadLocal as u8,
+                0,
+                Opcode::PushConst as u8,
+                0,
+                Opcode::Add as u8,
+                Opcode::StoreLocal as u8,
+                0,
+            ]);
+        }
+        code.extend_from_slice(&[
+            Opcode::PushConst as u8,
+            1,
+            Opcode::JumpIfFalse as u8,
+            0,
+            0,
+            Opcode::LoadLocal as u8,
+            0,
+            Opcode::Return as u8,
+        ]);
+        let loop_chunk = BytecodeChunk {
+            code,
+            constants: vec![ConstEntry::Int(1), ConstEntry::Int(0)],
+            num_locals: 1,
+            named_locals: vec![],
+            captured_names: vec![],
+            rest_param_index: None,
+            handlers: vec![],
+        };
+        let program_chunks = vec![loop_chunk.clone()];
+
+        let first_result = tiering.maybe_execute(0, &loop_chunk, &[], &program_chunks);
+        assert_eq!(first_result, Some(Value::Int(19)));
+        assert_eq!(tiering.chunk_states[0], ChunkTierState::Compiled);
     }
 }
