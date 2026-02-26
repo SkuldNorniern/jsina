@@ -32,12 +32,33 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
                 print_stmt(i, s, indent + 1);
             }
         }
-        Statement::FunctionDecl(s) => {
-            println!("{}[{}] FunctionDecl {} ({})", pad, idx, s.name, s.params.join(", "));
+        Statement::Labeled(s) => {
+            println!("{}[{}] Label {}:", pad, idx, s.label);
             print_stmt(0, &s.body, indent + 1);
         }
+        Statement::FunctionDecl(s) => {
+            println!(
+                "{}[{}] FunctionDecl {} ({})",
+                pad,
+                idx,
+                s.name,
+                s.params
+                    .iter()
+                    .map(|p| p.name().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            print_stmt(0, &s.body, indent + 1);
+        }
+        Statement::ClassDecl(s) => {
+            println!("{}[{}] ClassDecl {}", pad, idx, s.name);
+        }
         Statement::Return(s) => {
-            let arg = s.argument.as_ref().map(|e| format_expr(e)).unwrap_or_else(|| "".to_string());
+            let arg = s
+                .argument
+                .as_ref()
+                .map(|e| format_expr(e))
+                .unwrap_or_else(|| "".to_string());
             println!("{}[{}] Return {}", pad, idx, arg);
         }
         Statement::If(s) => {
@@ -57,22 +78,77 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
             println!("{}[{}] For", pad, idx);
             print_stmt(0, &s.body, indent + 1);
         }
+        Statement::ForIn(s) => {
+            let left = match &s.left {
+                ast::ForInOfLeft::VarDecl(n) => format!("var {}", n),
+                ast::ForInOfLeft::LetDecl(n) => format!("let {}", n),
+                ast::ForInOfLeft::ConstDecl(n) => format!("const {}", n),
+                ast::ForInOfLeft::Identifier(n) => n.clone(),
+                ast::ForInOfLeft::VarBinding(b) => format!("var {}", format_binding(b)),
+                ast::ForInOfLeft::LetBinding(b) => format!("let {}", format_binding(b)),
+                ast::ForInOfLeft::ConstBinding(b) => format!("const {}", format_binding(b)),
+                ast::ForInOfLeft::Pattern(b) => format_binding(b),
+            };
+            println!(
+                "{}[{}] ForIn {} in {}",
+                pad,
+                idx,
+                left,
+                format_expr(&s.right)
+            );
+            print_stmt(0, &s.body, indent + 1);
+        }
+        Statement::ForOf(s) => {
+            let left = match &s.left {
+                ast::ForInOfLeft::VarDecl(n) => format!("var {}", n),
+                ast::ForInOfLeft::LetDecl(n) => format!("let {}", n),
+                ast::ForInOfLeft::ConstDecl(n) => format!("const {}", n),
+                ast::ForInOfLeft::Identifier(n) => n.clone(),
+                ast::ForInOfLeft::VarBinding(b) => format!("var {}", format_binding(b)),
+                ast::ForInOfLeft::LetBinding(b) => format!("let {}", format_binding(b)),
+                ast::ForInOfLeft::ConstBinding(b) => format!("const {}", format_binding(b)),
+                ast::ForInOfLeft::Pattern(b) => format_binding(b),
+            };
+            println!(
+                "{}[{}] ForOf {} of {}",
+                pad,
+                idx,
+                left,
+                format_expr(&s.right)
+            );
+            print_stmt(0, &s.body, indent + 1);
+        }
         Statement::VarDecl(s) => {
             for d in &s.declarations {
-                let init = d.init.as_ref().map(|e| format_expr(e)).unwrap_or_else(|| "".to_string());
-                println!("{}[{}] var {} = {}", pad, idx, d.name, init);
+                let init = d
+                    .init
+                    .as_ref()
+                    .map(|e| format_expr(e))
+                    .unwrap_or_else(|| "".to_string());
+                let binding = format_binding(&d.binding);
+                println!("{}[{}] var {} = {}", pad, idx, binding, init);
             }
         }
         Statement::LetDecl(s) => {
             for d in &s.declarations {
-                let init = d.init.as_ref().map(|e| format_expr(e)).unwrap_or_else(|| "".to_string());
-                println!("{}[{}] let {} = {}", pad, idx, d.name, init);
+                let init = d
+                    .init
+                    .as_ref()
+                    .map(|e| format_expr(e))
+                    .unwrap_or_else(|| "".to_string());
+                let binding = format_binding(&d.binding);
+                println!("{}[{}] let {} = {}", pad, idx, binding, init);
             }
         }
         Statement::ConstDecl(s) => {
             for d in &s.declarations {
-                let init = d.init.as_ref().map(|e| format_expr(e)).unwrap_or_else(|| "".to_string());
-                println!("{}[{}] const {} = {}", pad, idx, d.name, init);
+                let init = d
+                    .init
+                    .as_ref()
+                    .map(|e| format_expr(e))
+                    .unwrap_or_else(|| "".to_string());
+                let binding = format_binding(&d.binding);
+                println!("{}[{}] const {} = {}", pad, idx, binding, init);
             }
         }
         Statement::Expression(s) => {
@@ -101,6 +177,61 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
                 print_stmt(0, f, indent + 2);
             }
         }
+        Statement::Switch(s) => {
+            println!("{}[{}] Switch {}", pad, idx, format_expr(&s.discriminant));
+            for (ci, c) in s.cases.iter().enumerate() {
+                match &c.test {
+                    Some(t) => println!("{}  case {}: {}", pad, ci, format_expr(t)),
+                    None => println!("{}  default:", pad),
+                }
+                for (si, cstmt) in c.body.iter().enumerate() {
+                    print_stmt(si, cstmt, indent + 2);
+                }
+            }
+        }
+    }
+}
+
+fn format_binding(b: &ast::Binding) -> String {
+    match b {
+        ast::Binding::Ident(n) => n.clone(),
+        ast::Binding::ObjectPattern(props) => {
+            use ast::ObjectPatternTarget;
+            let parts: Vec<String> = props
+                .iter()
+                .map(|p| {
+                    let target_str = match &p.target {
+                        ObjectPatternTarget::Ident(n) => n.clone(),
+                        ObjectPatternTarget::Expr(_) => "[expr]".to_string(),
+                    };
+                    let mut base = if p.shorthand {
+                        p.key.clone()
+                    } else {
+                        format!("{}: {}", p.key, target_str)
+                    };
+                    if let Some(init) = &p.default_init {
+                        base.push_str(" = ");
+                        base.push_str(&format_expr(init));
+                    }
+                    base
+                })
+                .collect();
+            format!("{{{}}}", parts.join(", "))
+        }
+        ast::Binding::ArrayPattern(elems) => {
+            let parts: Vec<String> = elems
+                .iter()
+                .map(|e| {
+                    let mut base = e.binding.clone().unwrap_or_else(|| "".to_string());
+                    if let Some(init) = &e.default_init {
+                        base.push_str(" = ");
+                        base.push_str(&format_expr(init));
+                    }
+                    base
+                })
+                .collect();
+            format!("[{}]", parts.join(", "))
+        }
     }
 }
 
@@ -109,17 +240,37 @@ fn format_expr(expr: &Expression) -> String {
         Expression::Literal(e) => format!("{:?}", e.value),
         Expression::This(_) => "this".to_string(),
         Expression::Identifier(e) => e.name.clone(),
-        Expression::Binary(e) => format!("({} {:?} {})", format_expr(&e.left), e.op, format_expr(&e.right)),
+        Expression::Binary(e) => format!(
+            "({} {:?} {})",
+            format_expr(&e.left),
+            e.op,
+            format_expr(&e.right)
+        ),
         Expression::Unary(e) => format!("({:?} {})", e.op, format_expr(&e.argument)),
         Expression::Call(e) => {
             let args: Vec<String> = e.args.iter().map(format_expr).collect();
             format!("{}({})", format_expr(&e.callee), args.join(", "))
         }
         Expression::Assign(e) => format!("{} = {}", format_expr(&e.left), format_expr(&e.right)),
-        Expression::Conditional(e) => format!("{} ? {} : {}", format_expr(&e.condition), format_expr(&e.then_expr), format_expr(&e.else_expr)),
+        Expression::Conditional(e) => format!(
+            "{} ? {} : {}",
+            format_expr(&e.condition),
+            format_expr(&e.then_expr),
+            format_expr(&e.else_expr)
+        ),
         Expression::ObjectLiteral(e) => {
-            let props: Vec<String> = e.properties.iter()
-                .map(|(k, v)| format!("{}: {}", k, format_expr(v)))
+            let props: Vec<String> = e
+                .properties
+                .iter()
+                .map(|property| {
+                    let key = match &property.key {
+                        crate::frontend::ast::ObjectPropertyKey::Static(name) => name.clone(),
+                        crate::frontend::ast::ObjectPropertyKey::Computed(expr) => {
+                            format!("[{}]", format_expr(expr))
+                        }
+                    };
+                    format!("{}: {}", key, format_expr(&property.value))
+                })
                 .collect();
             format!("{{{}}}", props.join(", "))
         }
@@ -138,20 +289,33 @@ fn format_expr(expr: &Expression) -> String {
         Expression::FunctionExpr(e) => {
             format!("function {}()", e.name.as_deref().unwrap_or(""))
         }
+        Expression::ArrowFunction(e) => {
+            let params: Vec<&str> = e.params.iter().map(|p| p.name()).collect();
+            format!("({}) => ...", params.join(", "))
+        }
+        Expression::PrefixIncrement(e) => format!("++{}", format_expr(&e.argument)),
+        Expression::PrefixDecrement(e) => format!("--{}", format_expr(&e.argument)),
         Expression::PostfixIncrement(e) => format!("{}++", format_expr(&e.argument)),
         Expression::PostfixDecrement(e) => format!("{}--", format_expr(&e.argument)),
         Expression::New(e) => {
             let args: Vec<String> = e.args.iter().map(format_expr).collect();
             format!("new {}({})", format_expr(&e.callee), args.join(", "))
         }
+        Expression::ClassExpr(e) => {
+            format!("class {}", e.name.as_deref().unwrap_or(""))
+        }
     }
 }
 
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
-pub fn test262(test262_dir: Option<&str>) -> Result<(), CliError> {
+pub fn test262(
+    test262_dir: Option<&str>,
+    all: bool,
+    json_output: bool,
+    limit: Option<usize>,
+) -> Result<(), CliError> {
     let cwd = std::env::current_dir().map_err(|e| CliError::Usage(e.to_string()))?;
     let allowlist_path = cwd.join("test262").join("allowlist.txt");
-    let entries = load_allowlist(&allowlist_path);
 
     let test262_root: Option<std::path::PathBuf> = test262_dir
         .map(Path::new)
