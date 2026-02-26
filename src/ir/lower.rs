@@ -27,6 +27,8 @@ const GLOBAL_NAMES: &[&str] = &[
     "RangeError",
     "SyntaxError",
     "URIError",
+    "EvalError",
+    "AggregateError",
     "globalThis",
     "Int32Array",
     "Uint8Array",
@@ -320,7 +322,7 @@ fn collect_function_exprs_for_in_of_left(
 pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
     let mut func_index: HashMap<String, u32> = HashMap::new();
     let mut func_decls: Vec<&FunctionDeclStmt> = Vec::new();
-    let mut top_level_expr_stmts: Vec<&Statement> = Vec::new();
+    let mut top_level_init_stmts: Vec<&Statement> = Vec::new();
     for stmt in &script.body {
         match stmt {
             Statement::FunctionDecl(f) => {
@@ -328,14 +330,29 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
                 func_index.insert(f.name.clone(), idx);
                 func_decls.push(f);
             }
-            Statement::Expression(_) => top_level_expr_stmts.push(stmt),
+            Statement::Expression(_)
+            | Statement::VarDecl(_)
+            | Statement::LetDecl(_)
+            | Statement::ConstDecl(_)
+            | Statement::Block(_)
+            | Statement::Labeled(_)
+            | Statement::If(_)
+            | Statement::While(_)
+            | Statement::For(_)
+            | Statement::ForIn(_)
+            | Statement::ForOf(_)
+            | Statement::Switch(_)
+            | Statement::Try(_)
+            | Statement::Throw(_)
+            | Statement::Break(_)
+            | Statement::Continue(_)
+            | Statement::Return(_) => top_level_init_stmts.push(stmt),
             Statement::ClassDecl(c) => {
                 return Err(LowerError::Unsupported(
                     "class not implemented".to_string(),
                     Some(c.span),
                 ));
             }
-            _ => {}
         }
     }
     let func_exprs = collect_function_exprs(script);
@@ -345,18 +362,15 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
         func_expr_map.insert(*nid, num_declared + i as u32);
     }
     let mut functions = Vec::new();
-    if !top_level_expr_stmts.is_empty() {
-        let init_span = top_level_expr_stmts
+    if !top_level_init_stmts.is_empty() {
+        let init_span = top_level_init_stmts
             .first()
-            .and_then(|s| match s {
-                Statement::Expression(e) => Some(e.span),
-                _ => None,
-            })
+            .map(|s| s.span())
             .unwrap_or_else(|| Span::point(crate::diagnostics::Position::start()));
         let init_body = BlockStmt {
             id: NodeId(0),
             span: init_span,
-            body: top_level_expr_stmts.iter().map(|s| (*s).clone()).collect(),
+            body: top_level_init_stmts.iter().map(|s| (*s).clone()).collect(),
         };
         let func_index_init: HashMap<String, u32> =
             func_index.iter().map(|(k, v)| (k.clone(), v + 1)).collect();
@@ -1011,7 +1025,7 @@ fn compile_function(
         exception_regions: Vec::new(),
         current_loop_label: None,
         label_map: HashMap::new(),
-        allow_function_captures: false,
+        allow_function_captures: true,
         captured_names: Vec::new(),
     };
 

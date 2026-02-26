@@ -174,6 +174,20 @@ impl Heap {
         self.set_prop(uri_err_id, "__call__", Value::Builtin(0x51));
         self.set_prop(global_id, "URIError", Value::Object(uri_err_id));
 
+        let eval_err_id = self.alloc_object();
+        self.set_prop(eval_err_id, "name", Value::String("EvalError".to_string()));
+        self.set_prop(eval_err_id, "__call__", Value::Builtin(0x51));
+        self.set_prop(global_id, "EvalError", Value::Object(eval_err_id));
+
+        let aggregate_err_id = self.alloc_object();
+        self.set_prop(
+            aggregate_err_id,
+            "name",
+            Value::String("AggregateError".to_string()),
+        );
+        self.set_prop(aggregate_err_id, "__call__", Value::Builtin(0x51));
+        self.set_prop(global_id, "AggregateError", Value::Object(aggregate_err_id));
+
         let regexp_id = self.alloc_object();
         self.set_prop(regexp_id, "escape", Value::Builtin(0x80));
         self.set_prop(regexp_id, "__call__", Value::Builtin(0x81));
