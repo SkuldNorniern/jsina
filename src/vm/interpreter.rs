@@ -1101,4 +1101,22 @@ mod tests {
             panic!("expected Return(2) for array length, got {:?}", result);
         }
     }
+
+    #[test]
+    fn interpret_dynamic_function_repeated_calls() {
+        let result = crate::driver::Driver::run(
+            "function main() { var x = 5; var f = function() { return x + 1; }; return f() + f(); }",
+        )
+        .expect("run");
+        assert_eq!(result, 12);
+    }
+
+    #[test]
+    fn interpret_dynamic_constructor_call() {
+        let result = crate::driver::Driver::run(
+            "function main() { var C = function() { this.x = 7; }; var o = new C(); return o.x; }",
+        )
+        .expect("run");
+        assert_eq!(result, 7);
+    }
 }
