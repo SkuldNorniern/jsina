@@ -215,6 +215,8 @@ impl Heap {
         self.set_prop(global_id, "decodeURIComponent", Value::Builtin(0xDF));
         self.set_prop(global_id, "parseInt", Value::Builtin(0xDC));
         self.set_prop(global_id, "parseFloat", Value::Builtin(0xDD));
+        self.set_prop(global_id, "escape", Value::Builtin(0xEB));
+        self.set_prop(global_id, "unescape", Value::Builtin(0xEC));
         self.set_prop(global_id, "Int32Array", Value::Builtin(0xE0));
         self.set_prop(global_id, "Uint8Array", Value::Builtin(0xE1));
         self.set_prop(global_id, "Uint8ClampedArray", Value::Builtin(0xE2));

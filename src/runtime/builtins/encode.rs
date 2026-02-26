@@ -153,6 +153,82 @@ pub fn decode_uri_component_builtin(
     })
 }
 
+#[inline(always)]
+fn is_legacy_escape_unescaped_ascii(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'@' | b'*' | b'_' | b'+' | b'-' | b'.' | b'/')
+}
+
+pub fn escape_builtin(args: &[Value], _heap: &mut crate::runtime::Heap) -> Value {
+    let s = args.first().map(to_prop_key).unwrap_or_default();
+    let mut out = String::with_capacity(s.len() * 3);
+
+    for unit in s.encode_utf16() {
+        if unit <= 0xFF {
+            let b = unit as u8;
+            if is_legacy_escape_unescaped_ascii(b) {
+                out.push(b as char);
+            } else {
+                push_percent_encoded(&mut out, b);
+            }
+        } else {
+            out.push('%');
+            out.push('u');
+            out.push(HEX[((unit >> 12) & 0xF) as usize] as char);
+            out.push(HEX[((unit >> 8) & 0xF) as usize] as char);
+            out.push(HEX[((unit >> 4) & 0xF) as usize] as char);
+            out.push(HEX[(unit & 0xF) as usize] as char);
+        }
+    }
+
+    Value::String(out)
+}
+
+pub fn unescape_builtin(args: &[Value], _heap: &mut crate::runtime::Heap) -> Value {
+    let s = args.first().map(to_prop_key).unwrap_or_default();
+    let bytes = s.as_bytes();
+    let mut out_units: Vec<u16> = Vec::with_capacity(bytes.len());
+
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 5 < bytes.len() && (bytes[i + 1] == b'u' || bytes[i + 1] == b'U') {
+                let d0 = hex_digit(bytes[i + 2]);
+                let d1 = hex_digit(bytes[i + 3]);
+                let d2 = hex_digit(bytes[i + 4]);
+                let d3 = hex_digit(bytes[i + 5]);
+                if let (Some(a), Some(b), Some(c), Some(d)) = (d0, d1, d2, d3) {
+                    let unit =
+                        ((a as u16) << 12) | ((b as u16) << 8) | ((c as u16) << 4) | (d as u16);
+                    out_units.push(unit);
+                    i += 6;
+                    continue;
+                }
+            }
+
+            if i + 2 < bytes.len() {
+                let hi = hex_digit(bytes[i + 1]);
+                let lo = hex_digit(bytes[i + 2]);
+                if let (Some(hi), Some(lo)) = (hi, lo) {
+                    out_units.push(((hi << 4) | lo) as u16);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+
+        let ch = match s[i..].chars().next() {
+            Some(c) => c,
+            None => break,
+        };
+        let mut buf = [0u16; 2];
+        let encoded = ch.encode_utf16(&mut buf);
+        out_units.extend_from_slice(encoded);
+        i += ch.len_utf8();
+    }
+
+    Value::String(String::from_utf16_lossy(&out_units))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +244,21 @@ mod tests {
     fn decode_valid() {
         assert_eq!(decode_uri_impl("%41", true).unwrap(), "A");
         assert_eq!(decode_uri_impl("a%42c", true).unwrap(), "aBc");
+    }
+
+    #[test]
+    fn legacy_escape_roundtrip_ascii() {
+        let mut heap = crate::runtime::Heap::new();
+        let escaped = escape_builtin(&[Value::String("a b".to_string())], &mut heap);
+        assert_eq!(escaped, Value::String("a%20b".to_string()));
+        let unescaped = unescape_builtin(&[Value::String("a%20b".to_string())], &mut heap);
+        assert_eq!(unescaped, Value::String("a b".to_string()));
+    }
+
+    #[test]
+    fn legacy_escape_unicode_uses_u_prefix() {
+        let mut heap = crate::runtime::Heap::new();
+        let escaped = escape_builtin(&[Value::String("\u{0100}".to_string())], &mut heap);
+        assert_eq!(escaped, Value::String("%u0100".to_string()));
     }
 }
