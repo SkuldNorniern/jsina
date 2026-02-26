@@ -218,8 +218,17 @@ impl Heap {
         self.set_prop(global_id, "escape", Value::Builtin(0xEB));
         self.set_prop(global_id, "unescape", Value::Builtin(0xEC));
         self.set_prop(global_id, "Int32Array", Value::Builtin(0xE0));
+        self.set_prop(global_id, "Int8Array", Value::Builtin(0xE0));
+        self.set_prop(global_id, "Int16Array", Value::Builtin(0xE0));
         self.set_prop(global_id, "Uint8Array", Value::Builtin(0xE1));
         self.set_prop(global_id, "Uint8ClampedArray", Value::Builtin(0xE2));
+        self.set_prop(global_id, "Uint16Array", Value::Builtin(0xE0));
+        self.set_prop(global_id, "Uint32Array", Value::Builtin(0xE0));
+        self.set_prop(global_id, "Float32Array", Value::Builtin(0xE0));
+        self.set_prop(global_id, "Float64Array", Value::Builtin(0xE0));
+        self.set_prop(global_id, "Float16Array", Value::Builtin(0xE0));
+        self.set_prop(global_id, "BigInt64Array", Value::Builtin(0xE0));
+        self.set_prop(global_id, "BigUint64Array", Value::Builtin(0xE0));
         self.set_prop(global_id, "ArrayBuffer", Value::Builtin(0xE3));
         self.set_prop(global_id, "Function", Value::Builtin(0xE4));
         self.set_prop(global_id, "isNaN", Value::Builtin(0xE5));

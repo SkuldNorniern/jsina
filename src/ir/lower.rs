@@ -36,9 +36,20 @@ const GLOBAL_NAMES: &[&str] = &[
     "WeakMap",
     "WeakSet",
     "DataView",
+    "Int8Array",
+    "Int16Array",
+    "Uint16Array",
+    "Uint32Array",
+    "Float32Array",
+    "Float64Array",
+    "Float16Array",
+    "BigInt64Array",
+    "BigUint64Array",
     "eval",
     "encodeURI",
     "encodeURIComponent",
+    "escape",
+    "unescape",
     "decodeURI",
     "decodeURIComponent",
     "parseInt",
@@ -54,6 +65,7 @@ const GLOBAL_NAMES: &[&str] = &[
     "Temporal",
     "Proxy",
     "Intl",
+    "isSameValue",
     "testResult",
     "__isArray",
     "__defineProperty",
@@ -3753,10 +3765,21 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 } else {
-                    return Err(LowerError::Unsupported(
-                        format!("call to undefined function '{}'", id.name),
-                        Some(id.span),
-                    ));
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Global("globalThis".to_string()),
+                        span: e.span,
+                    });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::Global(id.name.clone()),
+                        span: id.span,
+                    });
+                    for arg in &e.args {
+                        compile_expression(arg, ctx)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
                 }
             }
             _ => {
