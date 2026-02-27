@@ -125,7 +125,7 @@ impl Driver {
         enable_jit: bool,
     ) -> Result<i64, DriverError> {
         with_host(host, || {
-            Self::run_with_host_and_limit_inner(source, trace, None, None, enable_jit, true)
+            Self::run_with_host_and_limit_inner(source, trace, None, enable_jit, true, false)
         })
     }
 
@@ -141,43 +141,34 @@ impl Driver {
         })
     }
 
-    /// Run with step limit. Use for test262 to prevent infinite loops from exhausting memory.
-    pub fn run_with_step_limit(source: &str, step_limit: u64) -> Result<i64, DriverError> {
-        let host = CliHost;
-        with_host(&host, || {
-            Self::run_with_host_and_limit_inner(source, false, Some(step_limit), None, false, false)
-        })
-    }
-
-    /// Run with step limit and cancellation flag. When cancel is set, execution stops.
-    /// Use for test262 to avoid zombie threads when wall-clock timeout fires.
+    /// Run with cancellation flag. When cancel is set, execution stops.
+    /// Use for test262 with wall-clock timeout and infinite loop detection.
     pub fn run_with_step_limit_and_cancel(
         source: &str,
-        step_limit: u64,
+        _step_limit: u64,
         cancel: Option<&AtomicBool>,
+    ) -> Result<i64, DriverError> {
+        Self::run_with_timeout_and_cancel(source, cancel, true)
+    }
+
+    /// Run with wall-clock timeout via cancel.
+    /// When enable_infinite_loop_detection is true, cycle detection stops runaway loops (e.g. test262).
+    /// Default false for hosting use cases (event loops, servers).
+    pub fn run_with_timeout_and_cancel(
+        source: &str,
+        cancel: Option<&AtomicBool>,
+        enable_infinite_loop_detection: bool,
     ) -> Result<i64, DriverError> {
         let host = CliHost;
         with_host(&host, || {
             Self::run_with_host_and_limit_inner(
                 source,
                 false,
-                Some(step_limit),
                 cancel,
                 false,
                 false,
+                enable_infinite_loop_detection,
             )
-        })
-    }
-
-    /// Run with no step limit, only wall-clock timeout via cancel.
-    /// Use for test262 when step limit is not desired.
-    pub fn run_with_timeout_and_cancel(
-        source: &str,
-        cancel: Option<&AtomicBool>,
-    ) -> Result<i64, DriverError> {
-        let host = CliHost;
-        with_host(&host, || {
-            Self::run_with_host_and_limit_inner(source, false, None, cancel, false, false)
         })
     }
 
@@ -186,16 +177,16 @@ impl Driver {
         trace: bool,
         enable_jit: bool,
     ) -> Result<i64, DriverError> {
-        Self::run_with_host_and_limit_inner(source, trace, None, None, enable_jit, false)
+        Self::run_with_host_and_limit_inner(source, trace, None, enable_jit, false, false)
     }
 
     fn run_with_host_and_limit_inner(
         source: &str,
         trace: bool,
-        step_limit: Option<u64>,
         cancel: Option<&AtomicBool>,
         enable_jit: bool,
         emit_jit_stats: bool,
+        enable_infinite_loop_detection: bool,
     ) -> Result<i64, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
@@ -214,7 +205,7 @@ impl Driver {
             .iter()
             .position(|f| f.name.as_deref() == Some("__init__"));
 
-        if enable_jit && step_limit.is_none() && init_entry.is_none() {
+        if enable_jit && cancel.is_none() && init_entry.is_none() {
             let mut jit = crate::backend::JitSession::new();
             let chunk = &chunks[entry];
             if let Ok(Some(result)) = jit.try_compile(entry, chunk) {
@@ -254,10 +245,11 @@ impl Driver {
             crate::vm::interpret_program_with_limit_and_cancel_and_stats(
                 &program,
                 trace,
-                step_limit,
+                None,
                 cancel,
-                step_limit.is_some(),
+                false,
                 enable_jit,
+                enable_infinite_loop_detection,
             );
         if emit_jit_stats {
             if let Some(stats) = jit_stats {
