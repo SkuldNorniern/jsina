@@ -218,3 +218,55 @@ pub fn sup(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
     Value::String(format!("<sup>{}</sup>", s))
 }
+
+pub fn substr(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = match args.first() {
+        Some(Value::String(x)) => x.clone(),
+        Some(v) => v.to_string(),
+        None => String::new(),
+    };
+    let start = args.get(1).map(to_number).unwrap_or(0.0);
+    let len_val = args.get(2).map(to_number);
+    let chars: Vec<char> = s.chars().collect();
+    let len_i = chars.len() as i32;
+    let start_i = if start.is_nan() || start.is_infinite() {
+        0
+    } else {
+        start as i32
+    };
+    let from = if start_i >= 0 {
+        start_i.min(len_i).max(0) as usize
+    } else {
+        (len_i + start_i).max(0) as usize
+    };
+    let count = len_val
+        .map(|l| {
+            if l.is_nan() || l.is_infinite() || l < 0.0 {
+                len_i
+            } else {
+                l as i32
+            }
+        })
+        .unwrap_or(len_i);
+    let take_count = (count as usize).min(chars.len().saturating_sub(from));
+    let result: String = chars.into_iter().skip(from).take(take_count).collect();
+    Value::String(result)
+}
+
+pub fn trim_left(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = match args.first() {
+        Some(Value::String(x)) => x.clone(),
+        Some(v) => v.to_string(),
+        None => String::new(),
+    };
+    Value::String(s.trim_start().to_string())
+}
+
+pub fn trim_right(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = match args.first() {
+        Some(Value::String(x)) => x.clone(),
+        Some(v) => v.to_string(),
+        None => String::new(),
+    };
+    Value::String(s.trim_end().to_string())
+}

@@ -34,6 +34,7 @@ pub enum ConstEntry {
 pub enum Opcode {
     PushConst = 0x01,
     Pop = 0x02,
+    PushConst16 = 0x0F,
     Dup = 0x06,
     Swap = 0x07,
     LoadLocal = 0x03,
@@ -69,6 +70,8 @@ pub enum Opcode {
     SetProp = 0x53,
     GetPropDyn = 0x54,
     SetPropDyn = 0x55,
+    GetProp16 = 0x57,
+    SetProp16 = 0x58,
     Call = 0x40,
     CallBuiltin = 0x41,
     CallMethod = 0x42,

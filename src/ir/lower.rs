@@ -1193,7 +1193,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             return Ok(true);
         }
         Statement::Try(t) => {
-            let has_catch = t.catch_param.is_some() && t.catch_body.is_some();
+            let has_catch = t.catch_body.is_some();
             let has_finally = t.finally_body.is_some();
             if !has_catch && !has_finally {
                 return Err(LowerError::Unsupported(
@@ -1222,10 +1222,11 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             ctx.next_slot += 1;
 
             let exits = if has_catch && has_finally {
-                let catch_param = t.catch_param.as_ref().expect("catch param");
                 let catch_body = t.catch_body.as_ref().expect("catch body");
                 let finally_body = t.finally_body.as_ref().expect("finally body");
-                ctx.locals.insert(catch_param.clone(), exception_slot);
+                if let Some(catch_param) = &t.catch_param {
+                    ctx.locals.insert(catch_param.clone(), exception_slot);
+                }
 
                 let catch_id = ctx.blocks.len() as HirBlockId;
                 ctx.blocks.push(HirBlock {
@@ -1286,9 +1287,10 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
 
                 try_exits || catch_exits || finally_exits
             } else if has_catch {
-                let catch_param = t.catch_param.as_ref().expect("catch param");
                 let catch_body = t.catch_body.as_ref().expect("catch body");
-                ctx.locals.insert(catch_param.clone(), exception_slot);
+                if let Some(catch_param) = &t.catch_param {
+                    ctx.locals.insert(catch_param.clone(), exception_slot);
+                }
 
                 let catch_id = ctx.blocks.len() as HirBlockId;
                 ctx.blocks.push(HirBlock {
@@ -4660,6 +4662,15 @@ mod tests {
     }
 
     #[test]
+    fn lower_try_optional_catch_binding() {
+        let result = crate::driver::Driver::run(
+            "function main() { try { throw 1; } catch { return 42; } return 0; }",
+        )
+        .expect("run");
+        assert_eq!(result, 42, "try/catch without param should catch and return");
+    }
+
+    #[test]
     fn lower_throw() {
         let err = crate::driver::Driver::run("function main() { throw 42; }").unwrap_err();
         let msg = format!("{:?}", err);
@@ -5078,15 +5089,11 @@ function main() {
 "#;
         let result = crate::driver::Driver::run(src);
         assert!(
-            result.is_err(),
-            "deep recursion should hit call depth limit"
+            result.is_ok(),
+            "deep recursion should succeed: {:?}",
+            result
         );
-        let err = result.unwrap_err();
-        assert!(
-            err.to_string().contains("call depth"),
-            "expected CallDepthExceeded, got: {}",
-            err
-        );
+        assert_eq!(result.unwrap(), 1001, "recurse(1001) should return 1001");
     }
 
     #[test]

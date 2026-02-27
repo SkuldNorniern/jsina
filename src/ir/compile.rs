@@ -7,11 +7,16 @@ pub struct CompiledFunction {
     pub chunk: BytecodeChunk,
 }
 
-fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
+fn block_bytecode_size(block: &HirBlock, const_start: usize) -> usize {
     let mut size = 0;
+    let mut idx = const_start;
     for op in &block.ops {
         size += match op {
-            HirOp::LoadConst { .. } => 2,
+            HirOp::LoadConst { .. } => {
+                let n = if idx < 256 { 2 } else { 3 };
+                idx += 1;
+                n
+            }
             HirOp::Pop { .. } | HirOp::Dup { .. } | HirOp::Swap { .. } => 1,
             HirOp::LoadLocal { .. } | HirOp::StoreLocal { .. } => 2,
             HirOp::LoadThis { .. } => 1,
@@ -41,7 +46,11 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
             HirOp::NewObject { .. } | HirOp::NewObjectWithProto { .. } | HirOp::NewArray { .. } => {
                 1
             }
-            HirOp::GetProp { .. } | HirOp::SetProp { .. } => 2,
+            HirOp::GetProp { .. } | HirOp::SetProp { .. } => {
+                let n = if idx < 256 { 2 } else { 3 };
+                idx += 1;
+                n
+            }
             HirOp::GetPropDyn { .. } | HirOp::SetPropDyn { .. } => 1,
             HirOp::Call { .. } | HirOp::CallBuiltin { .. } | HirOp::New { .. } => 3,
             HirOp::CallMethod { .. } | HirOp::NewMethod { .. } => 2,
@@ -58,19 +67,10 @@ fn block_bytecode_size(block: &HirBlock, _constants_len: usize) -> usize {
 
 pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
     let mut constants = Vec::new();
-    let mut block_offsets: Vec<usize> = vec![0];
     for block in &func.blocks {
-        let size = block_bytecode_size(block, constants.len());
-        block_offsets.push(block_offsets.last().copied().unwrap_or(0) + size);
-    }
-
-    let mut code = Vec::new();
-
-    for (_block_idx, block) in func.blocks.iter().enumerate() {
         for op in &block.ops {
             match op {
                 HirOp::LoadConst { value, .. } => {
-                    let idx = constants.len() as u8;
                     constants.push(match value {
                         HirConst::Int(n) => ConstEntry::Int(*n),
                         HirConst::Float(n) => ConstEntry::Float(*n),
@@ -80,8 +80,49 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                         HirConst::Function(i) => ConstEntry::Function(*i as usize),
                         HirConst::Global(s) => ConstEntry::Global(s.clone()),
                     });
-                    code.push(Opcode::PushConst as u8);
-                    code.push(idx);
+                }
+                HirOp::GetProp { key, .. } | HirOp::SetProp { key, .. } => {
+                    constants.push(ConstEntry::String(key.clone()));
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut block_const_starts: Vec<usize> = vec![0];
+    for block in &func.blocks {
+        let mut n = 0;
+        for op in &block.ops {
+            match op {
+                HirOp::LoadConst { .. } | HirOp::GetProp { .. } | HirOp::SetProp { .. } => n += 1,
+                _ => {}
+            }
+        }
+        block_const_starts.push(block_const_starts.last().copied().unwrap_or(0) + n);
+    }
+    let mut block_offsets: Vec<usize> = vec![0];
+    for (i, block) in func.blocks.iter().enumerate() {
+        let const_start = block_const_starts[i];
+        let size = block_bytecode_size(block, const_start);
+        block_offsets.push(block_offsets.last().copied().unwrap_or(0) + size);
+    }
+
+    let mut code = Vec::new();
+    let mut const_idx = 0;
+
+    for (_block_idx, block) in func.blocks.iter().enumerate() {
+        for op in &block.ops {
+            match op {
+                HirOp::LoadConst { .. } => {
+                    let idx = const_idx;
+                    const_idx += 1;
+                    if idx < 256 {
+                        code.push(Opcode::PushConst as u8);
+                        code.push(idx as u8);
+                    } else {
+                        code.push(Opcode::PushConst16 as u8);
+                        code.push((idx & 0xFF) as u8);
+                        code.push((idx >> 8) as u8);
+                    }
                 }
                 HirOp::Pop { .. } => {
                     code.push(Opcode::Pop as u8);
@@ -131,17 +172,29 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 HirOp::NewObject { .. } => code.push(Opcode::NewObject as u8),
                 HirOp::NewObjectWithProto { .. } => code.push(Opcode::NewObjectWithProto as u8),
                 HirOp::NewArray { .. } => code.push(Opcode::NewArray as u8),
-                HirOp::GetProp { key, .. } => {
-                    let idx = constants.len();
-                    constants.push(ConstEntry::String(key.clone()));
-                    code.push(Opcode::GetProp as u8);
-                    code.push(idx.min(255) as u8);
+                HirOp::GetProp { .. } => {
+                    let idx = const_idx;
+                    const_idx += 1;
+                    if idx < 256 {
+                        code.push(Opcode::GetProp as u8);
+                        code.push(idx as u8);
+                    } else {
+                        code.push(Opcode::GetProp16 as u8);
+                        code.push((idx & 0xFF) as u8);
+                        code.push((idx >> 8) as u8);
+                    }
                 }
-                HirOp::SetProp { key, .. } => {
-                    let idx = constants.len();
-                    constants.push(ConstEntry::String(key.clone()));
-                    code.push(Opcode::SetProp as u8);
-                    code.push(idx.min(255) as u8);
+                HirOp::SetProp { .. } => {
+                    let idx = const_idx;
+                    const_idx += 1;
+                    if idx < 256 {
+                        code.push(Opcode::SetProp as u8);
+                        code.push(idx as u8);
+                    } else {
+                        code.push(Opcode::SetProp16 as u8);
+                        code.push((idx & 0xFF) as u8);
+                        code.push((idx >> 8) as u8);
+                    }
                 }
                 HirOp::GetPropDyn { .. } => code.push(Opcode::GetPropDyn as u8),
                 HirOp::SetPropDyn { .. } => code.push(Opcode::SetPropDyn as u8),

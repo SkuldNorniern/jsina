@@ -121,6 +121,9 @@ pub(crate) fn primitive_string_method(key: &str) -> Value {
         "strike" => Value::Builtin(b("String", "strike")),
         "sub" => Value::Builtin(b("String", "sub")),
         "sup" => Value::Builtin(b("String", "sup")),
+        "substr" => Value::Builtin(b("String", "substr")),
+        "trimLeft" => Value::Builtin(b("String", "trimLeft")),
+        "trimRight" => Value::Builtin(b("String", "trimRight")),
         _ => Value::Undefined,
     }
 }

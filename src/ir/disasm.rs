@@ -73,6 +73,18 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                     .unwrap_or_else(|| "?".to_string());
                 format!("  {:04}  PushConst  {}  ; {}", line_start, idx, const_val)
             }
+            x if x == Opcode::PushConst16 as u8 => {
+                let lo = code.get(pc).copied().unwrap_or(0) as usize;
+                let hi = code.get(pc + 1).copied().unwrap_or(0) as usize;
+                let idx = lo | (hi << 8);
+                pc += 2;
+                let const_val = chunk
+                    .constants
+                    .get(idx)
+                    .map(format_const)
+                    .unwrap_or_else(|| "?".to_string());
+                format!("  {:04}  PushConst16  {}  ; {}", line_start, idx, const_val)
+            }
             x if x == Opcode::Pop as u8 => format!("  {:04}  Pop", line_start),
             x if x == Opcode::Dup as u8 => format!("  {:04}  Dup", line_start),
             x if x == Opcode::Swap as u8 => format!("  {:04}  Swap", line_start),
@@ -134,6 +146,30 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
                     .map(format_const)
                     .unwrap_or_else(|| "?".to_string());
                 format!("  {:04}  SetProp  {}  ; {}", line_start, idx, key)
+            }
+            x if x == Opcode::GetProp16 as u8 => {
+                let lo = code.get(pc).copied().unwrap_or(0) as usize;
+                let hi = code.get(pc + 1).copied().unwrap_or(0) as usize;
+                let idx = lo | (hi << 8);
+                pc += 2;
+                let key = chunk
+                    .constants
+                    .get(idx)
+                    .map(format_const)
+                    .unwrap_or_else(|| "?".to_string());
+                format!("  {:04}  GetProp16  {}  ; {}", line_start, idx, key)
+            }
+            x if x == Opcode::SetProp16 as u8 => {
+                let lo = code.get(pc).copied().unwrap_or(0) as usize;
+                let hi = code.get(pc + 1).copied().unwrap_or(0) as usize;
+                let idx = lo | (hi << 8);
+                pc += 2;
+                let key = chunk
+                    .constants
+                    .get(idx)
+                    .map(format_const)
+                    .unwrap_or_else(|| "?".to_string());
+                format!("  {:04}  SetProp16  {}  ; {}", line_start, idx, key)
             }
             x if x == Opcode::GetPropDyn as u8 => format!("  {:04}  GetPropDyn", line_start),
             x if x == Opcode::SetPropDyn as u8 => format!("  {:04}  SetPropDyn", line_start),

@@ -16,6 +16,11 @@ pub(crate) fn read_i16(code: &[u8], pc: usize) -> i16 {
 }
 
 #[inline(always)]
+pub(crate) fn read_u16(code: &[u8], pc: usize) -> u16 {
+    u16::from_le_bytes([read_u8(code, pc), read_u8(code, pc + 1)])
+}
+
+#[inline(always)]
 pub(crate) fn execute_builtin(
     builtin_id: u8,
     argc: usize,

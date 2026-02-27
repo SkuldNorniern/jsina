@@ -1,8 +1,6 @@
 use crate::ir::bytecode::BytecodeChunk;
 use crate::runtime::Value;
 
-pub const MAX_CALL_DEPTH: usize = 1000;
-
 pub(crate) enum BuiltinResult {
     Push(Value),
     Throw(Value),
@@ -20,8 +18,7 @@ pub enum VmError {
     StackUnderflow,
     InvalidOpcode(u8),
     InvalidConstIndex(usize),
-    CallDepthExceeded,
-    StepLimitExceeded,
+    InfiniteLoopDetected,
     Cancelled,
 }
 
@@ -31,8 +28,7 @@ impl std::fmt::Display for VmError {
             Self::StackUnderflow => write!(f, "stack underflow"),
             Self::InvalidOpcode(b) => write!(f, "invalid opcode: 0x{:02x}", b),
             Self::InvalidConstIndex(i) => write!(f, "invalid constant index: {}", i),
-            Self::CallDepthExceeded => write!(f, "maximum call depth exceeded"),
-            Self::StepLimitExceeded => write!(f, "step limit exceeded (infinite loop?)"),
+            Self::InfiniteLoopDetected => write!(f, "infinite loop detected"),
             Self::Cancelled => write!(f, "execution cancelled (timeout)"),
         }
     }

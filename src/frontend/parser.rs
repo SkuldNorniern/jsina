@@ -724,11 +724,15 @@ impl Parser {
         let id = self.next_id();
         let body = Box::new(self.parse_block()?);
         let (catch_param, catch_body) = if self.optional(TokenType::Catch) {
-            self.expect(TokenType::LeftParen)?;
-            let param = self.expect(TokenType::Identifier)?.lexeme;
-            self.expect(TokenType::RightParen)?;
-            let catch = Box::new(self.parse_block()?);
-            (Some(param), Some(catch))
+            if self.optional(TokenType::LeftParen) {
+                let param = self.expect(TokenType::Identifier)?.lexeme;
+                self.expect(TokenType::RightParen)?;
+                let catch = Box::new(self.parse_block()?);
+                (Some(param), Some(catch))
+            } else {
+                let catch = Box::new(self.parse_block()?);
+                (None, Some(catch))
+            }
         } else {
             (None, None)
         };
@@ -737,7 +741,7 @@ impl Parser {
         } else {
             None
         };
-        if catch_param.is_none() && finally_body.is_none() {
+        if catch_body.is_none() && finally_body.is_none() {
             return Err(ParseError {
                 code: ErrorCode::ParseTryNeedsCatchOrFinally,
                 message: "try must have catch or finally".to_string(),
@@ -3404,6 +3408,21 @@ mod tests {
             }
         }
         panic!("expected try/catch in block");
+    }
+
+    #[test]
+    fn parse_try_optional_catch_binding() {
+        let script = parse_ok("function f() { try { throw 1; } catch { return 42; } }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::Try(t) = &b.body[0] {
+                    assert!(t.catch_param.is_none());
+                    assert!(t.catch_body.is_some());
+                    return;
+                }
+            }
+        }
+        panic!("expected try/catch without param in block");
     }
 
     #[test]

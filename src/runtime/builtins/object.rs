@@ -1,5 +1,19 @@
 use super::to_prop_key;
+use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
+
+fn builtin_arity(id: u8) -> i32 {
+    builtins::get(id)
+        .map(|b| match (b.category, b.name) {
+            ("String", "anchor") | ("String", "fontcolor") | ("String", "fontsize")
+            | ("String", "link") => 1,
+            ("String", "substr") => 2,
+            ("Date", "setYear") => 1,
+            ("RegExp", "compile") => 2,
+            _ => 0,
+        })
+        .unwrap_or(0)
+}
 
 pub fn create(args: &[Value], heap: &mut Heap) -> Value {
     let prototype = args.first().and_then(|p| match p {
@@ -48,6 +62,7 @@ pub fn has_own_property(args: &[Value], heap: &mut Heap) -> Value {
         Some(Value::Function(function_index)) => {
             heap.function_has_own_property(*function_index, &key)
         }
+        Some(Value::Builtin(_)) => key == "length" || key == "name",
         _ => false,
     };
     Value::Bool(result)
@@ -124,6 +139,7 @@ pub fn has_own(args: &[Value], heap: &mut Heap) -> Value {
         Some(Value::Function(function_index)) => {
             heap.function_has_own_property(*function_index, &key)
         }
+        Some(Value::Builtin(_)) => key == "length" || key == "name",
         _ => false,
     };
     Value::Bool(result)
@@ -205,6 +221,23 @@ pub fn get_own_property_descriptor(args: &[Value], heap: &mut Heap) -> Value {
                 create_data_descriptor(value, false, false, true, heap)
             } else {
                 create_data_descriptor(value, true, true, true, heap)
+            }
+        }
+        Value::Builtin(id) => {
+            if key == "length" {
+                let len = builtin_arity(*id);
+                create_data_descriptor(Value::Int(len), false, false, true, heap)
+            } else if key == "name" {
+                let name = builtins::name(*id);
+                create_data_descriptor(
+                    Value::String(name.to_string()),
+                    false,
+                    false,
+                    true,
+                    heap,
+                )
+            } else {
+                Value::Undefined
             }
         }
         _ => Value::Undefined,

@@ -614,6 +614,11 @@ const BUILTINS: &[BuiltinDef] = &[
         name: "test",
         entry: BuiltinEntry::Normal(regexp::test),
     },
+    BuiltinDef {
+        category: "RegExp",
+        name: "compile",
+        entry: BuiltinEntry::Normal(regexp::compile),
+    },
     // Map 0..3
     BuiltinDef {
         category: "Map",
@@ -682,6 +687,21 @@ const BUILTINS: &[BuiltinDef] = &[
         category: "String",
         name: "sup",
         entry: BuiltinEntry::Normal(string::sup),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "substr",
+        entry: BuiltinEntry::Normal(string::substr),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "trimLeft",
+        entry: BuiltinEntry::Normal(string::trim_left),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "trimRight",
+        entry: BuiltinEntry::Normal(string::trim_right),
     },
     // Date 0..4
     BuiltinDef {
@@ -979,8 +999,8 @@ mod tests {
         assert_eq!(resolve("Object", "preventExtensions"), Some(43));
         assert_eq!(resolve("Object", "setPrototypeOf"), Some(45));
         assert_eq!(resolve("String", "fromCharCode"), Some(67));
-        assert_eq!(resolve("Date", "now"), Some(95));
-        assert_eq!(resolve("Global", "Function"), Some(122));
+        assert_eq!(resolve("Date", "now"), Some(99));
+        assert_eq!(resolve("Global", "Function"), Some(126));
         assert_eq!(resolve("Unknown", "foo"), None);
     }
 

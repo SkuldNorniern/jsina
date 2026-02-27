@@ -26,6 +26,7 @@ pub struct Heap {
     error_object_ids: HashSet<usize>,
     global_object_id: usize,
     array_prototype_id: Option<usize>,
+    regexp_prototype_id: Option<usize>,
     function_props: HashMap<usize, HashMap<String, Value>>,
 }
 
@@ -42,6 +43,7 @@ impl Default for Heap {
             error_object_ids: HashSet::new(),
             global_object_id: 0,
             array_prototype_id: None,
+            regexp_prototype_id: None,
             function_props: HashMap::new(),
         };
         heap.init_globals();
@@ -132,13 +134,31 @@ impl Heap {
         self.set_prop(json_id, "stringify", Value::Builtin(b("Json", "stringify")));
         self.set_prop(global_id, "JSON", Value::Object(json_id));
 
+        let str_proto_id = self.alloc_object();
+        self.set_prop(str_proto_id, "split", Value::Builtin(b("String", "split")));
+        self.set_prop(str_proto_id, "trim", Value::Builtin(b("String", "trim")));
+        self.set_prop(str_proto_id, "toLowerCase", Value::Builtin(b("String", "toLowerCase")));
+        self.set_prop(str_proto_id, "toUpperCase", Value::Builtin(b("String", "toUpperCase")));
+        self.set_prop(str_proto_id, "charAt", Value::Builtin(b("String", "charAt")));
+        self.set_prop(str_proto_id, "repeat", Value::Builtin(b("String", "repeat")));
+        self.set_prop(str_proto_id, "anchor", Value::Builtin(b("String", "anchor")));
+        self.set_prop(str_proto_id, "big", Value::Builtin(b("String", "big")));
+        self.set_prop(str_proto_id, "blink", Value::Builtin(b("String", "blink")));
+        self.set_prop(str_proto_id, "bold", Value::Builtin(b("String", "bold")));
+        self.set_prop(str_proto_id, "fixed", Value::Builtin(b("String", "fixed")));
+        self.set_prop(str_proto_id, "fontcolor", Value::Builtin(b("String", "fontcolor")));
+        self.set_prop(str_proto_id, "fontsize", Value::Builtin(b("String", "fontsize")));
+        self.set_prop(str_proto_id, "italics", Value::Builtin(b("String", "italics")));
+        self.set_prop(str_proto_id, "link", Value::Builtin(b("String", "link")));
+        self.set_prop(str_proto_id, "small", Value::Builtin(b("String", "small")));
+        self.set_prop(str_proto_id, "strike", Value::Builtin(b("String", "strike")));
+        self.set_prop(str_proto_id, "sub", Value::Builtin(b("String", "sub")));
+        self.set_prop(str_proto_id, "substr", Value::Builtin(b("String", "substr")));
+        self.set_prop(str_proto_id, "sup", Value::Builtin(b("String", "sup")));
+        self.set_prop(str_proto_id, "trimLeft", Value::Builtin(b("String", "trimLeft")));
+        self.set_prop(str_proto_id, "trimRight", Value::Builtin(b("String", "trimRight")));
         let str_id = self.alloc_object();
-        self.set_prop(str_id, "split", Value::Builtin(b("String", "split")));
-        self.set_prop(str_id, "trim", Value::Builtin(b("String", "trim")));
-        self.set_prop(str_id, "toLowerCase", Value::Builtin(b("String", "toLowerCase")));
-        self.set_prop(str_id, "toUpperCase", Value::Builtin(b("String", "toUpperCase")));
-        self.set_prop(str_id, "charAt", Value::Builtin(b("String", "charAt")));
-        self.set_prop(str_id, "repeat", Value::Builtin(b("String", "repeat")));
+        self.set_prop(str_id, "prototype", Value::Object(str_proto_id));
         self.set_prop(str_id, "fromCharCode", Value::Builtin(b("String", "fromCharCode")));
         self.set_prop(global_id, "String", Value::Object(str_id));
 
@@ -216,7 +236,12 @@ impl Heap {
         self.set_prop(aggregate_err_id, "__call__", Value::Builtin(b("Type", "Error")));
         self.set_prop(global_id, "AggregateError", Value::Object(aggregate_err_id));
 
+        let regexp_proto_id = self.alloc_object();
+        self.regexp_prototype_id = Some(regexp_proto_id);
+        self.set_prop(regexp_proto_id, "test", Value::Builtin(b("RegExp", "test")));
+        self.set_prop(regexp_proto_id, "compile", Value::Builtin(b("RegExp", "compile")));
         let regexp_id = self.alloc_object();
+        self.set_prop(regexp_id, "prototype", Value::Object(regexp_proto_id));
         self.set_prop(regexp_id, "escape", Value::Builtin(b("RegExp", "escape")));
         self.set_prop(regexp_id, "__call__", Value::Builtin(b("RegExp", "create")));
         self.set_prop(global_id, "RegExp", Value::Object(regexp_id));
@@ -234,6 +259,14 @@ impl Heap {
         self.set_prop(global_id, "Set", Value::Object(set_id));
 
         let date_id = self.alloc_object();
+        let date_proto_id = self.alloc_object();
+        self.set_prop(date_proto_id, "getTime", Value::Builtin(b("Date", "getTime")));
+        self.set_prop(date_proto_id, "toString", Value::Builtin(b("Date", "toString")));
+        self.set_prop(date_proto_id, "toISOString", Value::Builtin(b("Date", "toISOString")));
+        self.set_prop(date_proto_id, "getYear", Value::Builtin(b("Date", "getYear")));
+        self.set_prop(date_proto_id, "setYear", Value::Builtin(b("Date", "setYear")));
+        self.set_prop(date_proto_id, "toGMTString", Value::Builtin(b("Date", "toGMTString")));
+        self.set_prop(date_id, "prototype", Value::Object(date_proto_id));
         self.set_prop(date_id, "now", Value::Builtin(b("Date", "now")));
         self.set_prop(date_id, "getTime", Value::Builtin(b("Date", "getTime")));
         self.set_prop(date_id, "toString", Value::Builtin(b("Date", "toString")));
@@ -284,7 +317,11 @@ impl Heap {
         self.set_prop(global_id, "WeakMap", Value::Object(weakmap_id));
         let weakset_id = self.alloc_object();
         self.set_prop(global_id, "WeakSet", Value::Object(weakset_id));
-        self.set_prop(global_id, "DataView", Value::Builtin(0xE9));
+        self.set_prop(
+            global_id,
+            "DataView",
+            Value::Builtin(b("TypedArray", "DataView")),
+        );
     }
 
     /// Add $262 host object for test262 harness. Match V8/Bun/Deno: $262 only exists when running via test262.
@@ -292,13 +329,25 @@ impl Heap {
         let global_id = self.global_object_id;
         let dollar262_id = self.alloc_object();
         self.set_prop(dollar262_id, "global", Value::Object(global_id));
-        self.set_prop(dollar262_id, "createRealm", Value::Builtin(0xD5));
-        self.set_prop(dollar262_id, "evalScript", Value::Builtin(0xD6));
-        self.set_prop(dollar262_id, "gc", Value::Builtin(0xD7));
-        self.set_prop(dollar262_id, "detachArrayBuffer", Value::Builtin(0xD8));
+        self.set_prop(
+            dollar262_id,
+            "createRealm",
+            Value::Builtin(b("$262", "createRealm")),
+        );
+        self.set_prop(
+            dollar262_id,
+            "evalScript",
+            Value::Builtin(b("$262", "evalScript")),
+        );
+        self.set_prop(dollar262_id, "gc", Value::Builtin(b("$262", "gc")));
+        self.set_prop(
+            dollar262_id,
+            "detachArrayBuffer",
+            Value::Builtin(b("$262", "detachArrayBuffer")),
+        );
         self.set_prop(global_id, "$262", Value::Object(dollar262_id));
         self.set_prop(global_id, "global", Value::Object(global_id));
-        self.set_prop(global_id, "timeout", Value::Builtin(0xEA));
+        self.set_prop(global_id, "timeout", Value::Builtin(b("Host", "timeout")));
         let temporal_id = self.alloc_object();
         self.set_prop(global_id, "Temporal", Value::Object(temporal_id));
         let proxy_id = self.alloc_object();
@@ -353,6 +402,10 @@ impl Heap {
 
     pub fn alloc_object(&mut self) -> usize {
         self.alloc_object_with_prototype(None)
+    }
+
+    pub fn alloc_regexp(&mut self) -> usize {
+        self.alloc_object_with_prototype(self.regexp_prototype_id)
     }
 
     pub fn alloc_object_with_prototype(&mut self, prototype: Option<usize>) -> usize {

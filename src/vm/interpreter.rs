@@ -5,7 +5,7 @@ use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::calls::{execute_builtin, pop_args, read_i16, read_u8, setup_callee_locals};
+use super::calls::{execute_builtin, pop_args, read_i16, read_u16, read_u8, setup_callee_locals};
 use super::ops::{
     add_values, div_values, gt_values, gte_values, instanceof_check, is_nullish, is_truthy,
     lt_values, lte_values, mod_values, mul_values, pow_values, strict_eq, sub_values,
@@ -13,7 +13,7 @@ use super::ops::{
 };
 use super::props::{GetPropCache, resolve_get_prop};
 use super::tiering::{JitTiering, JitTieringStats};
-use super::types::{BuiltinResult, Completion, MAX_CALL_DEPTH, Program, VmError};
+use super::types::{BuiltinResult, Completion, Program, VmError};
 
 struct Frame {
     chunk_index: usize,
@@ -65,27 +65,29 @@ pub fn interpret_program(program: &Program) -> Result<Completion, VmError> {
 pub fn interpret_program_with_limit(
     program: &Program,
     trace: bool,
-    step_limit: Option<u64>,
+    _step_limit: Option<u64>,
 ) -> Result<Completion, VmError> {
     let (result, _, _) =
-        interpret_program_with_trace_and_limit(program, trace, step_limit, None, false, true);
+        interpret_program_with_trace_and_limit(program, trace, None, None, false, true, false);
     result
 }
 
 pub fn interpret_program_with_limit_and_cancel(
     program: &Program,
     trace: bool,
-    step_limit: Option<u64>,
+    _step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
     test262_mode: bool,
+    enable_infinite_loop_detection: bool,
 ) -> (Result<Completion, VmError>, Heap) {
     let (result, heap, _) = interpret_program_with_trace_and_limit(
         program,
         trace,
-        step_limit,
+        None,
         cancel,
         test262_mode,
         true,
+        enable_infinite_loop_detection,
     );
     (result, heap)
 }
@@ -93,24 +95,26 @@ pub fn interpret_program_with_limit_and_cancel(
 pub fn interpret_program_with_limit_and_cancel_and_stats(
     program: &Program,
     trace: bool,
-    step_limit: Option<u64>,
+    _step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
     test262_mode: bool,
     enable_jit: bool,
+    enable_infinite_loop_detection: bool,
 ) -> (Result<Completion, VmError>, Heap, Option<JitTieringStats>) {
     interpret_program_with_trace_and_limit(
         program,
         trace,
-        step_limit,
+        None,
         cancel,
         test262_mode,
         enable_jit,
+        enable_infinite_loop_detection,
     )
 }
 
 pub fn interpret_program_with_trace(program: &Program, trace: bool) -> Result<Completion, VmError> {
     let (result, _, _) =
-        interpret_program_with_trace_and_limit(program, trace, None, None, false, true);
+        interpret_program_with_trace_and_limit(program, trace, None, None, false, true, false);
     result
 }
 
@@ -123,10 +127,11 @@ fn trace_op(pc: usize, op: u8) {
 fn interpret_program_with_trace_and_limit(
     program: &Program,
     trace: bool,
-    step_limit: Option<u64>,
+    _step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
     test262_mode: bool,
     enable_jit: bool,
+    enable_infinite_loop_detection: bool,
 ) -> (Result<Completion, VmError>, Heap, Option<JitTieringStats>) {
     let mut heap = Heap::new();
     if test262_mode {
@@ -147,9 +152,9 @@ fn interpret_program_with_trace_and_limit(
         program,
         &mut heap,
         trace,
-        step_limit,
         cancel,
         enable_jit,
+        enable_infinite_loop_detection,
         jit_stats.as_mut(),
     );
     (result, heap, jit_stats)
@@ -159,14 +164,21 @@ pub fn interpret_program_with_heap(
     program: &Program,
     heap: &mut Heap,
     trace: bool,
-    step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
     enable_jit: bool,
+    enable_infinite_loop_detection: bool,
     jit_stats: Option<&mut JitTieringStats>,
 ) -> Result<Completion, VmError> {
     if let Some(init_idx) = program.init_entry {
         interpret_program_with_heap_and_entry(
-            program, heap, init_idx, trace, step_limit, cancel, enable_jit, None,
+            program,
+            heap,
+            init_idx,
+            trace,
+            cancel,
+            enable_jit,
+            enable_infinite_loop_detection,
+            None,
         )?;
     }
     interpret_program_with_heap_and_entry(
@@ -174,29 +186,40 @@ pub fn interpret_program_with_heap(
         heap,
         program.entry,
         trace,
-        step_limit,
         cancel,
         enable_jit,
+        enable_infinite_loop_detection,
         jit_stats,
     )
 }
 
-/// Throttle (cancel/step check) runs only when timeout or step limit is in use.
-/// Unthrottled runs have no extra branches in the hot path for low latency and JIT-friendly execution.
+/// Throttle (cancel/cycle check) runs every CHECK_INTERVAL steps.
+/// Cycle detection catches infinite loops; cancel supports wall-clock timeout.
 const CHECK_INTERVAL: u32 = 256;
+const CYCLE_BUFFER_SIZE: usize = 64;
+const CYCLE_THRESHOLD: usize = 3;
+
+fn hash_execution_state(chunk_index: usize, pc: usize, stack_len: usize, frames_len: usize) -> u64 {
+    let h = (chunk_index as u64)
+        .wrapping_mul(31)
+        .wrapping_add(pc as u64)
+        .wrapping_mul(31)
+        .wrapping_add(stack_len as u64)
+        .wrapping_mul(31)
+        .wrapping_add(frames_len as u64);
+    h
+}
 
 pub fn interpret_program_with_heap_and_entry(
     program: &Program,
     heap: &mut Heap,
     entry: usize,
     trace: bool,
-    step_limit: Option<u64>,
     cancel: Option<&AtomicBool>,
     enable_jit: bool,
+    enable_infinite_loop_detection: bool,
     jit_report: Option<&mut JitTieringStats>,
 ) -> Result<Completion, VmError> {
-    let needs_throttle = cancel.is_some() || step_limit.is_some();
-    let mut steps_remaining = step_limit;
     let entry_chunk = program
         .chunks
         .get(entry)
@@ -218,32 +241,39 @@ pub fn interpret_program_with_heap_and_entry(
         getprop_cache: GetPropCache::new(),
         tiering: JitTiering::new(
             program.chunks.len(),
-            enable_jit && !trace && step_limit.is_none() && cancel.is_none(),
+            enable_jit && !trace && cancel.is_none(),
         ),
         jit_report,
     };
 
     let mut loop_counter: u32 = 0;
+    let mut cycle_buffer: [u64; CYCLE_BUFFER_SIZE] = [0; CYCLE_BUFFER_SIZE];
+    let mut cycle_idx: usize = 0;
 
     loop {
-        if needs_throttle {
-            loop_counter = loop_counter.wrapping_add(1);
-            if (loop_counter & CHECK_INTERVAL_MASK) == 0 {
-                if let Some(c) = cancel {
-                    if c.load(Ordering::Relaxed) {
-                        return Err(VmError::Cancelled);
-                    }
+        let frames_len = state.frames.len();
+        let stack_len = state.stack.len();
+        let frame = state.frames.last_mut().ok_or(VmError::StackUnderflow)?;
+        let chunk_index = frame.chunk_index;
+        let pc = frame.pc;
+
+        loop_counter = loop_counter.wrapping_add(1);
+        if (loop_counter & CHECK_INTERVAL_MASK) == 0 {
+            if let Some(c) = cancel {
+                if c.load(Ordering::Relaxed) {
+                    return Err(VmError::Cancelled);
                 }
             }
-            if let Some(ref mut n) = steps_remaining {
-                if *n == 0 {
-                    return Err(VmError::StepLimitExceeded);
+            if enable_infinite_loop_detection {
+                let h = hash_execution_state(chunk_index, pc, stack_len, frames_len);
+                cycle_buffer[cycle_idx] = h;
+                cycle_idx = (cycle_idx + 1) % CYCLE_BUFFER_SIZE;
+                let same_count = cycle_buffer.iter().filter(|&&x| x == h).count();
+                if same_count >= CYCLE_THRESHOLD {
+                    return Err(VmError::InfiniteLoopDetected);
                 }
-                *n -= 1;
             }
         }
-
-        let frame = state.frames.last_mut().ok_or(VmError::StackUnderflow)?;
         let chunk = if frame.is_dynamic {
             state
                 .chunks_stack
@@ -277,6 +307,53 @@ pub fn interpret_program_with_heap_and_entry(
             0x01 => {
                 let idx = read_u8(code, *pc) as usize;
                 *pc += 1;
+                let val = match constants.get(idx).ok_or(VmError::InvalidConstIndex(idx))? {
+                    ConstEntry::Global(name) => heap.get_global(name),
+                    ConstEntry::Function(func_idx) => {
+                        let callee_chunk = program
+                            .chunks
+                            .get(*func_idx)
+                            .ok_or(VmError::InvalidConstIndex(*func_idx))?;
+                        if callee_chunk.captured_names.is_empty() {
+                            Value::Function(*func_idx)
+                        } else {
+                            let mut captured_slots: Vec<(u32, Value)> = Vec::new();
+                            for capture_name in &callee_chunk.captured_names {
+                                let outer_slot = chunk
+                                    .named_locals
+                                    .iter()
+                                    .find_map(|(name, slot)| {
+                                        (name == capture_name).then_some(*slot)
+                                    })
+                                    .map(|slot| slot as usize);
+                                let inner_slot =
+                                    callee_chunk.named_locals.iter().find_map(|(name, slot)| {
+                                        (name == capture_name).then_some(*slot)
+                                    });
+                                if let Some(inner_slot) = inner_slot {
+                                    let captured_value = outer_slot
+                                        .and_then(|slot| locals.get(slot))
+                                        .cloned()
+                                        .unwrap_or(Value::Undefined);
+                                    captured_slots.push((inner_slot, captured_value));
+                                }
+                            }
+                            let dynamic_index = state.dynamic_chunks.len();
+                            state.dynamic_chunks.push(callee_chunk.clone());
+                            if state.dynamic_captures.len() <= dynamic_index {
+                                state.dynamic_captures.resize(dynamic_index + 1, Vec::new());
+                            }
+                            state.dynamic_captures[dynamic_index] = captured_slots;
+                            Value::DynamicFunction(dynamic_index)
+                        }
+                    }
+                    c => c.to_value(),
+                };
+                state.stack.push(val);
+            }
+            0x0F => {
+                let idx = read_u16(code, *pc) as usize;
+                *pc += 2;
                 let val = match constants.get(idx).ok_or(VmError::InvalidConstIndex(idx))? {
                     ConstEntry::Global(name) => heap.get_global(name),
                     ConstEntry::Function(func_idx) => {
@@ -616,9 +693,6 @@ pub fn interpret_program_with_heap_and_entry(
                 }
 
                 let callee_locals = setup_callee_locals(callee, &args, heap);
-                if state.frames.len() >= MAX_CALL_DEPTH {
-                    return Err(VmError::CallDepthExceeded);
-                }
                 state.frames.push(Frame {
                     chunk_index: func_idx,
                     is_dynamic: false,
@@ -712,9 +786,6 @@ pub fn interpret_program_with_heap_and_entry(
                                 }
                             }
                         }
-                        if state.frames.len() >= MAX_CALL_DEPTH {
-                            return Err(VmError::CallDepthExceeded);
-                        }
                         state.chunks_stack.push(callee_chunk);
                         state.frames.push(Frame {
                             chunk_index: state.chunks_stack.len() - 1,
@@ -743,9 +814,6 @@ pub fn interpret_program_with_heap_and_entry(
                         }
 
                         let callee_locals = setup_callee_locals(callee_chunk, &args, heap);
-                        if state.frames.len() >= MAX_CALL_DEPTH {
-                            return Err(VmError::CallDepthExceeded);
-                        }
                         state.frames.push(Frame {
                             chunk_index: func_idx,
                             is_dynamic: false,
@@ -778,9 +846,6 @@ pub fn interpret_program_with_heap_and_entry(
                 let obj_id = heap.alloc_object();
                 let args = pop_args(&mut state.stack, argc)?;
                 let callee_locals = setup_callee_locals(callee, &args, heap);
-                if state.frames.len() >= MAX_CALL_DEPTH {
-                    return Err(VmError::CallDepthExceeded);
-                }
                 state.frames.push(Frame {
                     chunk_index: func_idx,
                     is_dynamic: false,
@@ -836,9 +901,6 @@ pub fn interpret_program_with_heap_and_entry(
                                 }
                             }
                         }
-                        if state.frames.len() >= MAX_CALL_DEPTH {
-                            return Err(VmError::CallDepthExceeded);
-                        }
                         state.chunks_stack.push(callee_chunk);
                         state.frames.push(Frame {
                             chunk_index: state.chunks_stack.len() - 1,
@@ -856,9 +918,6 @@ pub fn interpret_program_with_heap_and_entry(
                             .get(func_idx)
                             .ok_or(VmError::InvalidConstIndex(func_idx))?;
                         let callee_locals = setup_callee_locals(callee_chunk, &args, heap);
-                        if state.frames.len() >= MAX_CALL_DEPTH {
-                            return Err(VmError::CallDepthExceeded);
-                        }
                         state.frames.push(Frame {
                             chunk_index: func_idx,
                             is_dynamic: false,
@@ -944,6 +1003,49 @@ pub fn interpret_program_with_heap_and_entry(
                 match &obj {
                     Value::Object(id) => heap.set_prop(*id, &key_str, value.clone()),
                     Value::Array(id) => heap.set_array_prop(*id, &key_str, value.clone()),
+                    Value::Map(id) => heap.map_set(*id, &key_str, value.clone()),
+                    Value::Function(i) => heap.set_function_prop(*i, &key_str, value.clone()),
+                    _ => {}
+                }
+                state.stack.push(value);
+            }
+            0x57 => {
+                let key_idx = read_u16(code, *pc) as usize;
+                *pc += 2;
+                let obj = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_str = match constants
+                    .get(key_idx)
+                    .ok_or(VmError::InvalidConstIndex(key_idx))?
+                {
+                    ConstEntry::String(s) => s.clone(),
+                    ConstEntry::Int(n) => n.to_string(),
+                    _ => return Err(VmError::InvalidConstIndex(key_idx)),
+                };
+                let result = resolve_get_prop(&obj, &key_str, Some(&mut state.getprop_cache), heap);
+                state.stack.push(result);
+            }
+            0x58 => {
+                let key_idx = read_u16(code, *pc) as usize;
+                *pc += 2;
+                let obj = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let value = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_str = match constants
+                    .get(key_idx)
+                    .ok_or(VmError::InvalidConstIndex(key_idx))?
+                {
+                    ConstEntry::String(s) => s.clone(),
+                    ConstEntry::Int(n) => n.to_string(),
+                    _ => return Err(VmError::InvalidConstIndex(key_idx)),
+                };
+                match &obj {
+                    Value::Object(id) => {
+                        state.getprop_cache.invalidate(*id, false, &key_str);
+                        heap.set_prop(*id, &key_str, value.clone());
+                    }
+                    Value::Array(id) => {
+                        state.getprop_cache.invalidate(*id, true, &key_str);
+                        heap.set_array_prop(*id, &key_str, value.clone());
+                    }
                     Value::Map(id) => heap.map_set(*id, &key_str, value.clone()),
                     Value::Function(i) => heap.set_function_prop(*i, &key_str, value.clone()),
                     _ => {}
@@ -1193,5 +1295,20 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 7);
+    }
+
+    #[test]
+    fn interpret_infinite_loop_detected() {
+        let result = crate::driver::Driver::run_with_timeout_and_cancel(
+            "function main() { while (true) {} return 0; }",
+            None,
+            true,
+        );
+        let err = result.expect_err("infinite loop should error when detection enabled");
+        assert!(
+            err.to_string().contains("infinite loop detected"),
+            "expected infinite loop detection, got: {}",
+            err
+        );
     }
 }

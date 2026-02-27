@@ -1,4 +1,9 @@
+use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
+
+fn reg_exp_test_id() -> u8 {
+    builtins::resolve("RegExp", "test").expect("RegExp.test builtin")
+}
 
 pub fn create(args: &[Value], heap: &mut Heap) -> Value {
     let pattern = match args.get(0) {
@@ -11,10 +16,10 @@ pub fn create(args: &[Value], heap: &mut Heap) -> Value {
         Some(v) => v.to_string(),
         None => String::new(),
     };
-    let obj_id = heap.alloc_object();
+    let obj_id = heap.alloc_regexp();
     heap.set_prop(obj_id, "source", Value::String(pattern.clone()));
     heap.set_prop(obj_id, "flags", Value::String(flags.clone()));
-    heap.set_prop(obj_id, "test", Value::Builtin(0x82));
+    heap.set_prop(obj_id, "test", Value::Builtin(reg_exp_test_id()));
     heap.set_prop(obj_id, "__regexp_pattern", Value::String(pattern));
     heap.set_prop(obj_id, "__regexp_flags", Value::String(flags));
     Value::Object(obj_id)
@@ -57,6 +62,41 @@ fn escape_char(c: char) -> Option<&'static str> {
         '/' => Some("\\/"),
         _ => None,
     }
+}
+
+pub fn compile(args: &[Value], heap: &mut Heap) -> Value {
+    let obj_id = match args.first().and_then(|v| v.as_object_id()) {
+        Some(id) => id,
+        None => return Value::Undefined,
+    };
+    let pattern = match args.get(1) {
+        Some(Value::String(s)) => s.clone(),
+        Some(v) => v.to_string(),
+        None => {
+            let existing = heap.get_prop(obj_id, "__regexp_pattern");
+            match existing {
+                Value::String(s) => s,
+                _ => String::new(),
+            }
+        }
+    };
+    let flags = match args.get(2) {
+        Some(Value::String(s)) => s.clone(),
+        Some(v) => v.to_string(),
+        None => {
+            let existing = heap.get_prop(obj_id, "__regexp_flags");
+            match existing {
+                Value::String(s) => s,
+                _ => String::new(),
+            }
+        }
+    };
+    heap.set_prop(obj_id, "source", Value::String(pattern.clone()));
+    heap.set_prop(obj_id, "flags", Value::String(flags.clone()));
+    heap.set_prop(obj_id, "__regexp_pattern", Value::String(pattern));
+    heap.set_prop(obj_id, "__regexp_flags", Value::String(flags));
+    heap.set_prop(obj_id, "test", Value::Builtin(reg_exp_test_id()));
+    Value::Object(obj_id)
 }
 
 pub fn escape(args: &[Value], _heap: &mut Heap) -> Value {
