@@ -24,6 +24,16 @@ pub fn string(args: &[Value], _heap: &mut Heap) -> Value {
     Value::String(arg)
 }
 
+pub fn includes(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    let search = args.get(1).map(|v| v.to_string()).unwrap_or_default();
+    let pos = args
+        .get(2)
+        .map(|v| super::to_number(v) as usize)
+        .unwrap_or(0);
+    Value::Bool(s.get(pos..).unwrap_or("").contains(search.as_str()))
+}
+
 pub fn trim(args: &[Value], _heap: &mut Heap) -> Value {
     let s = match args.first() {
         Some(Value::String(x)) => x.clone(),
@@ -81,6 +91,38 @@ pub fn ends_with(args: &[Value], _heap: &mut Heap) -> Value {
     };
     let end_pos = (end as usize).min(s.len());
     Value::Bool(s.get(..end_pos).unwrap_or("").ends_with(&search))
+}
+
+pub fn pad_start(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    let target_len = args.get(1).map(|v| super::to_number(v) as usize).unwrap_or(0);
+    let pad_str = args
+        .get(2)
+        .map(|v| v.to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| " ".to_string());
+    if s.len() >= target_len {
+        return Value::String(s);
+    }
+    let needed = target_len - s.len();
+    let pad_repeated: String = pad_str.chars().cycle().take(needed).collect();
+    Value::String(format!("{}{}", pad_repeated, s))
+}
+
+pub fn pad_end(args: &[Value], _heap: &mut Heap) -> Value {
+    let s = string_html_receiver(args);
+    let target_len = args.get(1).map(|v| super::to_number(v) as usize).unwrap_or(0);
+    let pad_str = args
+        .get(2)
+        .map(|v| v.to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| " ".to_string());
+    if s.len() >= target_len {
+        return Value::String(s);
+    }
+    let needed = target_len - s.len();
+    let pad_repeated: String = pad_str.chars().cycle().take(needed).collect();
+    Value::String(format!("{}{}", s, pad_repeated))
 }
 
 pub fn repeat(args: &[Value], _heap: &mut Heap) -> Value {

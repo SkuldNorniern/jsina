@@ -247,6 +247,7 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
 
 fn format_const(c: &ConstEntry) -> String {
     match c {
+        ConstEntry::Bool(b) => b.to_string(),
         ConstEntry::Int(n) => n.to_string(),
         ConstEntry::Float(n) => n.to_string(),
         ConstEntry::BigInt(s) => format!("{}n", s),

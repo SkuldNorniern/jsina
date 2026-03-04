@@ -180,7 +180,9 @@ fn builtin_prop(id: u8, key: &str, heap: &Heap) -> Value {
 
 pub(crate) fn primitive_string_method(key: &str) -> Value {
     match key {
-        "includes" => Value::Builtin(b("Array", "includes")),
+        "includes" => Value::Builtin(b("String", "includes")),
+        "padStart" => Value::Builtin(b("String", "padStart")),
+        "padEnd" => Value::Builtin(b("String", "padEnd")),
         "indexOf" => Value::Builtin(b("Array", "indexOf")),
         "lastIndexOf" => Value::Builtin(b("Array", "lastIndexOf")),
         "split" => Value::Builtin(b("String", "split")),

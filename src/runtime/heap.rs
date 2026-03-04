@@ -72,6 +72,8 @@ impl Heap {
         self.set_prop(obj_id, "prototype", Value::Object(obj_proto_id));
         self.set_prop(obj_id, "create", Value::Builtin(b("Object", "create")));
         self.set_prop(obj_id, "keys", Value::Builtin(b("Object", "keys")));
+        self.set_prop(obj_id, "values", Value::Builtin(b("Object", "values")));
+        self.set_prop(obj_id, "entries", Value::Builtin(b("Object", "entries")));
         self.set_prop(obj_id, "assign", Value::Builtin(b("Object", "assign")));
         self.set_prop(obj_id, "hasOwnProperty", Value::Builtin(b("Object", "hasOwnProperty")));
         self.set_prop(obj_id, "preventExtensions", Value::Builtin(b("Object", "preventExtensions")));
@@ -175,7 +177,9 @@ impl Heap {
         self.set_prop(str_proto_id, "toUpperCase", Value::Builtin(b("String", "toUpperCase")));
         self.set_prop(str_proto_id, "charAt", Value::Builtin(b("String", "charAt")));
         self.set_prop(str_proto_id, "at", Value::Builtin(b("String", "at")));
-        self.set_prop(str_proto_id, "includes", Value::Builtin(b("Array", "includes")));
+        self.set_prop(str_proto_id, "includes", Value::Builtin(b("String", "includes")));
+        self.set_prop(str_proto_id, "padStart", Value::Builtin(b("String", "padStart")));
+        self.set_prop(str_proto_id, "padEnd", Value::Builtin(b("String", "padEnd")));
         self.set_prop(str_proto_id, "indexOf", Value::Builtin(b("Array", "indexOf")));
         self.set_prop(str_proto_id, "lastIndexOf", Value::Builtin(b("Array", "lastIndexOf")));
         self.set_prop(str_proto_id, "repeat", Value::Builtin(b("String", "repeat")));
@@ -215,6 +219,8 @@ impl Heap {
         );
         self.set_prop(num_id, "isInteger", Value::Builtin(b("Number", "isInteger")));
         self.set_prop(num_id, "isSafeInteger", Value::Builtin(b("Number", "isSafeInteger")));
+        self.set_prop(num_id, "isFinite", Value::Builtin(b("Number", "isFinite")));
+        self.set_prop(num_id, "isNaN", Value::Builtin(b("Number", "isNaN")));
         self.set_prop(global_id, "Number", Value::Object(num_id));
 
         self.set_prop(global_id, "Boolean", Value::Builtin(b("Type", "Boolean")));

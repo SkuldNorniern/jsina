@@ -260,6 +260,10 @@ fn collect_function_exprs_expr(expr: &Expression, out: &mut Vec<(NodeId, Functio
             collect_function_exprs_expr(&e.left, out);
             collect_function_exprs_expr(&e.right, out);
         }
+        Expression::LogicalAssign(e) => {
+            collect_function_exprs_expr(&e.left, out);
+            collect_function_exprs_expr(&e.right, out);
+        }
         Expression::Binary(b) => {
             collect_function_exprs_expr(&b.left, out);
             collect_function_exprs_expr(&b.right, out);
@@ -875,17 +879,32 @@ fn compile_binding_from_slot(
                 if let Some(name) = &elem.binding {
                     let value_slot = ctx.next_slot;
                     ctx.next_slot += 1;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                        id: source_slot,
-                        span,
-                    });
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                        value: HirConst::Int(index as i64),
-                        span,
-                    });
-                    ctx.blocks[ctx.current_block]
-                        .ops
-                        .push(HirOp::GetPropDyn { span });
+                    if elem.rest {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                            id: source_slot,
+                            span,
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                            value: HirConst::Int(index as i64),
+                            span,
+                        });
+                        let slice_id = b("Array", "slice");
+                        ctx.blocks[ctx.current_block]
+                            .ops
+                            .push(HirOp::CallBuiltin { builtin: slice_id, argc: 2, span });
+                    } else {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                            id: source_slot,
+                            span,
+                        });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                            value: HirConst::Int(index as i64),
+                            span,
+                        });
+                        ctx.blocks[ctx.current_block]
+                            .ops
+                            .push(HirOp::GetPropDyn { span });
+                    }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                         id: value_slot,
                         span,
@@ -2445,6 +2464,156 @@ fn compile_call_with_spread(
     Ok(())
 }
 
+fn compile_logical_assign(
+    e: &LogicalAssignExpr,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    let result_slot = ctx.next_slot;
+    ctx.next_slot += 1;
+
+    compile_expression(&e.left, ctx)?;
+    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+        id: result_slot,
+        span: e.span,
+    });
+
+    let assign_block = ctx.blocks.len() as HirBlockId;
+    ctx.blocks.push(HirBlock {
+        id: assign_block,
+        ops: Vec::new(),
+        terminator: HirTerminator::Jump { target: 0 },
+    });
+    let skip_block = ctx.blocks.len() as HirBlockId;
+    ctx.blocks.push(HirBlock {
+        id: skip_block,
+        ops: Vec::new(),
+        terminator: HirTerminator::Jump { target: 0 },
+    });
+    let merge_block = ctx.blocks.len() as HirBlockId;
+    ctx.blocks.push(HirBlock {
+        id: merge_block,
+        ops: Vec::new(),
+        terminator: HirTerminator::Jump { target: 0 },
+    });
+
+    match e.op {
+        LogicalAssignOp::Or => {
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: result_slot,
+                then_block: skip_block,
+                else_block: assign_block,
+            };
+        }
+        LogicalAssignOp::And => {
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+                cond: result_slot,
+                then_block: assign_block,
+                else_block: skip_block,
+            };
+        }
+        LogicalAssignOp::Nullish => {
+            ctx.blocks[ctx.current_block].terminator = HirTerminator::BranchNullish {
+                cond: result_slot,
+                then_block: assign_block,
+                else_block: skip_block,
+            };
+        }
+    }
+
+    ctx.current_block = assign_block as usize;
+    compile_expression(&e.right, ctx)?;
+    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+        id: result_slot,
+        span: e.span,
+    });
+    compile_assign_to_lhs(&e.left, result_slot, e.span, ctx)?;
+    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_block };
+
+    ctx.current_block = skip_block as usize;
+    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_block };
+
+    ctx.current_block = merge_block as usize;
+    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+        id: result_slot,
+        span: e.span,
+    });
+
+    Ok(())
+}
+
+fn compile_assign_to_lhs(
+    lhs: &Expression,
+    rhs_slot: u32,
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    match lhs {
+        Expression::Identifier(id) => {
+            if let Some(&slot) = ctx.locals.get(&id.name) {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                    id: rhs_slot,
+                    span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal { id: slot, span });
+            } else if let Some(slot) = get_or_alloc_capture_slot(ctx, &id.name) {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                    id: rhs_slot,
+                    span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal { id: slot, span });
+            } else if GLOBAL_NAMES.contains(&id.name.as_str()) {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                    value: HirConst::Global("globalThis".to_string()),
+                    span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                    id: rhs_slot,
+                    span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
+                    key: id.name.clone(),
+                    span,
+                });
+            }
+            Ok(())
+        }
+        Expression::Member(m) => {
+            compile_expression(&m.object, ctx)?;
+            match &m.property {
+                MemberProperty::Identifier(key) => {
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: rhs_slot,
+                        span,
+                    });
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::Swap { span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
+                        key: key.clone(),
+                        span,
+                    });
+                }
+                MemberProperty::Expression(key_expr) => {
+                    compile_expression(key_expr, ctx)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                        id: rhs_slot,
+                        span,
+                    });
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::SetPropDyn { span });
+                }
+            }
+            Ok(())
+        }
+        _ => Err(LowerError::Unsupported(
+            "logical assignment to unsupported target".to_string(),
+            Some(span),
+        )),
+    }
+}
+
 fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
     let func_index = get_func_index(ctx);
     match expr {
@@ -2469,8 +2638,8 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     LiteralValue::Int(n) => HirConst::Int(*n),
                     LiteralValue::Number(n) => HirConst::Float(*n),
                     LiteralValue::BigInt(s) => HirConst::BigInt(s.clone()),
-                    LiteralValue::True => HirConst::Int(1),
-                    LiteralValue::False => HirConst::Int(0),
+                    LiteralValue::True => HirConst::Bool(true),
+                    LiteralValue::False => HirConst::Bool(false),
                     LiteralValue::Null => HirConst::Null,
                     LiteralValue::String(s) => HirConst::String(s.clone()),
                     LiteralValue::RegExp { .. } => unreachable!(),
@@ -3049,6 +3218,9 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 ));
             }
         },
+        Expression::LogicalAssign(e) => {
+            compile_logical_assign(e, ctx)?;
+        }
         Expression::Call(e) => match e.callee.as_ref() {
             Expression::Member(m) => {
                 if let MemberProperty::Expression(key_expr) = &m.property {
@@ -3280,6 +3452,26 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    && prop == "values"
+                    && e.args.len() == 1
+                {
+                    compile_call_arg(&e.args[0], ctx, e.span)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: b("Object", "values"),
+                        argc: 1,
+                        span: e.span,
+                    });
+                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    && prop == "entries"
+                    && e.args.len() == 1
+                {
+                    compile_call_arg(&e.args[0], ctx, e.span)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: b("Object", "entries"),
+                        argc: 1,
+                        span: e.span,
+                    });
+                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
                     && prop == "assign"
                     && e.args.len() >= 1
                 {
@@ -3432,6 +3624,26 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     compile_call_arg(&e.args[0], ctx, e.span)?;
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                         builtin: b("Number", "isSafeInteger"),
+                        argc: 1,
+                        span: e.span,
+                    });
+                } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                    && prop == "isFinite"
+                    && e.args.len() == 1
+                {
+                    compile_call_arg(&e.args[0], ctx, e.span)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: b("Number", "isFinite"),
+                        argc: 1,
+                        span: e.span,
+                    });
+                } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                    && prop == "isNaN"
+                    && e.args.len() == 1
+                {
+                    compile_call_arg(&e.args[0], ctx, e.span)?;
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: b("Number", "isNaN"),
                         argc: 1,
                         span: e.span,
                     });

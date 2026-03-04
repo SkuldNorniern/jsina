@@ -243,6 +243,7 @@ pub struct ObjectPatternProp {
 pub struct ArrayPatternElem {
     pub binding: Option<String>,
     pub default_init: Option<Box<Expression>>,
+    pub rest: bool,
 }
 
 impl Binding {
@@ -313,6 +314,7 @@ pub enum Expression {
     PostfixDecrement(PostfixExpr),
     New(NewExpr),
     ClassExpr(ClassExprData),
+    LogicalAssign(LogicalAssignExpr),
 }
 
 #[derive(Debug, Clone)]
@@ -526,6 +528,22 @@ pub struct AssignExpr {
     pub right: Box<Expression>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogicalAssignOp {
+    Or,
+    And,
+    Nullish,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogicalAssignExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub op: LogicalAssignOp,
+    pub left: Box<Expression>,
+    pub right: Box<Expression>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConditionalExpr {
     pub id: NodeId,
@@ -591,6 +609,7 @@ impl Expression {
             | Expression::PostfixDecrement(e) => e.span,
             Expression::New(e) => e.span,
             Expression::ClassExpr(e) => e.span,
+            Expression::LogicalAssign(e) => e.span,
         }
     }
 }

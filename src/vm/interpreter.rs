@@ -1828,6 +1828,7 @@ fn find_handler(chunk: &BytecodeChunk, throw_pc: usize) -> Option<(usize, usize,
 impl ConstEntry {
     fn to_value(&self) -> Value {
         match self {
+            ConstEntry::Bool(b) => Value::Bool(*b),
             ConstEntry::Int(n) => Value::Int((*n).clamp(i32::MIN as i64, i32::MAX as i64) as i32),
             ConstEntry::Float(n) => Value::Number(*n),
             ConstEntry::BigInt(s) => Value::BigInt(s.clone()),

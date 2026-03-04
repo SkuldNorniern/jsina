@@ -529,6 +529,16 @@ const BUILTINS: &[BuiltinDef] = &[
     },
     BuiltinDef {
         category: "Object",
+        name: "values",
+        entry: BuiltinEntry::Normal(object::values),
+    },
+    BuiltinDef {
+        category: "Object",
+        name: "entries",
+        entry: BuiltinEntry::Normal(object::entries),
+    },
+    BuiltinDef {
+        category: "Object",
         name: "assign",
         entry: BuiltinEntry::Normal(object::assign),
     },
@@ -630,6 +640,16 @@ const BUILTINS: &[BuiltinDef] = &[
     },
     BuiltinDef {
         category: "Number",
+        name: "isFinite",
+        entry: BuiltinEntry::Normal(number::is_finite),
+    },
+    BuiltinDef {
+        category: "Number",
+        name: "isNaN",
+        entry: BuiltinEntry::Normal(number::is_nan),
+    },
+    BuiltinDef {
+        category: "Number",
         name: "primitiveToString",
         entry: BuiltinEntry::Normal(number::primitive_to_string),
     },
@@ -658,6 +678,21 @@ const BUILTINS: &[BuiltinDef] = &[
         category: "String",
         name: "replace",
         entry: BuiltinEntry::Throwing(string::replace_throwing),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "includes",
+        entry: BuiltinEntry::Normal(string::includes),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "padStart",
+        entry: BuiltinEntry::Normal(string::pad_start),
+    },
+    BuiltinDef {
+        category: "String",
+        name: "padEnd",
+        entry: BuiltinEntry::Normal(string::pad_end),
     },
     BuiltinDef {
         category: "String",

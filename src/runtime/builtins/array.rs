@@ -921,9 +921,9 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
 }
 
 pub fn array_from(args: &[Value], heap: &mut Heap) -> Value {
-    let items = args.first();
+    let source = args.get(1);
     let arr_id = heap.alloc_array();
-    if let Some(Value::Array(src_id)) = items {
+    if let Some(Value::Array(src_id)) = source {
         let elems: Vec<Value> = heap
             .array_elements(*src_id)
             .map(|e| e.to_vec())
@@ -931,12 +931,10 @@ pub fn array_from(args: &[Value], heap: &mut Heap) -> Value {
         for v in elems {
             heap.array_push(arr_id, v);
         }
-    } else if let Some(Value::String(s)) = items {
+    } else if let Some(Value::String(s)) = source {
         for c in s.chars() {
             heap.array_push(arr_id, Value::String(c.to_string()));
         }
-    } else if let Some(v) = items {
-        heap.array_push(arr_id, v.clone());
     }
     Value::Array(arr_id)
 }

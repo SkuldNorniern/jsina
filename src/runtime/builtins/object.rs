@@ -73,6 +73,42 @@ pub fn keys(args: &[Value], heap: &mut Heap) -> Value {
     Value::Array(arr_id)
 }
 
+pub fn values(args: &[Value], heap: &mut Heap) -> Value {
+    let arr_id = heap.alloc_array();
+    match args.first() {
+        Some(Value::Object(obj_id)) => {
+            let ks = heap.object_keys(*obj_id);
+            let vals: Vec<Value> = ks.iter().map(|k| heap.get_prop(*obj_id, k)).collect();
+            for v in vals {
+                heap.array_push(arr_id, v);
+            }
+        }
+        Some(Value::Array(id)) => {
+            let elems = heap.array_elements(*id).map(|s| s.to_vec()).unwrap_or_default();
+            for v in elems {
+                heap.array_push(arr_id, v);
+            }
+        }
+        _ => {}
+    }
+    Value::Array(arr_id)
+}
+
+pub fn entries(args: &[Value], heap: &mut Heap) -> Value {
+    let outer_id = heap.alloc_array();
+    if let Some(Value::Object(obj_id)) = args.first() {
+        let ks = heap.object_keys(*obj_id);
+        let pairs: Vec<(String, Value)> = ks.iter().map(|k| (k.clone(), heap.get_prop(*obj_id, k))).collect();
+        for (k, v) in pairs {
+            let pair_id = heap.alloc_array();
+            heap.array_push(pair_id, Value::String(k));
+            heap.array_push(pair_id, v);
+            heap.array_push(outer_id, Value::Array(pair_id));
+        }
+    }
+    Value::Array(outer_id)
+}
+
 pub fn assign(args: &[Value], heap: &mut Heap) -> Value {
     let target = match args.first() {
         Some(v) => v,

@@ -269,6 +269,14 @@ fn format_expr(expr: &Expression) -> String {
             format!("{}({})", format_expr(&e.callee), args.join(", "))
         }
         Expression::Assign(e) => format!("{} = {}", format_expr(&e.left), format_expr(&e.right)),
+        Expression::LogicalAssign(e) => {
+            let op_str = match e.op {
+                crate::frontend::ast::LogicalAssignOp::Or => "||=",
+                crate::frontend::ast::LogicalAssignOp::And => "&&=",
+                crate::frontend::ast::LogicalAssignOp::Nullish => "??=",
+            };
+            format!("{} {} {}", format_expr(&e.left), op_str, format_expr(&e.right))
+        }
         Expression::Conditional(e) => format!(
             "{} ? {} : {}",
             format_expr(&e.condition),

@@ -1330,6 +1330,7 @@ impl Parser {
                     elems.push(ArrayPatternElem {
                         binding,
                         default_init,
+                        rest: false,
                     });
                 }
                 Some(Binding::ArrayPattern(elems))
@@ -1525,8 +1526,20 @@ impl Parser {
                     elems.push(ArrayPatternElem {
                         binding: None,
                         default_init: None,
+                        rest: false,
                     });
                     continue;
+                }
+                if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Spread)) {
+                    self.advance();
+                    let (rest_name, _) = self.expect_binding_identifier()?;
+                    elems.push(ArrayPatternElem {
+                        binding: Some(rest_name),
+                        default_init: None,
+                        rest: true,
+                    });
+                    self.expect(TokenType::RightBracket)?;
+                    break;
                 }
                 let binding = if matches!(
                     self.current().map(|t| &t.token_type),
@@ -1553,6 +1566,7 @@ impl Parser {
                 elems.push(ArrayPatternElem {
                     binding,
                     default_init,
+                    rest: false,
                 });
                 if !self.optional(TokenType::Comma) {
                     self.expect(TokenType::RightBracket)?;
@@ -1938,6 +1952,48 @@ impl Parser {
                         span,
                         left: Box::new(left),
                         right: Box::new(op_right),
+                    }));
+                }
+                Some(TokenType::LogicalOrAssign) => {
+                    self.end_recursion();
+                    let left_span = left.span();
+                    self.advance();
+                    let right = self.parse_expression_prec(2)?;
+                    let span = left_span.merge(right.span());
+                    return Ok(Expression::LogicalAssign(LogicalAssignExpr {
+                        id: self.next_id(),
+                        span,
+                        op: LogicalAssignOp::Or,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }));
+                }
+                Some(TokenType::LogicalAndAssign) => {
+                    self.end_recursion();
+                    let left_span = left.span();
+                    self.advance();
+                    let right = self.parse_expression_prec(2)?;
+                    let span = left_span.merge(right.span());
+                    return Ok(Expression::LogicalAssign(LogicalAssignExpr {
+                        id: self.next_id(),
+                        span,
+                        op: LogicalAssignOp::And,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }));
+                }
+                Some(TokenType::NullishAssign) => {
+                    self.end_recursion();
+                    let left_span = left.span();
+                    self.advance();
+                    let right = self.parse_expression_prec(2)?;
+                    let span = left_span.merge(right.span());
+                    return Ok(Expression::LogicalAssign(LogicalAssignExpr {
+                        id: self.next_id(),
+                        span,
+                        op: LogicalAssignOp::Nullish,
+                        left: Box::new(left),
+                        right: Box::new(right),
                     }));
                 }
                 _ => break,

@@ -76,6 +76,9 @@ pub enum TokenType {
     BitwiseAndAssign,
     BitwiseXorAssign,
     BitwiseOrAssign,
+    LogicalOrAssign,
+    LogicalAndAssign,
+    NullishAssign,
     Plus,
     Minus,
     Multiply,
@@ -196,6 +199,9 @@ impl TokenType {
                 | TokenType::BitwiseAndAssign
                 | TokenType::BitwiseXorAssign
                 | TokenType::BitwiseOrAssign
+                | TokenType::LogicalOrAssign
+                | TokenType::LogicalAndAssign
+                | TokenType::NullishAssign
                 | TokenType::Plus
                 | TokenType::Minus
                 | TokenType::Multiply
@@ -271,7 +277,10 @@ impl TokenType {
             | TokenType::UnsignedRightShiftAssign
             | TokenType::BitwiseAndAssign
             | TokenType::BitwiseXorAssign
-            | TokenType::BitwiseOrAssign => Some(0),
+            | TokenType::BitwiseOrAssign
+            | TokenType::LogicalOrAssign
+            | TokenType::LogicalAndAssign
+            | TokenType::NullishAssign => Some(0),
             _ => None,
         }
     }
@@ -291,7 +300,10 @@ impl TokenType {
             | TokenType::UnsignedRightShiftAssign
             | TokenType::BitwiseAndAssign
             | TokenType::BitwiseXorAssign
-            | TokenType::BitwiseOrAssign => false,
+            | TokenType::BitwiseOrAssign
+            | TokenType::LogicalOrAssign
+            | TokenType::LogicalAndAssign
+            | TokenType::NullishAssign => false,
             _ => self.precedence().is_some(),
         }
     }

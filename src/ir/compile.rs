@@ -75,6 +75,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
             match op {
                 HirOp::LoadConst { value, .. } => {
                     constants.push(match value {
+                        HirConst::Bool(b) => ConstEntry::Bool(*b),
                         HirConst::Int(n) => ConstEntry::Int(*n),
                         HirConst::Float(n) => ConstEntry::Float(*n),
                         HirConst::BigInt(s) => ConstEntry::BigInt(s.clone()),
