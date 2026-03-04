@@ -12,12 +12,16 @@ pub(crate) fn read_u8(code: &[u8], pc: usize) -> u8 {
 
 #[inline(always)]
 pub(crate) fn read_i16(code: &[u8], pc: usize) -> i16 {
-    i16::from_le_bytes([read_u8(code, pc), read_u8(code, pc + 1)])
+    debug_assert!(pc + 1 < code.len());
+    // SAFETY: Callers ensure pc+1 valid; each opcode consumes correct operand bytes.
+    unsafe { i16::from_le_bytes(*(code.as_ptr().add(pc) as *const [u8; 2])) }
 }
 
 #[inline(always)]
 pub(crate) fn read_u16(code: &[u8], pc: usize) -> u16 {
-    u16::from_le_bytes([read_u8(code, pc), read_u8(code, pc + 1)])
+    debug_assert!(pc + 1 < code.len());
+    // SAFETY: Callers ensure pc+1 valid; each opcode consumes correct operand bytes.
+    unsafe { u16::from_le_bytes(*(code.as_ptr().add(pc) as *const [u8; 2])) }
 }
 
 #[inline(always)]
@@ -50,25 +54,47 @@ pub(crate) fn execute_builtin(
             Value::Undefined,
         ];
         for i in (0..argc).rev() {
-            buf[i] = stack.pop().ok_or(VmError::StackUnderflow)?;
+            buf[i] = stack.pop().ok_or(VmError::StackUnderflow {
+                chunk_index: 0,
+                pc: 0,
+                opcode: 0,
+                stack_len: stack.len(),
+            })?;
         }
         builtins::dispatch(builtin_id, &buf[..argc], ctx)
     } else {
-        let mut args: Vec<Value> = (0..argc)
-            .map(|_| stack.pop().ok_or(VmError::StackUnderflow))
-            .collect::<Result<Vec<_>, _>>()?;
-        args.reverse();
+        let start = stack
+            .len()
+            .checked_sub(argc)
+            .ok_or(VmError::StackUnderflow {
+                chunk_index: 0,
+                pc: 0,
+                opcode: 0,
+                stack_len: stack.len(),
+            })?;
+        let args = stack.split_off(start);
         builtins::dispatch(builtin_id, &args, ctx)
     };
     match result {
         Ok(v) => Ok(BuiltinResult::Push(v)),
         Err(builtins::BuiltinError::Throw(v)) => Ok(BuiltinResult::Throw(v)),
+        Err(builtins::BuiltinError::Invoke {
+            callee,
+            this_arg,
+            args,
+            new_object,
+        }) => Ok(BuiltinResult::Invoke {
+            callee,
+            this_arg,
+            args,
+            new_object,
+        }),
     }
 }
 
 /// Pop `argc` values from the stack, returning them in left-to-right order.
 /// Uses `split_off` to avoid individual pops and reversal.
-#[inline]
+#[inline(always)]
 pub(crate) fn pop_args(stack: &mut Vec<Value>, argc: usize) -> Result<Vec<Value>, VmError> {
     if argc == 0 {
         return Ok(Vec::new());
@@ -76,12 +102,18 @@ pub(crate) fn pop_args(stack: &mut Vec<Value>, argc: usize) -> Result<Vec<Value>
     let start = stack
         .len()
         .checked_sub(argc)
-        .ok_or(VmError::StackUnderflow)?;
+        .ok_or_else(|| VmError::StackUnderflow {
+            chunk_index: 0,
+            pc: 0,
+            opcode: 0,
+            stack_len: stack.len(),
+        })?;
     Ok(stack.split_off(start))
 }
 
 /// Build the locals vec for a callee from the provided arguments.
 /// Handles rest parameters by collecting trailing args into a heap array.
+#[inline(always)]
 pub(crate) fn setup_callee_locals(
     chunk: &BytecodeChunk,
     args: &[Value],
@@ -110,11 +142,16 @@ pub(crate) fn setup_callee_locals(
             }
         }
     }
-    if let Some(arguments_slot) = chunk
-        .named_locals
-        .iter()
-        .find_map(|(name, slot)| (name == "arguments").then_some(*slot as usize))
-    {
+    let arguments_slot = chunk
+        .arguments_slot
+        .or_else(|| {
+            chunk
+                .named_locals
+                .iter()
+                .find_map(|(name, slot)| (name == "arguments").then_some(*slot))
+        })
+        .map(|s| s as usize);
+    if let Some(arguments_slot) = arguments_slot {
         if arguments_slot < locals.len() {
             let arguments_array_id = heap.alloc_array();
             if !args.is_empty() {

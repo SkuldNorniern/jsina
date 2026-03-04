@@ -5,27 +5,66 @@ fn b(category: &str, name: &str) -> u8 {
     builtins::resolve(category, name).expect("primitive method builtins are registered in BUILTINS")
 }
 
-pub(crate) struct GetPropCache {
+const CACHE_SLOTS: usize = 8;
+
+struct Slot {
     obj_id: usize,
     is_array: bool,
+    key_len: usize,
+    key_hash: u64,
     key: String,
     value: Option<Value>,
+}
+
+#[inline(always)]
+fn slot_hash(obj_id: usize, is_array: bool, key: &str) -> usize {
+    obj_id.wrapping_mul(31)
+        .wrapping_add(is_array as usize)
+        .wrapping_mul(31)
+        .wrapping_add(key.len())
+        .wrapping_add(key.bytes().take(4).map(|b| b as usize).fold(0usize, |a, b| a.wrapping_add(b)))
+}
+
+#[inline(always)]
+fn key_hash(key: &str) -> u64 {
+    (key.len() as u64)
+        .wrapping_add(key.bytes().take(8).map(|b| b as u64).fold(0u64, |a, b| a.wrapping_add(b)))
+}
+
+fn empty_slot() -> Slot {
+    Slot {
+        obj_id: usize::MAX,
+        is_array: false,
+        key_len: 0,
+        key_hash: 0,
+        key: String::new(),
+        value: None,
+    }
+}
+
+pub(crate) struct GetPropCache {
+    slots: [Slot; CACHE_SLOTS],
 }
 
 impl GetPropCache {
     pub fn new() -> Self {
         Self {
-            obj_id: usize::MAX,
-            is_array: false,
-            key: String::new(),
-            value: None,
+            slots: std::array::from_fn(|_| empty_slot()),
         }
     }
 
     #[inline(always)]
     pub fn get(&mut self, obj_id: usize, is_array: bool, key: &str, heap: &Heap) -> Value {
-        if self.obj_id == obj_id && self.is_array == is_array && self.key == key {
-            if let Some(ref v) = self.value {
+        let idx = slot_hash(obj_id, is_array, key) & (CACHE_SLOTS - 1);
+        let slot = &mut self.slots[idx];
+        let kh = key_hash(key);
+        if slot.obj_id == obj_id
+            && slot.is_array == is_array
+            && slot.key_len == key.len()
+            && slot.key_hash == kh
+            && slot.key == key
+        {
+            if let Some(ref v) = slot.value {
                 return v.clone();
             }
         }
@@ -34,26 +73,33 @@ impl GetPropCache {
         } else {
             heap.get_prop(obj_id, key)
         };
-        self.obj_id = obj_id;
-        self.is_array = is_array;
-        self.key = key.to_string();
-        self.value = Some(result.clone());
+        slot.obj_id = obj_id;
+        slot.is_array = is_array;
+        slot.key_len = key.len();
+        slot.key_hash = kh;
+        slot.key = key.to_string();
+        slot.value = Some(result.clone());
         result
     }
 
     pub fn invalidate(&mut self, obj_id: usize, is_array: bool, key: &str) {
-        if self.obj_id == obj_id && self.is_array == is_array && self.key == key {
-            self.value = None;
+        let idx = slot_hash(obj_id, is_array, key) & (CACHE_SLOTS - 1);
+        let slot = &mut self.slots[idx];
+        if slot.obj_id == obj_id && slot.is_array == is_array && slot.key == key {
+            slot.value = None;
         }
     }
 
     pub fn invalidate_all(&mut self) {
-        self.value = None;
+        for slot in &mut self.slots {
+            slot.value = None;
+        }
     }
 }
 
 /// Shared property resolution for both const-key (GetProp) and dynamic-key (GetPropDynamic).
 /// When `cache` is `Some`, the result is cached (used for const-key access).
+#[inline(always)]
 pub(crate) fn resolve_get_prop(
     obj: &Value,
     key: &str,
@@ -93,7 +139,41 @@ pub(crate) fn resolve_get_prop(
         Value::Date(_) => primitive_date_method(key),
         Value::Number(_) | Value::Int(_) => primitive_number_method(key),
         Value::Bool(_) => primitive_bool_method(key),
-        Value::Function(i) => heap.get_function_prop(*i, key),
+        Value::Function(i) => {
+            let own = heap.get_function_prop(*i, key);
+            if own != Value::Undefined {
+                own
+            } else {
+                function_prototype_prop(key)
+            }
+        }
+        Value::DynamicFunction(_) => function_prototype_prop(key),
+        Value::Builtin(id) => builtin_prop(*id, key, heap),
+        _ => Value::Undefined,
+    }
+}
+
+fn function_prototype_prop(key: &str) -> Value {
+    match key {
+        "bind" => Value::Builtin(b("Function", "bind")),
+        "call" => Value::Builtin(b("Function", "call")),
+        "apply" => Value::Builtin(b("Function", "apply")),
+        _ => Value::Undefined,
+    }
+}
+
+fn builtin_prop(id: u8, key: &str, heap: &Heap) -> Value {
+    if key == "length" || key == "name" {
+        if heap.builtin_prop_deleted(id, key) {
+            return Value::Undefined;
+        }
+    }
+    match key {
+        "length" => Value::Int(builtins::length(id)),
+        "name" => Value::String(builtins::name(id).to_string()),
+        "call" => Value::Builtin(b("Function", "call")),
+        "bind" => Value::Builtin(b("Function", "bind")),
+        "apply" => Value::Builtin(b("Function", "apply")),
         _ => Value::Undefined,
     }
 }
@@ -102,11 +182,20 @@ pub(crate) fn primitive_string_method(key: &str) -> Value {
     match key {
         "includes" => Value::Builtin(b("Array", "includes")),
         "indexOf" => Value::Builtin(b("Array", "indexOf")),
+        "lastIndexOf" => Value::Builtin(b("Array", "lastIndexOf")),
         "split" => Value::Builtin(b("String", "split")),
+        "match" => Value::Builtin(b("String", "match")),
+        "search" => Value::Builtin(b("String", "search")),
+        "replace" => Value::Builtin(b("String", "replace")),
+        "replaceAll" => Value::Builtin(b("String", "replace")),
         "trim" => Value::Builtin(b("String", "trim")),
+        "startsWith" => Value::Builtin(b("String", "startsWith")),
+        "endsWith" => Value::Builtin(b("String", "endsWith")),
         "toLowerCase" => Value::Builtin(b("String", "toLowerCase")),
         "toUpperCase" => Value::Builtin(b("String", "toUpperCase")),
         "charAt" => Value::Builtin(b("String", "charAt")),
+        "charCodeAt" => Value::Builtin(b("String", "charCodeAt")),
+        "at" => Value::Builtin(b("String", "at")),
         "repeat" => Value::Builtin(b("String", "repeat")),
         "anchor" => Value::Builtin(b("String", "anchor")),
         "big" => Value::Builtin(b("String", "big")),
@@ -134,6 +223,7 @@ pub(crate) fn primitive_date_method(key: &str) -> Value {
         "toString" => Value::Builtin(b("Date", "toString")),
         "toISOString" => Value::Builtin(b("Date", "toISOString")),
         "getYear" => Value::Builtin(b("Date", "getYear")),
+        "getFullYear" => Value::Builtin(b("Date", "getFullYear")),
         "setYear" => Value::Builtin(b("Date", "setYear")),
         "toGMTString" => Value::Builtin(b("Date", "toGMTString")),
         _ => Value::Undefined,

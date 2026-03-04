@@ -2,7 +2,7 @@ use crate::backend::JitSession;
 use crate::ir::bytecode::{BytecodeChunk, Opcode};
 use crate::runtime::Value;
 
-const DEFAULT_JIT_HOT_CALL_THRESHOLD: u32 = 8;
+const DEFAULT_JIT_HOT_CALL_THRESHOLD: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct JitTieringStats {
@@ -108,6 +108,10 @@ impl JitTiering {
         }
     }
 
+    pub fn hot_call_threshold(&self) -> u32 {
+        self.hot_call_threshold
+    }
+
     pub fn stats(&self) -> JitTieringStats {
         let mut snapshot = self.stats;
         snapshot.compiled_chunk_count = self
@@ -130,13 +134,20 @@ impl JitTiering {
 
     #[inline(always)]
     fn should_attempt_early_compile(chunk: &BytecodeChunk) -> bool {
-        if chunk.code.len() < 64 {
+        let code = &chunk.code;
+        if code.len() < 24 {
             return false;
         }
-        chunk
-            .code
-            .iter()
-            .any(|op| *op == Opcode::Jump as u8 || *op == Opcode::JumpIfFalse as u8)
+        let scan_limit = code.len().min(128);
+        let jump_op = Opcode::Jump as u8;
+        let jump_if_false_op = Opcode::JumpIfFalse as u8;
+        for i in 0..scan_limit {
+            let op = code[i];
+            if op == jump_op || op == jump_if_false_op {
+                return true;
+            }
+        }
+        false
     }
 
     #[inline(always)]
@@ -169,17 +180,18 @@ mod tests {
             captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
+            arguments_slot: None,
         };
         let program_chunks = vec![unsupported_chunk.clone()];
 
-        for _ in 0..tiering.hot_call_threshold {
+        for _ in 0..tiering.hot_call_threshold() {
             assert!(tiering
                 .maybe_execute(0, &unsupported_chunk, &[], &program_chunks)
                 .is_none());
         }
 
         assert_eq!(tiering.chunk_states[0], ChunkTierState::Rejected);
-        assert!(tiering.call_hot_counts[0] >= tiering.hot_call_threshold);
+        assert!(tiering.call_hot_counts[0] >= tiering.hot_call_threshold());
         let Some(session) = tiering.session.as_ref() else {
             panic!("jit session should be initialized when tiering is enabled");
         };
@@ -197,10 +209,11 @@ mod tests {
             captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
+            arguments_slot: None,
         };
         let program_chunks = vec![trivial_chunk.clone()];
 
-        for _ in 0..(tiering.hot_call_threshold - 1) {
+        for _ in 0..(tiering.hot_call_threshold() - 1) {
             assert!(tiering
                 .maybe_execute(0, &trivial_chunk, &[], &program_chunks)
                 .is_none());
@@ -251,6 +264,7 @@ mod tests {
             captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
+            arguments_slot: None,
         };
         let program_chunks = vec![loop_chunk.clone()];
 

@@ -4,6 +4,12 @@ use crate::runtime::Value;
 pub(crate) enum BuiltinResult {
     Push(Value),
     Throw(Value),
+    Invoke {
+        callee: Value,
+        this_arg: Value,
+        args: Vec<Value>,
+        new_object: Option<usize>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -15,7 +21,12 @@ pub enum Completion {
 
 #[derive(Debug)]
 pub enum VmError {
-    StackUnderflow,
+    StackUnderflow {
+        chunk_index: usize,
+        pc: usize,
+        opcode: u8,
+        stack_len: usize,
+    },
     InvalidOpcode(u8),
     InvalidConstIndex(usize),
     InfiniteLoopDetected,
@@ -25,7 +36,18 @@ pub enum VmError {
 impl std::fmt::Display for VmError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::StackUnderflow => write!(f, "stack underflow"),
+            Self::StackUnderflow {
+                chunk_index,
+                pc,
+                opcode,
+                stack_len,
+            } => {
+                write!(
+                    f,
+                    "stack underflow at chunk={} pc={} op=0x{:02x} stack_len={}",
+                    chunk_index, pc, opcode, stack_len
+                )
+            }
             Self::InvalidOpcode(b) => write!(f, "invalid opcode: 0x{:02x}", b),
             Self::InvalidConstIndex(i) => write!(f, "invalid constant index: {}", i),
             Self::InfiniteLoopDetected => write!(f, "infinite loop detected"),

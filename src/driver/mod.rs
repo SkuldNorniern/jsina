@@ -4,6 +4,7 @@ use crate::diagnostics::ErrorCode;
 use crate::frontend::{Lexer, Parser, check_early_errors};
 use crate::host::{CliHost, HostHooks, with_host};
 use crate::ir::{hir_to_bytecode, script_to_hir};
+use crate::runtime::Value;
 use crate::vm::{Completion, Program};
 use std::sync::atomic::AtomicBool;
 
@@ -13,7 +14,6 @@ pub enum DriverError {
     Diagnostic(Vec<Diagnostic>),
     Parse(crate::frontend::ParseError),
     Lower(crate::ir::LowerError),
-    Vm(crate::vm::VmError),
 }
 
 impl std::fmt::Display for DriverError {
@@ -28,7 +28,6 @@ impl std::fmt::Display for DriverError {
             }
             DriverError::Parse(e) => write!(f, "{}", e),
             DriverError::Lower(e) => write!(f, "{}", e),
-            DriverError::Vm(e) => write!(f, "{}", e),
         }
     }
 }
@@ -55,7 +54,7 @@ impl From<crate::ir::LowerError> for DriverError {
 
 impl From<crate::vm::VmError> for DriverError {
     fn from(e: crate::vm::VmError) -> Self {
-        DriverError::Vm(e)
+        DriverError::Diagnostic(vec![crate::diagnostics::vm_error_to_diagnostic(&e)])
     }
 }
 
@@ -125,7 +124,8 @@ impl Driver {
         enable_jit: bool,
     ) -> Result<i64, DriverError> {
         with_host(host, || {
-            Self::run_with_host_and_limit_inner(source, trace, None, enable_jit, true, false)
+            Self::run_with_host_and_limit_inner(source, trace, None, enable_jit, true, false, false)
+                .map(|v| v.to_i64())
         })
     }
 
@@ -148,16 +148,17 @@ impl Driver {
         _step_limit: u64,
         cancel: Option<&AtomicBool>,
     ) -> Result<i64, DriverError> {
-        Self::run_with_timeout_and_cancel(source, cancel, true)
+        Self::run_with_timeout_and_cancel(source, cancel, true, true)
     }
 
     /// Run with wall-clock timeout via cancel.
     /// When enable_infinite_loop_detection is true, cycle detection stops runaway loops (e.g. test262).
-    /// Default false for hosting use cases (event loops, servers).
+    /// When test262_mode is true, init test262 globals ($262, etc).
     pub fn run_with_timeout_and_cancel(
         source: &str,
         cancel: Option<&AtomicBool>,
         enable_infinite_loop_detection: bool,
+        test262_mode: bool,
     ) -> Result<i64, DriverError> {
         let host = CliHost;
         with_host(&host, || {
@@ -168,7 +169,9 @@ impl Driver {
                 false,
                 false,
                 enable_infinite_loop_detection,
+                test262_mode,
             )
+            .map(|v| v.to_i64())
         })
     }
 
@@ -177,7 +180,16 @@ impl Driver {
         trace: bool,
         enable_jit: bool,
     ) -> Result<i64, DriverError> {
-        Self::run_with_host_and_limit_inner(source, trace, None, enable_jit, false, false)
+        Self::run_with_host_and_limit_inner(source, trace, None, enable_jit, false, false, false)
+            .map(|v| v.to_i64())
+    }
+
+    pub fn run_to_string(source: &str) -> Result<String, DriverError> {
+        let host = CliHost;
+        with_host(&host, || {
+            Self::run_with_host_and_limit_inner(source, false, None, false, false, false, false)
+                .map(|v| format!("{}", v))
+        })
     }
 
     fn run_with_host_and_limit_inner(
@@ -187,7 +199,8 @@ impl Driver {
         enable_jit: bool,
         emit_jit_stats: bool,
         enable_infinite_loop_detection: bool,
-    ) -> Result<i64, DriverError> {
+        test262_mode: bool,
+    ) -> Result<Value, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
         let entry = funcs
@@ -215,7 +228,7 @@ impl Driver {
                         jit.compilation_attempt_count()
                     );
                 }
-                return Ok(result);
+                return Ok(Value::Int(result as i32));
             }
             if emit_jit_stats {
                 eprintln!(
@@ -247,7 +260,7 @@ impl Driver {
                 trace,
                 None,
                 cancel,
-                false,
+                test262_mode,
                 enable_jit,
                 enable_infinite_loop_detection,
             );
@@ -282,11 +295,13 @@ impl Driver {
                         format!("uncaught exception: {}", msg),
                         None,
                     )
+                    .with_cause("an exception was thrown and not caught by try/catch")
+                    .with_help("wrap the throwing code in try/catch or ensure errors are handled")
                 };
                 return Err(DriverError::Diagnostic(vec![diag]));
             }
         };
-        Ok(value.to_i64())
+        Ok(value)
     }
 }
 
@@ -326,5 +341,51 @@ mod tests {
         let r = Driver::run("function main() { var f = Function(\"return 42\"); return f(); }");
         assert!(r.is_ok(), "Function() should succeed: {:?}", r);
         assert_eq!(r.unwrap(), 42, "Function(\"return 42\")() should return 42");
+    }
+
+    #[test]
+    fn run_is_html_dda_callable_returns_null() {
+        let r = Driver::run_with_timeout_and_cancel(
+            "function main() { return $262.IsHTMLDDA() === null ? 1 : 0; }",
+            None,
+            false,
+            true,
+        );
+        assert!(
+            r.is_ok(),
+            "IsHTMLDDA() should be callable and return null: {:?}",
+            r
+        );
+        assert_eq!(r.unwrap(), 1, "IsHTMLDDA() must return null");
+    }
+
+    #[test]
+    fn jit_parity_simple_arithmetic() {
+        let source = "function main() { return 10 + 32; }";
+        let interp = Driver::run_with_host(&crate::host::CliHost, source, false, false);
+        let jit = Driver::run_with_host(&crate::host::CliHost, source, false, true);
+        assert!(interp.is_ok(), "interpreter: {:?}", interp);
+        assert!(jit.is_ok(), "jit: {:?}", jit);
+        assert_eq!(interp.unwrap(), jit.unwrap(), "jit must match interpreter");
+    }
+
+    #[test]
+    fn jit_parity_loop_sum() {
+        let source = "function main() { var sum = 0; for (var i = 1; i <= 100; i++) { sum += i; } return sum; }";
+        let interp = Driver::run_with_host(&crate::host::CliHost, source, false, false);
+        let jit = Driver::run_with_host(&crate::host::CliHost, source, false, true);
+        assert!(interp.is_ok(), "interpreter: {:?}", interp);
+        assert!(jit.is_ok(), "jit: {:?}", jit);
+        assert_eq!(interp.unwrap(), jit.unwrap(), "jit must match interpreter");
+    }
+
+    #[test]
+    fn jit_parity_pow() {
+        let source = "function main() { return 2 ** 10; }";
+        let interp = Driver::run_with_host(&crate::host::CliHost, source, false, false);
+        let jit = Driver::run_with_host(&crate::host::CliHost, source, false, true);
+        assert!(interp.is_ok(), "interpreter: {:?}", interp);
+        assert!(jit.is_ok(), "jit: {:?}", jit);
+        assert_eq!(interp.unwrap(), jit.unwrap(), "jit must match interpreter");
     }
 }

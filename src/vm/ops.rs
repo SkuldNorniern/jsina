@@ -1,7 +1,7 @@
 use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
 
-#[inline]
+#[inline(always)]
 pub(crate) fn is_truthy(v: &Value) -> bool {
     match v {
         Value::Undefined | Value::Null => false,
@@ -12,12 +12,12 @@ pub(crate) fn is_truthy(v: &Value) -> bool {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn is_nullish(v: &Value) -> bool {
     matches!(v, Value::Undefined | Value::Null)
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn strict_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
@@ -40,24 +40,36 @@ pub(crate) fn strict_eq(a: &Value, b: &Value) -> bool {
 }
 
 pub(crate) fn value_to_prop_key(v: &Value) -> String {
+    value_to_prop_key_impl(v, None)
+}
+
+pub(crate) fn value_to_prop_key_with_heap(v: &Value, heap: &crate::runtime::Heap) -> String {
+    value_to_prop_key_impl(v, Some(heap))
+}
+
+fn value_to_prop_key_impl(v: &Value, heap: Option<&crate::runtime::Heap>) -> String {
     match v {
         Value::String(s) => s.clone(),
         Value::Int(n) => n.to_string(),
         Value::Number(n) => n.to_string(),
         Value::Bool(b) => b.to_string(),
+        Value::BigInt(s) => s.clone(),
         Value::Null => "null".to_string(),
         Value::Undefined => "undefined".to_string(),
-        Value::Symbol(_) => "Symbol()".to_string(),
+        Value::Symbol(id) => heap
+            .and_then(|h| h.symbol_description(*id))
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| format!("Symbol.{}", id)),
         Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => {
             "[object Object]".to_string()
         }
-        Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => {
-            "function".to_string()
-        }
+        Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_)
+        | Value::BoundBuiltin(_, _, _)
+        | Value::BoundFunction(_, _, _) => "function".to_string(),
     }
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn add_values(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::String(x), Value::String(y)) => Value::String(format!("{}{}", x, y)),
@@ -71,7 +83,7 @@ pub(crate) fn add_values(a: &Value, b: &Value) -> Value {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn sub_values(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::Int(x), Value::Int(y)) => Value::Int(x.saturating_sub(*y)),
@@ -82,7 +94,7 @@ pub(crate) fn sub_values(a: &Value, b: &Value) -> Value {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn mul_values(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::Int(x), Value::Int(y)) => Value::Int(x.saturating_mul(*y)),
@@ -93,6 +105,7 @@ pub(crate) fn mul_values(a: &Value, b: &Value) -> Value {
     }
 }
 
+#[inline(always)]
 pub(crate) fn div_values(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::Int(x), Value::Int(y)) => {
@@ -115,6 +128,7 @@ pub(crate) fn div_values(a: &Value, b: &Value) -> Value {
     }
 }
 
+#[inline(always)]
 pub(crate) fn mod_values(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::Int(x), Value::Int(y)) => {
@@ -131,6 +145,7 @@ pub(crate) fn mod_values(a: &Value, b: &Value) -> Value {
     }
 }
 
+#[inline(always)]
 pub(crate) fn pow_values(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::Int(x), Value::Int(y)) if *y >= 0 && *y <= 31 => {
@@ -143,7 +158,7 @@ pub(crate) fn pow_values(a: &Value, b: &Value) -> Value {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn lt_values(a: &Value, b: &Value) -> Value {
     let result = match (a, b) {
         (Value::Int(x), Value::Int(y)) => x < y,
@@ -156,7 +171,7 @@ pub(crate) fn lt_values(a: &Value, b: &Value) -> Value {
     Value::Bool(result)
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn lte_values(a: &Value, b: &Value) -> Value {
     let result = match (a, b) {
         (Value::Int(x), Value::Int(y)) => x <= y,
@@ -169,7 +184,7 @@ pub(crate) fn lte_values(a: &Value, b: &Value) -> Value {
     Value::Bool(result)
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn gt_values(a: &Value, b: &Value) -> Value {
     let result = match (a, b) {
         (Value::Int(x), Value::Int(y)) => x > y,
@@ -182,7 +197,7 @@ pub(crate) fn gt_values(a: &Value, b: &Value) -> Value {
     Value::Bool(result)
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn gte_values(a: &Value, b: &Value) -> Value {
     let result = match (a, b) {
         (Value::Int(x), Value::Int(y)) => x >= y,
@@ -195,6 +210,7 @@ pub(crate) fn gte_values(a: &Value, b: &Value) -> Value {
     Value::Bool(result)
 }
 
+#[cold]
 pub(crate) fn instanceof_check(value: &Value, constructor: &Value, heap: &Heap) -> bool {
     let constructor_name = get_constructor_name(constructor, heap);
     match (value, constructor_name.as_deref()) {

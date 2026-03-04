@@ -9,7 +9,7 @@ use super::calls::{execute_builtin, pop_args, read_i16, read_u16, read_u8, setup
 use super::ops::{
     add_values, div_values, gt_values, gte_values, instanceof_check, is_nullish, is_truthy,
     lt_values, lte_values, mod_values, mul_values, pow_values, strict_eq, sub_values,
-    value_to_prop_key,
+    value_to_prop_key, value_to_prop_key_with_heap,
 };
 use super::props::{GetPropCache, resolve_get_prop};
 use super::tiering::{JitTiering, JitTieringStats};
@@ -19,7 +19,8 @@ struct Frame {
     chunk_index: usize,
     is_dynamic: bool,
     pc: usize,
-    locals: Vec<Value>,
+    stack_base: usize,
+    num_locals: usize,
     this_value: Value,
     rethrow_after_finally: bool,
     new_object: Option<usize>,
@@ -42,6 +43,29 @@ impl<'a> Drop for RunState<'a> {
     fn drop(&mut self) {
         if let Some(report) = self.jit_report.take() {
             *report = self.tiering.stats();
+        }
+    }
+}
+
+impl<'a> RunState<'a> {
+    #[inline(always)]
+    fn set_local_at(&mut self, stack_base: usize, num_locals: usize, slot: usize, v: Value) {
+        if slot < num_locals {
+            if let Some(ptr) = self.stack.get_mut(stack_base + slot) {
+                *ptr = v;
+            }
+        }
+    }
+
+    fn throw_into_handler_slot(&mut self, slot: usize, v: Value, is_fin: bool, hpc: usize) {
+        let frame_idx = self.frames.len().saturating_sub(1);
+        if let Some(f) = self.frames.get(frame_idx) {
+            self.set_local_at(f.stack_base, f.num_locals, slot, v);
+        }
+        if let Some(f) = self.frames.get_mut(frame_idx) {
+            f.rethrow_after_finally = is_fin;
+            f.pc = hpc;
+            self.stack.truncate(f.stack_base + f.num_locals);
         }
     }
 }
@@ -195,10 +219,11 @@ pub fn interpret_program_with_heap(
 
 /// Throttle (cancel/cycle check) runs every CHECK_INTERVAL steps.
 /// Cycle detection catches infinite loops; cancel supports wall-clock timeout.
-const CHECK_INTERVAL: u32 = 256;
-const CYCLE_BUFFER_SIZE: usize = 64;
+const CHECK_INTERVAL: u32 = 1024;
+const CYCLE_BUFFER_SIZE: usize = 32;
 const CYCLE_THRESHOLD: usize = 3;
 
+#[inline(always)]
 fn hash_execution_state(chunk_index: usize, pc: usize, stack_len: usize, frames_len: usize) -> u64 {
     let h = (chunk_index as u64)
         .wrapping_mul(31)
@@ -224,13 +249,17 @@ pub fn interpret_program_with_heap_and_entry(
         .chunks
         .get(entry)
         .ok_or(VmError::InvalidConstIndex(entry))?;
+    let num_locals = entry_chunk.num_locals as usize;
+    let mut stack = Vec::with_capacity(512);
+    stack.extend(std::iter::repeat(Value::Undefined).take(num_locals));
     let mut state = RunState {
-        stack: Vec::with_capacity(256),
+        stack,
         frames: vec![Frame {
             chunk_index: entry,
             is_dynamic: false,
             pc: 0,
-            locals: vec![Value::Undefined; entry_chunk.num_locals as usize],
+            stack_base: 0,
+            num_locals,
             this_value: Value::Undefined,
             rethrow_after_finally: false,
             new_object: None,
@@ -253,9 +282,23 @@ pub fn interpret_program_with_heap_and_entry(
     loop {
         let frames_len = state.frames.len();
         let stack_len = state.stack.len();
-        let frame = state.frames.last_mut().ok_or(VmError::StackUnderflow)?;
-        let chunk_index = frame.chunk_index;
-        let pc = frame.pc;
+        let frame_idx = state.frames.len().saturating_sub(1);
+        let (chunk_index, is_dynamic, stack_base, num_locals, frame_pc) = {
+            let f = state.frames.get(frame_idx).ok_or(VmError::StackUnderflow {
+                chunk_index: 0,
+                pc: 0,
+                opcode: 0,
+                stack_len: 0,
+            })?;
+            (
+                f.chunk_index,
+                f.is_dynamic,
+                f.stack_base,
+                f.num_locals,
+                f.pc,
+            )
+        };
+        let mut pc = frame_pc;
 
         loop_counter = loop_counter.wrapping_add(1);
         if (loop_counter & CHECK_INTERVAL_MASK) == 0 {
@@ -267,46 +310,57 @@ pub fn interpret_program_with_heap_and_entry(
             if enable_infinite_loop_detection {
                 let h = hash_execution_state(chunk_index, pc, stack_len, frames_len);
                 cycle_buffer[cycle_idx] = h;
-                cycle_idx = (cycle_idx + 1) % CYCLE_BUFFER_SIZE;
-                let same_count = cycle_buffer.iter().filter(|&&x| x == h).count();
-                if same_count >= CYCLE_THRESHOLD {
-                    return Err(VmError::InfiniteLoopDetected);
+                cycle_idx = (cycle_idx + 1) & (CYCLE_BUFFER_SIZE - 1);
+                let mut same_count = 0;
+                for x in &cycle_buffer {
+                    if *x == h {
+                        same_count += 1;
+                        if same_count >= CYCLE_THRESHOLD {
+                            return Err(VmError::InfiniteLoopDetected);
+                        }
+                    }
                 }
             }
         }
-        let chunk = if frame.is_dynamic {
+        let chunk = if is_dynamic {
             state
                 .chunks_stack
-                .get(frame.chunk_index)
-                .ok_or(VmError::InvalidConstIndex(frame.chunk_index))?
+                .get(chunk_index)
+                .ok_or(VmError::InvalidConstIndex(chunk_index))?
         } else {
             program
                 .chunks
-                .get(frame.chunk_index)
-                .ok_or(VmError::InvalidConstIndex(frame.chunk_index))?
+                .get(chunk_index)
+                .ok_or(VmError::InvalidConstIndex(chunk_index))?
         };
         let code = &chunk.code;
         let constants = &chunk.constants;
-        let locals = &mut frame.locals;
-        let pc = &mut frame.pc;
 
-        if *pc >= code.len() {
+        if pc >= code.len() {
             break;
         }
 
-        let op = read_u8(code, *pc);
-        let trace_pc = *pc;
-        *pc += 1;
+        let trace_pc = pc;
+        let op = code[pc];
+        pc += 1;
 
         if trace {
             trace_op(trace_pc, op);
         }
 
+        let stack_len_at_op = state.stack.len();
+        let underflow_chunk = chunk_index;
+        let underflow = move || VmError::StackUnderflow {
+            chunk_index: underflow_chunk,
+            pc: trace_pc,
+            opcode: op,
+            stack_len: stack_len_at_op,
+        };
         match op {
             // ---- Stack / Locals ----
             0x01 => {
-                let idx = read_u8(code, *pc) as usize;
-                *pc += 1;
+                let idx = read_u8(code, pc) as usize;
+                pc += 1;
                 let val = match constants.get(idx).ok_or(VmError::InvalidConstIndex(idx))? {
                     ConstEntry::Global(name) => heap.get_global(name),
                     ConstEntry::Function(func_idx) => {
@@ -332,8 +386,17 @@ pub fn interpret_program_with_heap_and_entry(
                                     });
                                 if let Some(inner_slot) = inner_slot {
                                     let captured_value = outer_slot
-                                        .and_then(|slot| locals.get(slot))
-                                        .cloned()
+                                        .map(|s| {
+                                            if s < num_locals {
+                                                state
+                                                    .stack
+                                                    .get(stack_base + s)
+                                                    .cloned()
+                                                    .unwrap_or(Value::Undefined)
+                                            } else {
+                                                Value::Undefined
+                                            }
+                                        })
                                         .unwrap_or(Value::Undefined);
                                     captured_slots.push((inner_slot, captured_value));
                                 }
@@ -352,8 +415,8 @@ pub fn interpret_program_with_heap_and_entry(
                 state.stack.push(val);
             }
             0x0F => {
-                let idx = read_u16(code, *pc) as usize;
-                *pc += 2;
+                let idx = read_u16(code, pc) as usize;
+                pc += 2;
                 let val = match constants.get(idx).ok_or(VmError::InvalidConstIndex(idx))? {
                     ConstEntry::Global(name) => heap.get_global(name),
                     ConstEntry::Function(func_idx) => {
@@ -379,8 +442,17 @@ pub fn interpret_program_with_heap_and_entry(
                                     });
                                 if let Some(inner_slot) = inner_slot {
                                     let captured_value = outer_slot
-                                        .and_then(|slot| locals.get(slot))
-                                        .cloned()
+                                        .map(|s| {
+                                            if s < num_locals {
+                                                state
+                                                    .stack
+                                                    .get(stack_base + s)
+                                                    .cloned()
+                                                    .unwrap_or(Value::Undefined)
+                                            } else {
+                                                Value::Undefined
+                                            }
+                                        })
                                         .unwrap_or(Value::Undefined);
                                     captured_slots.push((inner_slot, captured_value));
                                 }
@@ -399,122 +471,152 @@ pub fn interpret_program_with_heap_and_entry(
                 state.stack.push(val);
             }
             0x02 => {
-                state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                state.stack.pop().ok_or_else(underflow)?;
             }
             0x03 => {
-                let slot = read_u8(code, *pc) as usize;
-                *pc += 1;
-                let val = locals.get(slot).cloned().unwrap_or(Value::Undefined);
+                let slot = read_u8(code, pc) as usize;
+                pc += 1;
+                let val = if slot < num_locals {
+                    state
+                        .stack
+                        .get(stack_base + slot)
+                        .cloned()
+                        .unwrap_or(Value::Undefined)
+                } else {
+                    Value::Undefined
+                };
                 state.stack.push(val);
             }
             0x04 => {
-                let slot = read_u8(code, *pc) as usize;
-                *pc += 1;
-                let val = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                if slot < locals.len() {
-                    locals[slot] = val;
+                let slot = read_u8(code, pc) as usize;
+                pc += 1;
+                let val = state.stack.pop().ok_or_else(underflow)?;
+                if slot < num_locals {
+                    if let Some(ptr) = state.stack.get_mut(stack_base + slot) {
+                        *ptr = val;
+                    }
                 }
             }
             0x05 => {
-                state.stack.push(frame.this_value.clone());
+                state.stack.push(state.frames[frame_idx].this_value.clone());
             }
             0x06 => {
-                let top = state.stack.last().cloned().ok_or(VmError::StackUnderflow)?;
+                let top = state.stack.last().cloned().ok_or_else(underflow)?;
                 state.stack.push(top);
             }
             0x07 => {
-                let b = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let a = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                state.stack.push(b);
-                state.stack.push(a);
+                let len = state.stack.len();
+                if len < 2 {
+                    return Err(underflow());
+                }
+                state.stack.swap(len - 1, len - 2);
             }
 
             // ---- Arithmetic ----
             0x10 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(match (&lhs, &rhs) {
                     (Value::Int(a), Value::Int(b)) => Value::Int(a.saturating_add(*b)),
                     _ => add_values(&lhs, &rhs),
                 });
             }
             0x11 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(match (&lhs, &rhs) {
                     (Value::Int(a), Value::Int(b)) => Value::Int(a.saturating_sub(*b)),
                     _ => sub_values(&lhs, &rhs),
                 });
             }
             0x12 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(match (&lhs, &rhs) {
                     (Value::Int(a), Value::Int(b)) => Value::Int(a.saturating_mul(*b)),
                     _ => mul_values(&lhs, &rhs),
                 });
             }
             0x13 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(div_values(&lhs, &rhs));
             }
             0x14 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(match (&lhs, &rhs) {
                     (Value::Int(a), Value::Int(b)) => Value::Bool(a < b),
                     _ => lt_values(&lhs, &rhs),
                 });
             }
             0x15 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                state.stack.push(mod_values(&lhs, &rhs));
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
+                state.stack.push(match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) if *b != 0 => Value::Int(a.wrapping_rem(*b)),
+                    _ => mod_values(&lhs, &rhs),
+                });
             }
             0x16 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(pow_values(&lhs, &rhs));
             }
 
             // ---- Comparison / Equality ----
             0x17 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                state.stack.push(Value::Bool(strict_eq(&lhs, &rhs)));
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
+                state.stack.push(Value::Bool(match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) => a == b,
+                    _ => strict_eq(&lhs, &rhs),
+                }));
             }
             0x18 => {
-                let val = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let val = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(Value::Bool(!is_truthy(&val)));
             }
             0x19 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                state.stack.push(lte_values(&lhs, &rhs));
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
+                state.stack.push(match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) => Value::Bool(a <= b),
+                    _ => lte_values(&lhs, &rhs),
+                });
             }
             0x1a => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                state.stack.push(gt_values(&lhs, &rhs));
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
+                state.stack.push(match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) => Value::Bool(a > b),
+                    _ => gt_values(&lhs, &rhs),
+                });
             }
             0x1b => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                state.stack.push(gte_values(&lhs, &rhs));
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
+                state.stack.push(match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) => Value::Bool(a >= b),
+                    _ => gte_values(&lhs, &rhs),
+                });
             }
             0x1c => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                state.stack.push(Value::Bool(!strict_eq(&lhs, &rhs)));
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
+                state.stack.push(Value::Bool(match (&lhs, &rhs) {
+                    (Value::Int(a), Value::Int(b)) => a != b,
+                    _ => !strict_eq(&lhs, &rhs),
+                }));
             }
             0x1d => {
-                let val = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let val = state.stack.pop().ok_or_else(underflow)?;
                 let s = match &val {
                     Value::Undefined => "undefined",
                     Value::Null => "object",
                     Value::Bool(_) => "boolean",
                     Value::Int(_) | Value::Number(_) => "number",
+                    Value::BigInt(_) => "bigint",
                     Value::String(_) => "string",
                     Value::Symbol(_) => "symbol",
                     Value::Object(_)
@@ -522,60 +624,59 @@ pub fn interpret_program_with_heap_and_entry(
                     | Value::Map(_)
                     | Value::Set(_)
                     | Value::Date(_) => "object",
-                    Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_) => {
-                        "function"
-                    }
+                    Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_)
+                    | Value::BoundBuiltin(_, _, _) | Value::BoundFunction(_, _, _) => "function",
                 };
                 state.stack.push(Value::String(s.to_string()));
             }
 
             // ---- Bitwise ----
             0x1e => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(Value::Int(lhs.to_i32() << rhs.to_i32()));
             }
             0x1f => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(Value::Int(lhs.to_i32() >> rhs.to_i32()));
             }
             0x23 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(Value::Int(
                     (lhs.to_i32() as u32 >> rhs.to_i32() as u32) as i32,
                 ));
             }
             0x24 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(Value::Int(lhs.to_i32() & rhs.to_i32()));
             }
             0x25 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(Value::Int(lhs.to_i32() | rhs.to_i32()));
             }
             0x26 => {
-                let rhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let lhs = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let rhs = state.stack.pop().ok_or_else(underflow)?;
+                let lhs = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(Value::Int(lhs.to_i32() ^ rhs.to_i32()));
             }
             0x27 => {
-                let val = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let val = state.stack.pop().ok_or_else(underflow)?;
                 state.stack.push(Value::Int(!val.to_i32()));
             }
             0x28 => {
-                let constructor = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let value = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let constructor = state.stack.pop().ok_or_else(underflow)?;
+                let value = state.stack.pop().ok_or_else(underflow)?;
                 state
                     .stack
                     .push(Value::Bool(instanceof_check(&value, &constructor, heap)));
             }
             0x29 => {
-                let key = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let obj_val = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key = state.stack.pop().ok_or_else(underflow)?;
+                let obj_val = state.stack.pop().ok_or_else(underflow)?;
                 let key_str = value_to_prop_key(&key);
                 let result = match &obj_val {
                     Value::Object(id) => {
@@ -594,6 +695,14 @@ pub fn interpret_program_with_heap_and_entry(
                         heap.delete_function_prop(*function_index, &key_str);
                         true
                     }
+                    Value::Builtin(id) => {
+                        if key_str == "length" || key_str == "name" {
+                            heap.delete_builtin_prop(*id, &key_str);
+                            true
+                        } else {
+                            true
+                        }
+                    }
                     _ => true,
                 };
                 state.stack.push(Value::Bool(result));
@@ -603,6 +712,7 @@ pub fn interpret_program_with_heap_and_entry(
             0x20 => {
                 let val = state.stack.pop().unwrap_or(Value::Undefined);
                 let popped = state.frames.pop();
+                let callee_stack_base = popped.as_ref().map(|f| f.stack_base).unwrap_or(0);
                 if let Some(ref f) = popped {
                     if f.is_dynamic {
                         state.chunks_stack.pop();
@@ -621,62 +731,145 @@ pub fn interpret_program_with_heap_and_entry(
                 } else {
                     val
                 };
+                state.stack.truncate(callee_stack_base);
                 if state.frames.is_empty() {
                     return Ok(Completion::Return(result));
                 }
                 state.stack.push(result);
             }
             0x21 => {
-                let val = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let throw_pc = *pc - 1;
+                let val = state.stack.pop().ok_or_else(underflow)?;
+                let throw_pc = trace_pc;
                 if let Some((hpc, slot, is_fin)) = find_handler(chunk, throw_pc) {
-                    if slot < locals.len() {
-                        locals[slot] = val.clone();
-                    }
-                    frame.rethrow_after_finally = is_fin;
-                    *pc = hpc;
+                    state.throw_into_handler_slot(slot, val.clone(), is_fin, hpc);
+                    pc = hpc;
                 } else {
-                    return Ok(Completion::Throw(val));
+                    let thrown_val = val;
+                    loop {
+                        let popped = state.frames.pop();
+                        if let Some(ref f) = popped {
+                            if f.is_dynamic {
+                                state.chunks_stack.pop();
+                            }
+                            state.stack.truncate(f.stack_base);
+                        }
+                        if popped.is_none() || state.frames.is_empty() {
+                            return Ok(Completion::Throw(thrown_val));
+                        }
+                        let caller_idx = state.frames.len() - 1;
+                        let (caller_chunk_idx, is_dyn, caller_pc, stack_base, num_locals) = {
+                            let f = &state.frames[caller_idx];
+                            (
+                                f.chunk_index,
+                                f.is_dynamic,
+                                f.pc,
+                                f.stack_base,
+                                f.num_locals,
+                            )
+                        };
+                        let caller_chunk = if is_dyn {
+                            state
+                                .chunks_stack
+                                .get(caller_chunk_idx)
+                                .ok_or(VmError::InvalidConstIndex(caller_chunk_idx))?
+                        } else {
+                            program
+                                .chunks
+                                .get(caller_chunk_idx)
+                                .ok_or(VmError::InvalidConstIndex(caller_chunk_idx))?
+                        };
+                        if let Some((hpc, slot, is_fin)) = find_handler(caller_chunk, caller_pc) {
+                            state.set_local_at(stack_base, num_locals, slot, thrown_val.clone());
+                            state.frames[caller_idx].rethrow_after_finally = is_fin;
+                            state.frames[caller_idx].pc = hpc;
+                            break;
+                        }
+                    }
+                    continue;
                 }
             }
             0x22 => {
-                let slot = read_u8(code, *pc) as usize;
-                *pc += 1;
-                if frame.rethrow_after_finally {
-                    frame.rethrow_after_finally = false;
-                    let val = locals.get(slot).cloned().unwrap_or(Value::Undefined);
-                    return Ok(Completion::Throw(val));
+                let slot = read_u8(code, pc) as usize;
+                pc += 1;
+                if state.frames[frame_idx].rethrow_after_finally {
+                    state.frames[frame_idx].rethrow_after_finally = false;
+                    let thrown_val = state
+                        .stack
+                        .get(stack_base + slot)
+                        .cloned()
+                        .unwrap_or(Value::Undefined);
+                    loop {
+                        let popped = state.frames.pop();
+                        if let Some(ref f) = popped {
+                            if f.is_dynamic {
+                                state.chunks_stack.pop();
+                            }
+                            state.stack.truncate(f.stack_base);
+                        }
+                        if popped.is_none() || state.frames.is_empty() {
+                            return Ok(Completion::Throw(thrown_val));
+                        }
+                        let caller_idx = state.frames.len() - 1;
+                        let (caller_chunk_idx, is_dyn, caller_pc, stack_base, num_locals) = {
+                            let f = &state.frames[caller_idx];
+                            (
+                                f.chunk_index,
+                                f.is_dynamic,
+                                f.pc,
+                                f.stack_base,
+                                f.num_locals,
+                            )
+                        };
+                        let caller_chunk = if is_dyn {
+                            state
+                                .chunks_stack
+                                .get(caller_chunk_idx)
+                                .ok_or(VmError::InvalidConstIndex(caller_chunk_idx))?
+                        } else {
+                            program
+                                .chunks
+                                .get(caller_chunk_idx)
+                                .ok_or(VmError::InvalidConstIndex(caller_chunk_idx))?
+                        };
+                        if let Some((hpc, slot, is_fin)) = find_handler(caller_chunk, caller_pc) {
+                            state.set_local_at(stack_base, num_locals, slot, thrown_val.clone());
+                            state.frames[caller_idx].rethrow_after_finally = is_fin;
+                            state.frames[caller_idx].pc = hpc;
+                            break;
+                        }
+                    }
+                    continue;
                 }
             }
 
             // ---- Jumps ----
             0x30 => {
-                let offset = read_i16(code, *pc) as isize;
-                *pc += 2;
-                let val = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let offset = read_i16(code, pc) as isize;
+                pc += 2;
+                let val = state.stack.pop().ok_or_else(underflow)?;
                 if !is_truthy(&val) {
-                    *pc = (*pc as isize + offset) as usize;
+                    pc = (pc as isize + offset) as usize;
                 }
             }
             0x31 => {
-                let offset = read_i16(code, *pc) as isize;
-                *pc += 2;
-                *pc = (*pc as isize + offset) as usize;
+                let offset = read_i16(code, pc) as isize;
+                pc += 2;
+                pc = (pc as isize + offset) as usize;
             }
             0x32 => {
-                let offset = read_i16(code, *pc) as isize;
-                *pc += 2;
-                let val = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let offset = read_i16(code, pc) as isize;
+                pc += 2;
+                let val = state.stack.pop().ok_or_else(underflow)?;
                 if is_nullish(&val) {
-                    *pc = (*pc as isize + offset) as usize;
+                    pc = (pc as isize + offset) as usize;
                 }
             }
 
             // ---- Call (static target) ----
             0x40 => {
-                let func_idx = read_u8(code, *pc) as usize;
-                let argc = read_u8(code, *pc + 1) as usize;
-                *pc += 2;
+                let func_idx = read_u8(code, pc) as usize;
+                let argc = read_u8(code, pc + 1) as usize;
+                pc += 2;
                 let callee = program
                     .chunks
                     .get(func_idx)
@@ -689,15 +882,20 @@ pub fn interpret_program_with_heap_and_entry(
                         .maybe_execute(func_idx, callee, &args, &program.chunks)
                 {
                     state.stack.push(value);
+                    state.frames[frame_idx].pc = pc;
                     continue;
                 }
 
                 let callee_locals = setup_callee_locals(callee, &args, heap);
+                let num_locals = callee_locals.len();
+                let stack_base = state.stack.len();
+                state.stack.extend(callee_locals);
                 state.frames.push(Frame {
                     chunk_index: func_idx,
                     is_dynamic: false,
                     pc: 0,
-                    locals: callee_locals,
+                    stack_base,
+                    num_locals,
                     this_value: Value::Undefined,
                     rethrow_after_finally: false,
                     new_object: None,
@@ -706,10 +904,10 @@ pub fn interpret_program_with_heap_and_entry(
 
             // ---- CallBuiltin ----
             0x41 => {
-                let builtin_id = read_u8(code, *pc);
-                let argc = read_u8(code, *pc + 1) as usize;
-                *pc += 2;
-                let call_pc = *pc - 3;
+                let builtin_id = read_u8(code, pc);
+                let argc = read_u8(code, pc + 1) as usize;
+                pc += 2;
+                let call_pc = trace_pc;
                 let mut ctx = builtins::BuiltinContext {
                     heap,
                     dynamic_chunks: &mut state.dynamic_chunks,
@@ -721,13 +919,26 @@ pub fn interpret_program_with_heap_and_entry(
                     }
                     Ok(BuiltinResult::Throw(v)) => {
                         if let Some((hpc, slot, is_fin)) = find_handler(chunk, call_pc) {
-                            if slot < locals.len() {
-                                locals[slot] = v.clone();
-                            }
-                            frame.rethrow_after_finally = is_fin;
-                            *pc = hpc;
+                            state.throw_into_handler_slot(slot, v.clone(), is_fin, hpc);
+                            pc = hpc;
                         } else {
                             return Ok(Completion::Throw(v));
+                        }
+                    }
+                    Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                        if let Some(c) = handle_apply_invoke(
+                            program,
+                            heap,
+                            &mut state,
+                            chunk_index,
+                            is_dynamic,
+                            call_pc,
+                            callee,
+                            this_arg,
+                            args,
+                            new_object,
+                        )? {
+                            return Ok(c);
                         }
                     }
                     Err(e) => return Err(e),
@@ -736,18 +947,36 @@ pub fn interpret_program_with_heap_and_entry(
 
             // ---- CallMethod (dynamic target) ----
             0x42 => {
-                let argc = read_u8(code, *pc) as usize;
-                *pc += 1;
-                let call_pc = *pc - 2;
+                let argc = read_u8(code, pc) as usize;
+                pc += 1;
+                let call_pc = trace_pc;
+                if argc == 1 {
+                    let arg = state.stack.pop().ok_or_else(underflow)?;
+                    let callee = state.stack.pop().ok_or_else(underflow)?;
+                    let receiver = state.stack.pop().ok_or_else(underflow)?;
+                    if let (Value::Builtin(bid), Value::Array(arr_id)) =
+                        (&callee, &receiver)
+                    {
+                        if *bid == builtins::ARRAY_PUSH_BUILTIN_ID {
+                            heap.array_push(*arr_id, arg);
+                            state.stack.push(Value::Int(heap.array_len(*arr_id) as i32));
+                            state.frames[frame_idx].pc = pc;
+                            continue;
+                        }
+                    }
+                    state.stack.push(receiver);
+                    state.stack.push(callee);
+                    state.stack.push(arg);
+                }
                 let args = pop_args(&mut state.stack, argc)?;
-                let callee = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let receiver = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let callee = state.stack.pop().ok_or_else(underflow)?;
+                let receiver = state.stack.pop().ok_or_else(underflow)?;
                 match callee {
                     Value::Builtin(builtin_id) => {
+                        state.stack.push(receiver);
                         for a in &args {
                             state.stack.push(a.clone());
                         }
-                        state.stack.push(receiver);
                         let mut ctx = builtins::BuiltinContext {
                             heap,
                             dynamic_chunks: &mut state.dynamic_chunks,
@@ -759,13 +988,26 @@ pub fn interpret_program_with_heap_and_entry(
                             }
                             Ok(BuiltinResult::Throw(v)) => {
                                 if let Some((hpc, slot, is_fin)) = find_handler(chunk, call_pc) {
-                                    if slot < locals.len() {
-                                        locals[slot] = v.clone();
-                                    }
-                                    frame.rethrow_after_finally = is_fin;
-                                    *pc = hpc;
+                                    state.throw_into_handler_slot(slot, v.clone(), is_fin, hpc);
+                                    pc = hpc;
                                 } else {
                                     return Ok(Completion::Throw(v));
+                                }
+                            }
+                            Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                                if let Some(c) = handle_apply_invoke(
+                                    program,
+                                    heap,
+                                    &mut state,
+                                    chunk_index,
+                                    is_dynamic,
+                                    call_pc,
+                                    callee,
+                                    this_arg,
+                                    args,
+                                    new_object,
+                                )? {
+                                    return Ok(c);
                                 }
                             }
                             Err(e) => return Err(e),
@@ -777,21 +1019,25 @@ pub fn interpret_program_with_heap_and_entry(
                             .get(heap_idx)
                             .ok_or(VmError::InvalidConstIndex(heap_idx))?
                             .clone();
-                        let mut callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
-                        if let Some(captured) = state.dynamic_captures.get(heap_idx) {
-                            for (slot, value) in captured {
-                                let slot = *slot as usize;
-                                if slot < callee_locals.len() {
-                                    callee_locals[slot] = value.clone();
-                                }
-                            }
+                        let callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
+                        let num_locals = callee_locals.len();
+                        let stack_base = state.stack.len();
+                        let captured: Vec<(u32, Value)> = state
+                            .dynamic_captures
+                            .get(heap_idx)
+                            .cloned()
+                            .unwrap_or_default();
+                        state.stack.extend(callee_locals);
+                        for (slot, value) in captured {
+                            state.set_local_at(stack_base, num_locals, slot as usize, value);
                         }
                         state.chunks_stack.push(callee_chunk);
                         state.frames.push(Frame {
                             chunk_index: state.chunks_stack.len() - 1,
                             is_dynamic: true,
                             pc: 0,
-                            locals: callee_locals,
+                            stack_base,
+                            num_locals,
                             this_value: receiver,
                             rethrow_after_finally: false,
                             new_object: None,
@@ -810,19 +1056,150 @@ pub fn interpret_program_with_heap_and_entry(
                             &program.chunks,
                         ) {
                             state.stack.push(value);
+                            state.frames[frame_idx].pc = pc;
                             continue;
                         }
 
                         let callee_locals = setup_callee_locals(callee_chunk, &args, heap);
+                        let callee_stack_base = state.stack.len();
+                        state.stack.extend(callee_locals);
                         state.frames.push(Frame {
                             chunk_index: func_idx,
                             is_dynamic: false,
                             pc: 0,
-                            locals: callee_locals,
+                            stack_base: callee_stack_base,
+                            num_locals: state.stack.len() - callee_stack_base,
                             this_value: receiver,
                             rethrow_after_finally: false,
                             new_object: None,
                         });
+                    }
+                    Value::BoundFunction(target, bound_this, bound_args) => {
+                        let mut merged = bound_args.clone();
+                        merged.extend(args.iter().cloned());
+                        if let Some(c) = handle_apply_invoke(
+                            program,
+                            heap,
+                            &mut state,
+                            chunk_index,
+                            is_dynamic,
+                            call_pc,
+                            target.as_ref().clone(),
+                            bound_this.as_ref().clone(),
+                            merged,
+                            None,
+                        )? {
+                            return Ok(c);
+                        }
+                    }
+                    Value::BoundBuiltin(builtin_id, bound_val, append_target) => {
+                        let call_args: Vec<Value> = if append_target {
+                            let mut a: Vec<Value> = args.iter().cloned().collect();
+                            a.push(bound_val.as_ref().clone());
+                            a
+                        } else {
+                            let mut a = vec![bound_val.as_ref().clone()];
+                            a.extend(args.iter().cloned());
+                            a
+                        };
+                        for v in &call_args {
+                            state.stack.push(v.clone());
+                        }
+                        let mut ctx = builtins::BuiltinContext {
+                            heap,
+                            dynamic_chunks: &mut state.dynamic_chunks,
+                        };
+                        match execute_builtin(
+                            builtin_id,
+                            call_args.len(),
+                            &mut state.stack,
+                            &mut ctx,
+                        ) {
+                            Ok(BuiltinResult::Push(v)) => {
+                                state.getprop_cache.invalidate_all();
+                                state.stack.push(v);
+                            }
+                            Ok(BuiltinResult::Throw(v)) => {
+                                if let Some((hpc, slot, is_fin)) = find_handler(chunk, call_pc) {
+                                    state.throw_into_handler_slot(slot, v.clone(), is_fin, hpc);
+                                    pc = hpc;
+                                } else {
+                                    return Ok(Completion::Throw(v));
+                                }
+                            }
+                            Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                                if let Some(c) = handle_apply_invoke(
+                                    program,
+                                    heap,
+                                    &mut state,
+                                    chunk_index,
+                                    is_dynamic,
+                                    call_pc,
+                                    callee,
+                                    this_arg,
+                                    args,
+                                    new_object,
+                                )? {
+                                    return Ok(c);
+                                }
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    Value::Object(obj_id) => {
+                        if let Value::Builtin(builtin_id) = heap.get_prop(obj_id, "__call__") {
+                            state.stack.push(receiver);
+                            for a in &args {
+                                state.stack.push(a.clone());
+                            }
+                            let mut ctx = builtins::BuiltinContext {
+                                heap,
+                                dynamic_chunks: &mut state.dynamic_chunks,
+                            };
+                            match execute_builtin(
+                                builtin_id,
+                                argc + 1,
+                                &mut state.stack,
+                                &mut ctx,
+                            ) {
+                                Ok(BuiltinResult::Push(v)) => {
+                                    state.getprop_cache.invalidate_all();
+                                    state.stack.push(v);
+                                }
+                                Ok(BuiltinResult::Throw(v)) => {
+                                    if let Some((hpc, slot, is_fin)) = find_handler(chunk, call_pc) {
+                                        state.throw_into_handler_slot(slot, v.clone(), is_fin, hpc);
+                                        pc = hpc;
+                                    } else {
+                                        return Ok(Completion::Throw(v));
+                                    }
+                                }
+                                Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                                    if let Some(c) = handle_apply_invoke(
+                                        program,
+                                        heap,
+                                        &mut state,
+                                        chunk_index,
+                                        is_dynamic,
+                                        call_pc,
+                                        callee,
+                                        this_arg,
+                                        args,
+                                        new_object,
+                                    )? {
+                                        return Ok(c);
+                                    }
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        } else if heap.is_html_dda_object(obj_id) {
+                            state.stack.push(Value::Null);
+                        } else {
+                            let msg = format!(
+                                "TypeError: callee is not a function (got object)",
+                            );
+                            return Ok(Completion::Throw(Value::String(msg)));
+                        }
                     }
                     _ => {
                         let msg = format!(
@@ -836,9 +1213,9 @@ pub fn interpret_program_with_heap_and_entry(
 
             // ---- NewCall (static target) ----
             0x43 => {
-                let func_idx = read_u8(code, *pc) as usize;
-                let argc = read_u8(code, *pc + 1) as usize;
-                *pc += 2;
+                let func_idx = read_u8(code, pc) as usize;
+                let argc = read_u8(code, pc + 1) as usize;
+                pc += 2;
                 let callee = program
                     .chunks
                     .get(func_idx)
@@ -846,11 +1223,14 @@ pub fn interpret_program_with_heap_and_entry(
                 let obj_id = heap.alloc_object();
                 let args = pop_args(&mut state.stack, argc)?;
                 let callee_locals = setup_callee_locals(callee, &args, heap);
+                let stack_base = state.stack.len();
+                state.stack.extend(callee_locals);
                 state.frames.push(Frame {
                     chunk_index: func_idx,
                     is_dynamic: false,
                     pc: 0,
-                    locals: callee_locals,
+                    stack_base,
+                    num_locals: state.stack.len() - stack_base,
                     this_value: Value::Object(obj_id),
                     rethrow_after_finally: false,
                     new_object: Some(obj_id),
@@ -859,18 +1239,18 @@ pub fn interpret_program_with_heap_and_entry(
 
             // ---- NewMethod (dynamic target) ----
             0x44 => {
-                let argc = read_u8(code, *pc) as usize;
-                *pc += 1;
+                let argc = read_u8(code, pc) as usize;
+                pc += 1;
                 let args = pop_args(&mut state.stack, argc)?;
-                let callee = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let callee = state.stack.pop().ok_or_else(underflow)?;
                 let obj_id = heap.alloc_object();
                 let receiver = Value::Object(obj_id);
                 match callee {
                     Value::Builtin(builtin_id) => {
+                        state.stack.push(receiver);
                         for a in &args {
                             state.stack.push(a.clone());
                         }
-                        state.stack.push(receiver);
                         let mut ctx = builtins::BuiltinContext {
                             heap,
                             dynamic_chunks: &mut state.dynamic_chunks,
@@ -883,6 +1263,22 @@ pub fn interpret_program_with_heap_and_entry(
                             Ok(BuiltinResult::Throw(v)) => {
                                 return Ok(Completion::Throw(v));
                             }
+                            Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                                if let Some(c) = handle_apply_invoke(
+                                    program,
+                                    heap,
+                                    &mut state,
+                                    chunk_index,
+                                    is_dynamic,
+                                    trace_pc,
+                                    callee,
+                                    this_arg,
+                                    args,
+                                    new_object,
+                                )? {
+                                    return Ok(c);
+                                }
+                            }
                             Err(e) => return Err(e),
                         }
                     }
@@ -892,21 +1288,25 @@ pub fn interpret_program_with_heap_and_entry(
                             .get(heap_idx)
                             .ok_or(VmError::InvalidConstIndex(heap_idx))?
                             .clone();
-                        let mut callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
-                        if let Some(captured) = state.dynamic_captures.get(heap_idx) {
-                            for (slot, value) in captured {
-                                let slot = *slot as usize;
-                                if slot < callee_locals.len() {
-                                    callee_locals[slot] = value.clone();
-                                }
-                            }
+                        let callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
+                        let num_locals = callee_locals.len();
+                        let stack_base = state.stack.len();
+                        let captured: Vec<(u32, Value)> = state
+                            .dynamic_captures
+                            .get(heap_idx)
+                            .cloned()
+                            .unwrap_or_default();
+                        state.stack.extend(callee_locals);
+                        for (slot, value) in captured {
+                            state.set_local_at(stack_base, num_locals, slot as usize, value);
                         }
                         state.chunks_stack.push(callee_chunk);
                         state.frames.push(Frame {
                             chunk_index: state.chunks_stack.len() - 1,
                             is_dynamic: true,
                             pc: 0,
-                            locals: callee_locals,
+                            stack_base,
+                            num_locals,
                             this_value: receiver,
                             rethrow_after_finally: false,
                             new_object: Some(obj_id),
@@ -918,15 +1318,83 @@ pub fn interpret_program_with_heap_and_entry(
                             .get(func_idx)
                             .ok_or(VmError::InvalidConstIndex(func_idx))?;
                         let callee_locals = setup_callee_locals(callee_chunk, &args, heap);
+                        let stack_base = state.stack.len();
+                        state.stack.extend(callee_locals);
                         state.frames.push(Frame {
                             chunk_index: func_idx,
                             is_dynamic: false,
                             pc: 0,
-                            locals: callee_locals,
+                            stack_base,
+                            num_locals: state.stack.len() - stack_base,
                             this_value: receiver,
                             rethrow_after_finally: false,
                             new_object: Some(obj_id),
                         });
+                    }
+                    Value::BoundFunction(target, _bound_this, bound_args) => {
+                        let mut merged = bound_args.clone();
+                        merged.extend(args.iter().cloned());
+                        if let Some(c) = handle_apply_invoke(
+                            program,
+                            heap,
+                            &mut state,
+                            chunk_index,
+                            is_dynamic,
+                            trace_pc,
+                            target.as_ref().clone(),
+                            receiver,
+                            merged,
+                            Some(obj_id),
+                        )? {
+                            return Ok(c);
+                        }
+                    }
+                    Value::Object(obj_id_callee) => {
+                        if let Value::Builtin(builtin_id) = heap.get_prop(obj_id_callee, "__call__") {
+                            state.stack.push(receiver);
+                            for a in &args {
+                                state.stack.push(a.clone());
+                            }
+                            let mut ctx = builtins::BuiltinContext {
+                                heap,
+                                dynamic_chunks: &mut state.dynamic_chunks,
+                            };
+                            match execute_builtin(
+                                builtin_id,
+                                argc + 1,
+                                &mut state.stack,
+                                &mut ctx,
+                            ) {
+                                Ok(BuiltinResult::Push(_)) => {
+                                    state.getprop_cache.invalidate_all();
+                                }
+                                Ok(BuiltinResult::Throw(v)) => {
+                                    return Ok(Completion::Throw(v));
+                                }
+                                Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                                    if let Some(c) = handle_apply_invoke(
+                                        program,
+                                        heap,
+                                        &mut state,
+                                        chunk_index,
+                                        is_dynamic,
+                                        trace_pc,
+                                        callee,
+                                        this_arg,
+                                        args,
+                                        new_object,
+                                    )? {
+                                        return Ok(c);
+                                    }
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        } else if heap.is_html_dda_object(obj_id_callee) {
+                            state.stack.push(Value::Null);
+                        } else {
+                            let msg = "TypeError: callee is not a function (got object)".to_string();
+                            return Ok(Completion::Throw(Value::String(msg)));
+                        }
                     }
                     _ => {
                         let msg = format!(
@@ -946,9 +1414,9 @@ pub fn interpret_program_with_heap_and_entry(
                 state.stack.push(Value::Array(heap.alloc_array()));
             }
             0x52 => {
-                let key_idx = read_u8(code, *pc) as usize;
-                *pc += 1;
-                let obj = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_idx = read_u8(code, pc) as usize;
+                pc += 1;
+                let obj = state.stack.pop().ok_or_else(underflow)?;
                 let key_str = match constants
                     .get(key_idx)
                     .ok_or(VmError::InvalidConstIndex(key_idx))?
@@ -961,10 +1429,10 @@ pub fn interpret_program_with_heap_and_entry(
                 state.stack.push(result);
             }
             0x53 => {
-                let key_idx = read_u8(code, *pc) as usize;
-                *pc += 1;
-                let obj = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let value = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_idx = read_u8(code, pc) as usize;
+                pc += 1;
+                let obj = state.stack.pop().ok_or_else(underflow)?;
+                let value = state.stack.pop().ok_or_else(underflow)?;
                 let key_str = match constants
                     .get(key_idx)
                     .ok_or(VmError::InvalidConstIndex(key_idx))?
@@ -989,17 +1457,17 @@ pub fn interpret_program_with_heap_and_entry(
                 state.stack.push(value);
             }
             0x54 => {
-                let key = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let obj = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let key_str = value_to_prop_key(&key);
+                let key = state.stack.pop().ok_or_else(underflow)?;
+                let obj = state.stack.pop().ok_or_else(underflow)?;
+                let key_str = value_to_prop_key_with_heap(&key, heap);
                 let result = resolve_get_prop(&obj, &key_str, None, heap);
                 state.stack.push(result);
             }
             0x55 => {
-                let value = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let key = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let obj = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let key_str = value_to_prop_key(&key);
+                let value = state.stack.pop().ok_or_else(underflow)?;
+                let key = state.stack.pop().ok_or_else(underflow)?;
+                let obj = state.stack.pop().ok_or_else(underflow)?;
+                let key_str = value_to_prop_key_with_heap(&key, heap);
                 match &obj {
                     Value::Object(id) => heap.set_prop(*id, &key_str, value.clone()),
                     Value::Array(id) => heap.set_array_prop(*id, &key_str, value.clone()),
@@ -1010,9 +1478,9 @@ pub fn interpret_program_with_heap_and_entry(
                 state.stack.push(value);
             }
             0x57 => {
-                let key_idx = read_u16(code, *pc) as usize;
-                *pc += 2;
-                let obj = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_idx = read_u16(code, pc) as usize;
+                pc += 2;
+                let obj = state.stack.pop().ok_or_else(underflow)?;
                 let key_str = match constants
                     .get(key_idx)
                     .ok_or(VmError::InvalidConstIndex(key_idx))?
@@ -1025,10 +1493,10 @@ pub fn interpret_program_with_heap_and_entry(
                 state.stack.push(result);
             }
             0x58 => {
-                let key_idx = read_u16(code, *pc) as usize;
-                *pc += 2;
-                let obj = state.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let value = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let key_idx = read_u16(code, pc) as usize;
+                pc += 2;
+                let obj = state.stack.pop().ok_or_else(underflow)?;
+                let value = state.stack.pop().ok_or_else(underflow)?;
                 let key_str = match constants
                     .get(key_idx)
                     .ok_or(VmError::InvalidConstIndex(key_idx))?
@@ -1053,7 +1521,7 @@ pub fn interpret_program_with_heap_and_entry(
                 state.stack.push(value);
             }
             0x56 => {
-                let proto = state.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let proto = state.stack.pop().ok_or_else(underflow)?;
                 let prototype = match &proto {
                     Value::Null | Value::Undefined => None,
                     Value::Object(id) => Some(*id),
@@ -1066,6 +1534,9 @@ pub fn interpret_program_with_heap_and_entry(
 
             _ => return Err(VmError::InvalidOpcode(op)),
         }
+        if frame_idx < state.frames.len() {
+            state.frames[frame_idx].pc = pc;
+        }
     }
 
     let result = state.stack.pop().unwrap_or(Value::Undefined);
@@ -1073,6 +1544,259 @@ pub fn interpret_program_with_heap_and_entry(
 }
 
 /// Finds the innermost exception handler covering `throw_pc`.
+fn handle_apply_invoke(
+    program: &Program,
+    heap: &mut Heap,
+    state: &mut RunState,
+    chunk_index: usize,
+    is_dynamic: bool,
+    call_pc: usize,
+    mut callee: Value,
+    mut this_arg: Value,
+    mut args: Vec<Value>,
+    mut new_object: Option<usize>,
+) -> Result<Option<Completion>, VmError> {
+    let chunk = if is_dynamic {
+        state
+            .chunks_stack
+            .get(chunk_index)
+            .ok_or(VmError::InvalidConstIndex(chunk_index))?
+    } else {
+        program
+            .chunks
+            .get(chunk_index)
+            .ok_or(VmError::InvalidConstIndex(chunk_index))?
+    };
+    loop {
+        let bind_unwrap = match &callee {
+            Value::BoundFunction(target, bound_this, bound_args) => {
+                let mut merged = bound_args.clone();
+                merged.extend(args.clone());
+                Some((target.as_ref().clone(), bound_this.as_ref().clone(), merged))
+            }
+            _ => None,
+        };
+        if let Some((new_callee, new_this, new_args)) = bind_unwrap {
+            callee = new_callee;
+            this_arg = new_this;
+            args = new_args;
+            continue;
+        }
+        match &callee {
+            Value::Builtin(builtin_id) => {
+                state.stack.push(this_arg.clone());
+                for a in &args {
+                    state.stack.push(a.clone());
+                }
+                let mut ctx = builtins::BuiltinContext {
+                    heap,
+                    dynamic_chunks: &mut state.dynamic_chunks,
+                };
+                match execute_builtin(*builtin_id, args.len() + 1, &mut state.stack, &mut ctx) {
+                    Ok(BuiltinResult::Push(v)) => {
+                        state.getprop_cache.invalidate_all();
+                        state.stack.push(v);
+                        return Ok(None);
+                    }
+                    Ok(BuiltinResult::Throw(v)) => {
+                        if let Some((hpc, slot, is_fin)) = find_handler(chunk, call_pc) {
+                            state.throw_into_handler_slot(slot, v.clone(), is_fin, hpc);
+                            return Ok(None);
+                        }
+                        return Ok(Some(Completion::Throw(v)));
+                    }
+                    Ok(BuiltinResult::Invoke {
+                        callee: c,
+                        this_arg: t,
+                        args: a,
+                        new_object: no,
+                    }) => {
+                        callee = c;
+                        this_arg = t;
+                        args = a;
+                        new_object = no;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Value::DynamicFunction(heap_idx) => {
+                let callee_chunk = state
+                    .dynamic_chunks
+                    .get(*heap_idx)
+                    .ok_or(VmError::InvalidConstIndex(*heap_idx))?
+                    .clone();
+                let callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
+                let num_locals = callee_locals.len();
+                let stack_base = state.stack.len();
+                let captured: Vec<(u32, Value)> = state
+                    .dynamic_captures
+                    .get(*heap_idx)
+                    .cloned()
+                    .unwrap_or_default();
+                state.stack.extend(callee_locals);
+                for (slot, value) in captured {
+                    state.set_local_at(stack_base, num_locals, slot as usize, value);
+                }
+                state.chunks_stack.push(callee_chunk);
+                state.frames.push(Frame {
+                    chunk_index: state.chunks_stack.len() - 1,
+                    is_dynamic: true,
+                    pc: 0,
+                    stack_base,
+                    num_locals,
+                    this_value: this_arg,
+                    rethrow_after_finally: false,
+                    new_object,
+                });
+                return Ok(None);
+            }
+            Value::Function(func_idx) => {
+                let callee_chunk = program
+                    .chunks
+                    .get(*func_idx)
+                    .ok_or(VmError::InvalidConstIndex(*func_idx))?;
+
+                if let Some(value) = state.tiering.maybe_execute(
+                    *func_idx,
+                    callee_chunk,
+                    &args,
+                    &program.chunks,
+                ) {
+                    state.stack.push(value);
+                    return Ok(None);
+                }
+
+                let callee_locals = setup_callee_locals(callee_chunk, &args, heap);
+                let stack_base = state.stack.len();
+                state.stack.extend(callee_locals);
+                state.frames.push(Frame {
+                    chunk_index: *func_idx,
+                    is_dynamic: false,
+                    pc: 0,
+                    stack_base,
+                    num_locals: state.stack.len() - stack_base,
+                    this_value: this_arg,
+                    rethrow_after_finally: false,
+                    new_object,
+                });
+                return Ok(None);
+            }
+            Value::BoundBuiltin(builtin_id, bound_val, append_target) => {
+                let call_args: Vec<Value> = if *append_target {
+                    let mut a: Vec<Value> = args.iter().cloned().collect();
+                    a.push(bound_val.as_ref().clone());
+                    a
+                } else {
+                    let mut a = vec![bound_val.as_ref().clone()];
+                    a.extend(args.iter().cloned());
+                    a
+                };
+                        for v in &call_args {
+                            state.stack.push(v.clone());
+                        }
+                        let mut ctx = builtins::BuiltinContext {
+                            heap,
+                            dynamic_chunks: &mut state.dynamic_chunks,
+                        };
+                        match execute_builtin(
+                            *builtin_id,
+                    call_args.len(),
+                    &mut state.stack,
+                    &mut ctx,
+                ) {
+                    Ok(BuiltinResult::Push(v)) => {
+                        state.getprop_cache.invalidate_all();
+                        state.stack.push(v);
+                        return Ok(None);
+                    }
+                    Ok(BuiltinResult::Throw(v)) => {
+                        if let Some((hpc, slot, is_fin)) = find_handler(chunk, call_pc) {
+                            state.throw_into_handler_slot(slot, v.clone(), is_fin, hpc);
+                            return Ok(None);
+                        }
+                        return Ok(Some(Completion::Throw(v)));
+                    }
+                    Ok(BuiltinResult::Invoke {
+                        callee: c,
+                        this_arg: t,
+                        args: a,
+                        new_object: no,
+                    }) => {
+                        callee = c;
+                        this_arg = t;
+                        args = a;
+                        new_object = no;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Value::Object(obj_id) => {
+                if let Value::Builtin(builtin_id) = heap.get_prop(*obj_id, "__call__") {
+                    state.stack.push(this_arg.clone());
+                    for a in &args {
+                        state.stack.push(a.clone());
+                    }
+                    let mut ctx = builtins::BuiltinContext {
+                        heap,
+                        dynamic_chunks: &mut state.dynamic_chunks,
+                    };
+                    match execute_builtin(
+                        builtin_id,
+                        args.len() + 1,
+                        &mut state.stack,
+                        &mut ctx,
+                    ) {
+                        Ok(BuiltinResult::Push(v)) => {
+                            state.getprop_cache.invalidate_all();
+                            state.stack.push(v);
+                            return Ok(None);
+                        }
+                        Ok(BuiltinResult::Throw(v)) => {
+                            if let Some((hpc, slot, is_fin)) = find_handler(chunk, call_pc) {
+                                if let Some(f) = state.frames.last() {
+                                    state.set_local_at(f.stack_base, f.num_locals, slot, v.clone());
+                                }
+                                if let Some(f) = state.frames.last_mut() {
+                                    f.rethrow_after_finally = is_fin;
+                                    f.pc = hpc;
+                                }
+                                return Ok(None);
+                            }
+                            return Ok(Some(Completion::Throw(v)));
+                        }
+                        Ok(BuiltinResult::Invoke {
+                            callee: c,
+                            this_arg: t,
+                            args: a,
+                            new_object: no,
+                        }) => {
+                            callee = c;
+                            this_arg = t;
+                            args = a;
+                            new_object = no;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                } else if heap.is_html_dda_object(*obj_id) {
+                    state.stack.push(Value::Null);
+                    return Ok(None);
+                } else {
+                    let msg =
+                        "TypeError: callee is not a function (got object)".to_string();
+                    return Ok(Some(Completion::Throw(Value::String(msg))));
+                }
+            }
+            _ => {
+                let msg = format!(
+                    "TypeError: callee is not a function (got {})",
+                    callee.type_name_for_error(),
+                );
+                return Ok(Some(Completion::Throw(Value::String(msg))));
+            }
+        }
+    }
+}
+
 /// Returns (handler_pc, catch_slot, is_finally).
 #[inline]
 fn find_handler(chunk: &BytecodeChunk, throw_pc: usize) -> Option<(usize, usize, bool)> {
@@ -1088,6 +1812,7 @@ impl ConstEntry {
         match self {
             ConstEntry::Int(n) => Value::Int((*n).clamp(i32::MIN as i64, i32::MAX as i64) as i32),
             ConstEntry::Float(n) => Value::Number(*n),
+            ConstEntry::BigInt(s) => Value::BigInt(s.clone()),
             ConstEntry::String(s) => Value::String(s.clone()),
             ConstEntry::Null => Value::Null,
             ConstEntry::Undefined => Value::Undefined,
@@ -1111,6 +1836,7 @@ mod tests {
             captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
+            arguments_slot: None,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(Value::Int(42)) = result {
@@ -1136,6 +1862,7 @@ mod tests {
             captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
+            arguments_slot: None,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -1183,6 +1910,7 @@ mod tests {
             captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
+            arguments_slot: None,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -1222,6 +1950,7 @@ mod tests {
             captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
+            arguments_slot: None,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -1270,6 +1999,7 @@ mod tests {
             captured_names: vec![],
             rest_param_index: None,
             handlers: vec![],
+            arguments_slot: None,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -1303,6 +2033,7 @@ mod tests {
             "function main() { while (true) {} return 0; }",
             None,
             true,
+            false,
         );
         let err = result.expect_err("infinite loop should error when detection enabled");
         assert!(

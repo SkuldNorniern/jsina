@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod cli;
+pub mod serve;
 pub mod diagnostics;
 pub mod driver;
 pub mod frontend;
