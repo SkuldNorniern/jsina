@@ -228,6 +228,7 @@ pub enum Binding {
 pub enum ObjectPatternTarget {
     Ident(String),
     Expr(Expression),
+    Pattern(Box<Binding>),
 }
 
 #[derive(Debug, Clone)]
@@ -250,9 +251,10 @@ impl Binding {
             Binding::Ident(n) => vec![n.as_str()],
             Binding::ObjectPattern(props) => props
                 .iter()
-                .filter_map(|p| match &p.target {
-                    ObjectPatternTarget::Ident(n) => Some(n.as_str()),
-                    ObjectPatternTarget::Expr(_) => None,
+                .flat_map(|p| match &p.target {
+                    ObjectPatternTarget::Ident(n) => vec![n.as_str()],
+                    ObjectPatternTarget::Pattern(b) => b.names(),
+                    ObjectPatternTarget::Expr(_) => vec![],
                 })
                 .collect(),
             Binding::ArrayPattern(elems) => {
@@ -479,6 +481,7 @@ pub enum BinaryOp {
     BitwiseOr,
     BitwiseXor,
     Instanceof,
+    In,
 }
 
 #[derive(Debug, Clone)]

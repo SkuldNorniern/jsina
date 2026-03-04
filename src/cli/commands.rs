@@ -211,6 +211,7 @@ fn format_binding(b: &ast::Binding) -> String {
                 .map(|p| {
                     let target_str = match &p.target {
                         ObjectPatternTarget::Ident(n) => n.clone(),
+                        ObjectPatternTarget::Pattern(b) => format_binding(b),
                         ObjectPatternTarget::Expr(_) => "[expr]".to_string(),
                     };
                     let mut base = if p.shorthand {

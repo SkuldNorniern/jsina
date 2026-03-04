@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::calls::{execute_builtin, pop_args, read_i16, read_u16, read_u8, setup_callee_locals};
 use super::ops::{
-    add_values, div_values, gt_values, gte_values, instanceof_check, is_nullish, is_truthy,
-    loose_eq, lt_values, lte_values, mod_values, mul_values, pow_values, strict_eq, sub_values,
-    value_to_prop_key, value_to_prop_key_with_heap,
+    add_values, div_values, gt_values, gte_values, in_check, instanceof_check, is_nullish,
+    is_truthy, loose_eq, lt_values, lte_values, mod_values, mul_values, pow_values, strict_eq,
+    sub_values, value_to_prop_key, value_to_prop_key_with_heap,
 };
 use super::props::{GetPropCache, resolve_get_prop};
 use super::tiering::{JitTiering, JitTieringStats};
@@ -683,6 +683,14 @@ pub fn interpret_program_with_heap_and_entry(
                 state
                     .stack
                     .push(Value::Bool(instanceof_check(&value, &constructor, heap)));
+            }
+            0x2c => {
+                let obj = state.stack.pop().ok_or_else(underflow)?;
+                let key = state.stack.pop().ok_or_else(underflow)?;
+                match in_check(&key, &obj, heap) {
+                    Ok(result) => state.stack.push(Value::Bool(result)),
+                    Err(msg) => return Ok(Completion::Throw(Value::String(msg))),
+                }
             }
             0x29 => {
                 let key = state.stack.pop().ok_or_else(underflow)?;

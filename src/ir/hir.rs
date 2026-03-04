@@ -110,6 +110,9 @@ pub enum HirOp {
     Instanceof {
         span: Span,
     },
+    In {
+        span: Span,
+    },
     Not {
         span: Span,
     },

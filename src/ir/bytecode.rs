@@ -56,6 +56,7 @@ pub enum Opcode {
     StrictNotEq = 0x1c,
     Eq = 0x2a,
     NotEq = 0x2b,
+    In = 0x2c,
     LeftShift = 0x1e,
     RightShift = 0x1f,
     UnsignedRightShift = 0x23,

@@ -28,7 +28,8 @@ fn binary_op_precedence(op: BinaryOp) -> u8 {
         BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => 12,
         BinaryOp::Add | BinaryOp::Sub => 11,
         BinaryOp::LeftShift | BinaryOp::RightShift | BinaryOp::UnsignedRightShift => 10,
-        BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte | BinaryOp::Instanceof => 9,
+        BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte | BinaryOp::Instanceof
+        | BinaryOp::In => 9,
         BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::StrictEq | BinaryOp::StrictNotEq => 8,
         BinaryOp::BitwiseAnd => 7,
         BinaryOp::BitwiseXor => 6,
@@ -1452,35 +1453,26 @@ impl Parser {
                 }
                 let key_tok = self.expect_property_name()?;
                 let key = key_tok.lexeme.clone();
-                let (binding, shorthand, default_init) = if self.optional(TokenType::Colon) {
+                let (target, shorthand, default_init) = if self.optional(TokenType::Colon) {
                     let (nested, _) = self.parse_binding()?;
-                    if matches!(
-                        &nested,
-                        Binding::ObjectPattern(_) | Binding::ArrayPattern(_)
-                    ) {
-                        return Err(ParseError {
-                            code: ErrorCode::ParseExpectedVarLetConst,
-                            message: "nested destructuring not yet supported".to_string(),
-                            span: Some(key_tok.span),
-                        });
-                    }
-                    let name = if let Some(bound_name) = nested.names().into_iter().next() {
-                        bound_name.to_string()
-                    } else {
-                        return Err(ParseError {
-                            code: ErrorCode::ParseExpectedIdentOrComma,
-                            message: "expected identifier in binding pattern".to_string(),
-                            span: Some(key_tok.span),
-                        });
-                    };
                     let default_init = if self.optional(TokenType::Assign) {
                         let mut default_expr = self.parse_assignment_expression_allow_in()?;
-                        Self::assign_default_initializer_name(&mut default_expr, &name);
+                        for name in nested.names() {
+                            Self::assign_default_initializer_name(&mut default_expr, name);
+                        }
                         Some(Box::new(default_expr))
                     } else {
                         None
                     };
-                    (name, false, default_init)
+                    let target = match &nested {
+                        Binding::Ident(n) => {
+                            crate::frontend::ast::ObjectPatternTarget::Ident(n.clone())
+                        }
+                        Binding::ObjectPattern(_) | Binding::ArrayPattern(_) => {
+                            crate::frontend::ast::ObjectPatternTarget::Pattern(Box::new(nested))
+                        }
+                    };
+                    (target, false, default_init)
                 } else {
                     if !matches!(key_tok.token_type, TokenType::Identifier | TokenType::Yield) {
                         return Err(ParseError {
@@ -1496,11 +1488,15 @@ impl Parser {
                     } else {
                         None
                     };
-                    (key.clone(), true, default_init)
+                    (
+                        crate::frontend::ast::ObjectPatternTarget::Ident(key.clone()),
+                        true,
+                        default_init,
+                    )
                 };
                 props.push(ObjectPatternProp {
                     key,
-                    target: crate::frontend::ast::ObjectPatternTarget::Ident(binding),
+                    target,
                     shorthand,
                     default_init,
                 });
@@ -1611,7 +1607,7 @@ impl Parser {
                     let rhs_with_in = Expression::Binary(BinaryExpr {
                         id: self.next_id(),
                         span: rhs_span,
-                        op: BinaryOp::Instanceof,
+                        op: BinaryOp::In,
                         left: assign.right,
                         right: Box::new(in_right),
                     });
@@ -1628,7 +1624,7 @@ impl Parser {
                     Expression::Binary(BinaryExpr {
                         id: self.next_id(),
                         span,
-                        op: BinaryOp::Instanceof,
+                        op: BinaryOp::In,
                         left: Box::new(other),
                         right: Box::new(in_right),
                     })
@@ -1690,6 +1686,7 @@ impl Parser {
                 Some(TokenType::BitwiseOr) => BinaryOp::BitwiseOr,
                 Some(TokenType::BitwiseXor) => BinaryOp::BitwiseXor,
                 Some(TokenType::Instanceof) => BinaryOp::Instanceof,
+                Some(TokenType::In) => BinaryOp::In,
                 Some(TokenType::Assign) => {
                     self.end_recursion();
                     let left_span = left.span();
@@ -1721,6 +1718,26 @@ impl Parser {
                         span,
                         left: Box::new(left),
                         right: Box::new(add_right),
+                    }));
+                }
+                Some(TokenType::ExponentAssign) => {
+                    self.end_recursion();
+                    let left_span = left.span();
+                    self.advance();
+                    let right = self.parse_expression_prec(2)?;
+                    let span = left_span.merge(right.span());
+                    let pow_right = Expression::Binary(BinaryExpr {
+                        id: self.next_id(),
+                        span,
+                        op: BinaryOp::Pow,
+                        left: Box::new(left.clone()),
+                        right: Box::new(right),
+                    });
+                    return Ok(Expression::Assign(AssignExpr {
+                        id: self.next_id(),
+                        span,
+                        left: Box::new(left),
+                        right: Box::new(pow_right),
                     }));
                 }
                 Some(TokenType::UnsignedRightShiftAssign) => {

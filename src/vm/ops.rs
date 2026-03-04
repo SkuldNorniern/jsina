@@ -328,6 +328,38 @@ pub(crate) fn instanceof_check(value: &Value, constructor: &Value, heap: &Heap) 
     }
 }
 
+pub(crate) fn in_check(key: &Value, obj: &Value, heap: &Heap) -> Result<bool, String> {
+    let key_str = value_to_prop_key(key);
+    match obj {
+        Value::Object(id) => Ok(heap.object_has_property(*id, &key_str)),
+        Value::Array(id) => Ok(heap.array_has_property(*id, &key_str)),
+        Value::Map(id) => Ok(key_str == "size" || heap.map_has(*id, &key_str)),
+        Value::Set(_) => Ok(key_str == "size"),
+        Value::Function(idx) => {
+            let has_own = heap.function_has_own_property(*idx, &key_str);
+            let has_proto = matches!(key_str.as_str(), "call" | "apply" | "bind");
+            Ok(has_own || has_proto)
+        }
+        Value::DynamicFunction(_) => {
+            Ok(matches!(key_str.as_str(), "call" | "apply" | "bind"))
+        }
+        Value::Builtin(id) => {
+            let deletable = key_str == "length" || key_str == "name";
+            let has = matches!(key_str.as_str(), "length" | "name" | "call" | "bind" | "apply");
+            Ok(has && (!deletable || !heap.builtin_prop_deleted(*id, &key_str)))
+        }
+        Value::BoundBuiltin(_, _, _) | Value::BoundFunction(_, _, _) => {
+            Ok(matches!(key_str.as_str(), "call" | "apply" | "bind"))
+        }
+        Value::Date(_) => Ok(key_str == "length" || key_str == "getTime" || key_str == "valueOf" || key_str == "toString"),
+        _ => Err(format!(
+            "TypeError: Cannot use 'in' operator to search for '{}' in {}",
+            key_str,
+            obj.type_name_for_error()
+        )),
+    }
+}
+
 fn get_constructor_name(constructor: &Value, heap: &Heap) -> Option<String> {
     match constructor {
         Value::Object(id) => {

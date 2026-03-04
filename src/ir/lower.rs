@@ -843,6 +843,30 @@ fn compile_binding_from_slot(
                             ctx,
                         )?;
                     }
+                    ObjectPatternTarget::Pattern(nested) => {
+                        let effective_slot = if let Some(ref def) = prop.default_init {
+                            let merge_slot = ctx.next_slot;
+                            ctx.next_slot += 1;
+                            store_binding_value(
+                                merge_slot,
+                                value_slot,
+                                Some(def),
+                                span,
+                                ctx,
+                            )?;
+                            merge_slot
+                        } else {
+                            value_slot
+                        };
+                        compile_binding_from_slot(
+                            nested,
+                            effective_slot,
+                            mode,
+                            missing_message,
+                            span,
+                            ctx,
+                        )?;
+                    }
                 }
             }
         }
@@ -2706,6 +2730,9 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     BinaryOp::Instanceof => ctx.blocks[ctx.current_block]
                         .ops
                         .push(HirOp::Instanceof { span: e.span }),
+                    BinaryOp::In => ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::In { span: e.span }),
                     BinaryOp::Comma => unreachable!("Comma handled in outer match"),
                     BinaryOp::Eq => ctx.blocks[ctx.current_block]
                         .ops

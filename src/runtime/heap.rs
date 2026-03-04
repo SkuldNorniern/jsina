@@ -789,6 +789,43 @@ impl Heap {
             .unwrap_or(false)
     }
 
+    pub fn object_has_property(&self, obj_id: usize, key: &str) -> bool {
+        let mut current = Some(obj_id);
+        while let Some(id) = current {
+            if let Some(obj) = self.objects.get(id) {
+                if obj.props.contains_key(key) {
+                    return true;
+                }
+                current = obj.prototype;
+            } else {
+                break;
+            }
+        }
+        false
+    }
+
+    pub fn array_has_property(&self, arr_id: usize, key: &str) -> bool {
+        if let Some(elements) = self.arrays.get(arr_id) {
+            if key == "length" {
+                return true;
+            }
+            if let Ok(idx) = key.parse::<usize>() {
+                if idx < elements.len() {
+                    return true;
+                }
+            }
+            if let Some(props) = self.array_props.get(arr_id) {
+                if props.contains_key(key) {
+                    return true;
+                }
+            }
+        }
+        if let Some(proto_id) = self.array_prototype_id {
+            return self.object_has_property(proto_id, key);
+        }
+        false
+    }
+
     pub fn delete_builtin_prop(&mut self, builtin_id: u8, key: &str) {
         self.deleted_builtin_props
             .insert((builtin_id, key.to_string()));

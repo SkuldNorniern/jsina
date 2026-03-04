@@ -48,6 +48,11 @@ pub fn opcode_name(op: u8) -> &'static str {
         x if x == Opcode::JumpIfNullish as u8 => "JumpIfNullish",
         x if x == Opcode::Jump as u8 => "Jump",
         x if x == Opcode::Return as u8 => "Return",
+        x if x == Opcode::Instanceof as u8 => "Instanceof",
+        x if x == Opcode::Delete as u8 => "Delete",
+        x if x == Opcode::Eq as u8 => "Eq",
+        x if x == Opcode::NotEq as u8 => "NotEq",
+        x if x == Opcode::In as u8 => "In",
         _ => "?",
     }
 }
@@ -122,6 +127,11 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             x if x == Opcode::Not as u8 => format!("  {:04}  Not", line_start),
             x if x == Opcode::BitwiseNot as u8 => format!("  {:04}  BitwiseNot", line_start),
             x if x == Opcode::Typeof as u8 => format!("  {:04}  Typeof", line_start),
+            x if x == Opcode::Instanceof as u8 => format!("  {:04}  Instanceof", line_start),
+            x if x == Opcode::Delete as u8 => format!("  {:04}  Delete", line_start),
+            x if x == Opcode::Eq as u8 => format!("  {:04}  Eq", line_start),
+            x if x == Opcode::NotEq as u8 => format!("  {:04}  NotEq", line_start),
+            x if x == Opcode::In as u8 => format!("  {:04}  In", line_start),
             x if x == Opcode::NewObject as u8 => format!("  {:04}  NewObject", line_start),
             x if x == Opcode::NewObjectWithProto as u8 => {
                 format!("  {:04}  NewObjectWithProto", line_start)

@@ -41,6 +41,7 @@ fn block_bytecode_size(block: &HirBlock, const_start: usize) -> usize {
             | HirOp::BitwiseOr { .. }
             | HirOp::BitwiseXor { .. }
             | HirOp::Instanceof { .. }
+            | HirOp::In { .. }
             | HirOp::Not { .. }
             | HirOp::BitwiseNot { .. }
             | HirOp::Typeof { .. }
@@ -170,6 +171,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 HirOp::BitwiseOr { .. } => code.push(Opcode::BitwiseOr as u8),
                 HirOp::BitwiseXor { .. } => code.push(Opcode::BitwiseXor as u8),
                 HirOp::Instanceof { .. } => code.push(Opcode::Instanceof as u8),
+                HirOp::In { .. } => code.push(Opcode::In as u8),
                 HirOp::Delete { .. } => code.push(Opcode::Delete as u8),
                 HirOp::Not { .. } => code.push(Opcode::Not as u8),
                 HirOp::BitwiseNot { .. } => code.push(Opcode::BitwiseNot as u8),
