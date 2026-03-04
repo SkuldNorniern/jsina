@@ -43,26 +43,55 @@ USAGE:
 
 COMMANDS:
     run      Execute a JavaScript file (default)
+    serve    Serve static files and run JS via /run?file= (default dir: sample/simple_web)
     tokens   Dump tokens from source
     ast      Dump AST
     hir      Dump HIR / Lamina IR
     bc       Dump bytecode
     ir       Alias for hir - dump Lamina IR
-    test262  Run test262 allowlist (debug build only; use --test262-dir for repo path)
+    test262  Run test262 (allowlist or --all; --json for CI; default repo: asset/test262)
+
+OPTIONS (run):
+    --seed N        Seed RNG for deterministic Math.random (M2 replay)
+    --trace-exec    Print each opcode as it executes (debug)
+    --jit           Try JIT for trivial main (numeric only); fallback to interpreter
+    --jit-stats     Print JIT/tiering counters to stderr
 
 EXAMPLES:
     jsina run script.js
+    jsina run --seed 42 script.js
+    jsina serve sample/simple_web
     jsina tokens script.js
     jsina hir script.js
 "#;
 
 pub fn run(args: &[String]) -> Result<(), CliError> {
     let (command, path) = parse_args(args)?;
-    let source = load_source(path)?;
+    let cmd = command.as_deref().unwrap_or("run");
+    let source = if cmd == "test262" || cmd == "serve" || cmd == "help" || cmd == "-h" || cmd == "--help" {
+        String::new()
+    } else {
+        load_source(path)?
+    };
 
-    match command.as_deref().unwrap_or("run") {
+    match cmd {
+        "serve" => {
+            let (serve_dir, port) = parse_serve_opts(args, path)?;
+            crate::serve::serve(&serve_dir, port)?;
+        }
         "run" => {
-            let result = Driver::run(&source)?;
+            let (seed, trace, jit, jit_stats) = parse_run_opts(args);
+            if let Some(s) = seed {
+                crate::runtime::builtins::seed_random(s);
+            }
+            let jit_enabled = jit || jit_stats;
+            let result = if jit_stats {
+                Driver::run_with_host_and_jit_stats(&crate::host::CliHost, &source, trace, jit_enabled)?
+            } else if jit_enabled {
+                Driver::run_with_host(&crate::host::CliHost, &source, trace, true)?
+            } else {
+                Driver::run_with_host(&crate::host::CliHost, &source, trace, false)?
+            };
             println!("{}", result);
         }
         "tokens" => {
@@ -81,22 +110,17 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             println!("{}", bc);
         }
         "test262" => {
-            #[cfg(debug_assertions)]
-            {
-                commands::test262(path)?;
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                return Err(CliError::Usage(
-                    "test262 is only available in debug builds (cargo build); use for CI/dev only".to_string(),
-                ));
-            }
+            let (flag_dir, all, json, limit) = parse_test262_args(args)?;
+            commands::test262(flag_dir.as_deref(), all, json, limit)?;
         }
         "help" | "-h" | "--help" => {
             print!("{}", HELP);
         }
         _ => {
-            return Err(CliError::Usage(format!("unknown command: {}", command.as_deref().unwrap_or(""))));
+            return Err(CliError::Usage(format!(
+                "unknown command: {}",
+                command.as_deref().unwrap_or("")
+            )));
         }
     }
 
@@ -113,13 +137,27 @@ fn parse_args(args: &[String]) -> Result<(Option<String>, Option<&str>), CliErro
         if arg == "-h" || arg == "--help" {
             command = Some("help".to_string());
         } else if arg == "--test262-dir" {
-            i += 1;
-            if i < args.len() {
-                path = Some(args[i].as_str());
-            }
+            i += 2;
+            continue;
+        } else if arg == "--seed" {
+            i += 2;
+            continue;
+        } else if arg == "--trace-exec" || arg == "--jit" || arg == "--jit-stats" {
             i += 1;
             continue;
-        } else if ["run", "tokens", "ast", "hir", "bc", "ir", "test262"].contains(&arg.as_str()) {
+        } else if arg == "--all" {
+            i += 1;
+            continue;
+        } else if arg == "--json" {
+            i += 1;
+            continue;
+        } else if arg == "--limit" {
+            i += 2;
+            continue;
+        } else if arg == "--port" {
+            i += 2;
+            continue;
+        } else if ["run", "serve", "tokens", "ast", "hir", "bc", "ir", "test262"].contains(&arg.as_str()) {
             if command.is_none() {
                 command = Some(arg.clone());
             } else if path.is_none() {
@@ -134,14 +172,97 @@ fn parse_args(args: &[String]) -> Result<(Option<String>, Option<&str>), CliErro
     Ok((command, path))
 }
 
+fn parse_run_opts(args: &[String]) -> (Option<u64>, bool, bool, bool) {
+    let mut seed = None;
+    let mut trace = false;
+    let mut jit = false;
+    let mut jit_stats = false;
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--seed" {
+            i += 1;
+            if i < args.len() {
+                seed = args[i].parse().ok();
+            }
+            i += 1;
+        } else if args[i] == "--trace-exec" {
+            trace = true;
+            i += 1;
+        } else if args[i] == "--jit" {
+            jit = true;
+            i += 1;
+        } else if args[i] == "--jit-stats" {
+            jit_stats = true;
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    (seed, trace, jit, jit_stats)
+}
+
+fn parse_serve_opts(
+    args: &[String],
+    path: Option<&str>,
+) -> Result<(String, Option<u16>), CliError> {
+    let dir = path.unwrap_or("sample/simple_web").to_string();
+    let mut port = None;
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--port" {
+            i += 1;
+            if i < args.len() {
+                port = args[i].parse().ok();
+            }
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    Ok((dir, port))
+}
+
+fn parse_test262_args(
+    args: &[String],
+) -> Result<(Option<String>, bool, bool, Option<usize>), CliError> {
+    let mut test262_dir = None;
+    let mut all = false;
+    let mut json = false;
+    let mut limit = None;
+    let mut i = 1;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "--test262-dir" {
+            i += 1;
+            if i < args.len() {
+                test262_dir = Some(args[i].clone());
+            }
+            i += 1;
+        } else if arg == "--all" {
+            all = true;
+            i += 1;
+        } else if arg == "--json" {
+            json = true;
+            i += 1;
+        } else if arg == "--limit" {
+            i += 1;
+            if i < args.len() {
+                limit = args[i].parse().ok();
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    Ok((test262_dir, all, json, limit))
+}
+
 fn load_source(path: Option<&str>) -> Result<String, CliError> {
     match path {
         Some(p) => {
             let content = fs::read_to_string(Path::new(p))?;
             Ok(content)
         }
-        None => {
-            Ok("function main() { let x = 10; let y = 40; return x + y; }".to_string())
-        }
+        None => Ok("function main() { let x = 10; let y = 40; return x + y; }".to_string()),
     }
 }

@@ -1,7 +1,8 @@
 use crate::cli::CliError;
 use crate::driver::Driver;
+use crate::frontend::ast;
 use crate::frontend::{Expression, Script, Statement, TokenType};
-use crate::test262::{load_allowlist, run_test, TestStatus};
+use crate::test262::{TestStatus, load_allowlist, run_test};
 use std::path::Path;
 
 pub fn tokens(source: &str) {
@@ -168,8 +169,11 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
         Statement::Try(s) => {
             println!("{}[{}] Try", pad, idx);
             print_stmt(0, &s.body, indent + 1);
-            if let (Some(p), Some(c)) = (&s.catch_param, &s.catch_body) {
-                println!("{}  catch ({}):", pad, p);
+            if let Some(c) = &s.catch_body {
+                match &s.catch_param {
+                    Some(p) => println!("{}  catch ({}):", pad, p),
+                    None => println!("{}  catch:", pad),
+                }
                 print_stmt(0, c, indent + 2);
             }
             if let Some(f) = &s.finally_body {
@@ -189,6 +193,7 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
                 }
             }
         }
+        Statement::Empty(_) => {}
     }
 }
 
@@ -248,7 +253,14 @@ fn format_expr(expr: &Expression) -> String {
         ),
         Expression::Unary(e) => format!("({:?} {})", e.op, format_expr(&e.argument)),
         Expression::Call(e) => {
-            let args: Vec<String> = e.args.iter().map(format_expr).collect();
+            let args: Vec<String> = e
+                .args
+                .iter()
+                .map(|a| match a {
+                    crate::frontend::ast::CallArg::Expr(expr) => format_expr(expr),
+                    crate::frontend::ast::CallArg::Spread(expr) => format!("...{}", format_expr(expr)),
+                })
+                .collect();
             format!("{}({})", format_expr(&e.callee), args.join(", "))
         }
         Expression::Assign(e) => format!("{} = {}", format_expr(&e.left), format_expr(&e.right)),
@@ -262,20 +274,31 @@ fn format_expr(expr: &Expression) -> String {
             let props: Vec<String> = e
                 .properties
                 .iter()
-                .map(|property| {
-                    let key = match &property.key {
+                .filter_map(|property| {
+                    let crate::frontend::ast::ObjectPropertyOrSpread::Property(prop) = property else {
+                        return Some("...".to_string());
+                    };
+                    let key = match &prop.key {
                         crate::frontend::ast::ObjectPropertyKey::Static(name) => name.clone(),
                         crate::frontend::ast::ObjectPropertyKey::Computed(expr) => {
                             format!("[{}]", format_expr(expr))
                         }
                     };
-                    format!("{}: {}", key, format_expr(&property.value))
+                    Some(format!("{}: {}", key, format_expr(&prop.value)))
                 })
                 .collect();
             format!("{{{}}}", props.join(", "))
         }
         Expression::ArrayLiteral(e) => {
-            let elems: Vec<String> = e.elements.iter().map(format_expr).collect();
+            let elems: Vec<String> = e
+                .elements
+                .iter()
+                .map(|o| match o {
+                    crate::frontend::ast::ArrayElement::Expr(expr) => format_expr(expr),
+                    crate::frontend::ast::ArrayElement::Hole => String::new(),
+                    crate::frontend::ast::ArrayElement::Spread(expr) => format!("...{}", format_expr(expr)),
+                })
+                .collect();
             format!("[{}]", elems.join(", "))
         }
         Expression::Member(e) => match &e.property {
@@ -298,7 +321,14 @@ fn format_expr(expr: &Expression) -> String {
         Expression::PostfixIncrement(e) => format!("{}++", format_expr(&e.argument)),
         Expression::PostfixDecrement(e) => format!("{}--", format_expr(&e.argument)),
         Expression::New(e) => {
-            let args: Vec<String> = e.args.iter().map(format_expr).collect();
+            let args: Vec<String> = e
+                .args
+                .iter()
+                .map(|a| match a {
+                    crate::frontend::ast::CallArg::Expr(expr) => format_expr(expr),
+                    crate::frontend::ast::CallArg::Spread(expr) => format!("...{}", format_expr(expr)),
+                })
+                .collect();
             format!("new {}({})", format_expr(&e.callee), args.join(", "))
         }
         Expression::ClassExpr(e) => {
@@ -335,40 +365,184 @@ pub fn test262(
             }
         });
 
+    let (test_paths, allowlist_by_path): (Vec<String>, std::collections::HashMap<String, crate::test262::AllowlistEntry>) = if all {
+        let root = test262_root.as_ref().ok_or_else(|| {
+            CliError::Usage(
+                "--all requires test262 root (--test262-dir, TEST262_ROOT, or asset/test262)"
+                    .to_string(),
+            )
+        })?;
+        let paths = crate::test262::scan_test262_tests(root);
+        (paths, std::collections::HashMap::new())
+    } else {
+        let entries = load_allowlist(&allowlist_path);
+        let by_path: std::collections::HashMap<_, _> = entries
+            .iter()
+            .map(|e| (e.test_path.clone(), e.clone()))
+            .collect();
+        let paths = entries.into_iter().map(|e| e.test_path).collect();
+        (paths, by_path)
+    };
+    let mut test_paths = test_paths;
+    if let Some(n) = limit {
+        test_paths.truncate(n);
+    }
+
     let mut pass = 0;
     let mut fail = 0;
+    let mut timeout = 0;
     let mut skip = 0;
+    let mut results: Vec<(String, TestStatus, Option<String>)> = Vec::new();
 
-    for entry in &entries {
-        let test_path = Path::new(&entry.test_path);
+    for test_path_str in &test_paths {
+        let test_path = Path::new(test_path_str);
+        let entry = allowlist_by_path.get(test_path_str);
+        if entry.map(|e| e.reason.as_str()) == Some("known-bug") {
+            skip += 1;
+            if !json_output {
+                println!("SKIP  {}  known-bug", test_path_str);
+            }
+            continue;
+        }
         let result = run_test(test_path, test262_root.as_deref());
-        match result.status {
+        let expected_timeout = entry
+            .map(|e| e.reason == "expected-timeout")
+            .unwrap_or(false);
+        let effective_status = if result.status == TestStatus::Timeout && expected_timeout {
+            TestStatus::Pass
+        } else {
+            result.status
+        };
+        match effective_status {
             TestStatus::Pass => {
                 pass += 1;
-                println!("PASS  {}", result.path);
+                if !json_output {
+                    let suffix = if result.status == TestStatus::Timeout && expected_timeout {
+                        " (expected-timeout)"
+                    } else {
+                        ""
+                    };
+                    println!("PASS  {}{}", result.path, suffix);
+                }
             }
             TestStatus::Fail => {
                 fail += 1;
-                println!("FAIL  {}  {}", result.path, result.message.as_deref().unwrap_or(""));
+                if !json_output {
+                    println!(
+                        "FAIL  {}  {}",
+                        result.path,
+                        result.message.as_deref().unwrap_or("")
+                    );
+                }
+            }
+            TestStatus::Timeout => {
+                timeout += 1;
+                if !json_output {
+                    println!(
+                        "TIMEOUT  {}  {}",
+                        result.path,
+                        result.message.as_deref().unwrap_or("")
+                    );
+                }
             }
             TestStatus::SkipFeature | TestStatus::SkipParse => {
                 skip += 1;
-                println!("SKIP  {}", result.path);
+                if !json_output {
+                    let reason = result.message.as_deref().unwrap_or("(no reason)");
+                    println!("SKIP  {}  [{}]", result.path, reason);
+                }
             }
             TestStatus::HarnessError => {
                 fail += 1;
-                println!("ERROR {}  {}", result.path, result.message.as_deref().unwrap_or(""));
+                if !json_output {
+                    println!(
+                        "ERROR {}  {}",
+                        result.path,
+                        result.message.as_deref().unwrap_or("")
+                    );
+                }
             }
+        }
+        if json_output {
+            results.push((result.path, effective_status, result.message));
         }
     }
 
-    println!(
-        "\ntest262: {} passed, {} failed, {} skipped (allowlist: {})",
-        pass,
-        fail,
-        skip,
-        entries.len()
-    );
+    let total = test_paths.len();
+    let fail_total = fail + skip;
+    let runnable = total - skip;
+    let pass_pct = if total > 0 {
+        (pass as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+    let runnable_pass_pct = if runnable > 0 {
+        (pass as f64 / runnable as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    if json_output {
+        fn escape_json(s: &str) -> String {
+            let mut out = String::with_capacity(s.len() + 2);
+            out.push('"');
+            for c in s.chars() {
+                match c {
+                    '"' => out.push_str("\\\""),
+                    '\\' => out.push_str("\\\\"),
+                    '\n' => out.push_str("\\n"),
+                    '\r' => out.push_str("\\r"),
+                    '\t' => out.push_str("\\t"),
+                    c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+                    c => out.push(c),
+                }
+            }
+            out.push('"');
+            out
+        }
+        let status_str = |s: TestStatus| match s {
+            TestStatus::Pass => "pass",
+            TestStatus::Fail => "fail",
+            TestStatus::Timeout => "timeout",
+            TestStatus::SkipFeature | TestStatus::SkipParse => "skip",
+            TestStatus::HarnessError => "error",
+        };
+        println!("{{");
+        println!("  \"passed\": {},", pass);
+        println!("  \"failed\": {},", fail_total);
+        println!("  \"timeout\": {},", timeout);
+        println!("  \"skipped\": {},", skip);
+        println!("  \"total\": {},", total);
+        println!("  \"pass_pct\": {:.2},", pass_pct);
+        println!("  \"pass_pct_runnable\": {:.2},", runnable_pass_pct);
+        println!("  \"tests\": [");
+        for (i, (path, status, msg)) in results.iter().enumerate() {
+            let comma = if i < results.len() - 1 { "," } else { "" };
+            let status_s = status_str(*status);
+            let msg_part = msg
+                .as_ref()
+                .map(|m| format!(", \"message\": {}", escape_json(m)))
+                .unwrap_or_default();
+            println!(
+                "    {{\"path\": {}, \"status\": \"{}\"{}}}{}",
+                escape_json(path),
+                status_s,
+                msg_part,
+                comma
+            );
+        }
+        println!("  ]");
+        println!("}}");
+    } else {
+        println!(
+            "\ntest262: {} passed, {} failed ({} skipped), {} timeout (total: {})",
+            pass, fail_total, skip, timeout, total
+        );
+        println!(
+            "  pass: {:.2}% of total, {:.2}% of runnable (excluding skip)",
+            pass_pct, runnable_pass_pct
+        );
+    }
 
     if fail > 0 {
         return Err(CliError::Usage(format!("{} test(s) failed", fail)));
