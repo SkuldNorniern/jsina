@@ -1,6 +1,40 @@
 use super::Value;
+use crate::ir::bytecode::BytecodeChunk;
 use crate::runtime::builtins;
 use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GeneratorStatus {
+    NotStarted,
+    Suspended,
+    Completed,
+}
+
+#[derive(Debug, Clone)]
+pub enum PromiseState {
+    Pending,
+    Fulfilled(Value),
+    Rejected(Value),
+}
+
+#[derive(Debug, Clone)]
+pub struct PromiseRecord {
+    pub state: PromiseState,
+    /// Callbacks registered via .then(onFulfilled, onRejected)
+    pub callbacks: Vec<(Value, Value)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GeneratorState {
+    pub chunk: BytecodeChunk,
+    pub is_dynamic: bool,
+    pub dyn_index: usize,
+    pub pc: usize,
+    pub locals: Vec<Value>,
+    pub operand_stack: Vec<Value>,
+    pub status: GeneratorStatus,
+    pub this_value: Value,
+}
 
 fn b(category: &str, name: &str) -> u8 {
     builtins::resolve(category, name).unwrap_or_else(|| panic!("builtin {}::{}", category, name))
@@ -30,6 +64,17 @@ pub struct Heap {
     function_props: HashMap<usize, HashMap<String, Value>>,
     deleted_builtin_props: HashSet<(u8, String)>,
     is_html_dda_object_id: Option<usize>,
+    /// Bytecode chunks for dynamic (closure) functions. Indexed by DynamicFunction id.
+    /// Lives on the heap so DynamicFunction values remain valid across interpreter invocations.
+    pub dynamic_chunks: Vec<BytecodeChunk>,
+    /// Captured slot values for each dynamic function.
+    pub dynamic_captures: Vec<Vec<(u32, Value)>>,
+    /// Named properties for dynamic functions (e.g. `prototype`). Indexed by dynamic function id.
+    dynamic_function_props: Vec<HashMap<String, Value>>,
+    /// Suspended generator states. Indexed by the usize in Value::Generator.
+    pub generator_states: Vec<GeneratorState>,
+    /// Promise records. Indexed by the usize in Value::Promise.
+    pub promises: Vec<PromiseRecord>,
 }
 
 impl Default for Heap {
@@ -49,6 +94,11 @@ impl Default for Heap {
             function_props: HashMap::new(),
             deleted_builtin_props: HashSet::new(),
             is_html_dda_object_id: None,
+            dynamic_chunks: Vec::new(),
+            dynamic_captures: Vec::new(),
+            dynamic_function_props: Vec::new(),
+            generator_states: Vec::new(),
+            promises: Vec::new(),
         };
         heap.init_globals();
         heap
@@ -723,6 +773,13 @@ impl Heap {
         self.set_prop(func_id, "prototype", Value::Object(func_proto_id));
         self.set_prop(func_id, "__call__", Value::Builtin(b("Global", "Function")));
         self.set_prop(global_id, "Function", Value::Object(func_id));
+        let promise_id = self.alloc_object();
+        let promise_proto_id = self.alloc_object();
+        self.set_prop(promise_id, "prototype", Value::Object(promise_proto_id));
+        self.set_prop(promise_id, "resolve", Value::Builtin(b("Promise", "resolve_static")));
+        self.set_prop(promise_id, "reject", Value::Builtin(b("Promise", "reject_static")));
+        self.set_prop(promise_id, "all", Value::Builtin(b("Promise", "all")));
+        self.set_prop(global_id, "Promise", Value::Object(promise_id));
         self.set_prop(global_id, "isNaN", Value::Builtin(b("Global", "isNaN")));
         self.set_prop(
             global_id,
@@ -806,6 +863,52 @@ impl Heap {
             return;
         }
         props.insert(key.to_string(), value);
+    }
+
+    pub fn get_dynamic_function_prop(&self, dyn_idx: usize, key: &str) -> Value {
+        self.dynamic_function_props
+            .get(dyn_idx)
+            .and_then(|m| m.get(key).cloned())
+            .unwrap_or(Value::Undefined)
+    }
+
+    pub fn set_dynamic_function_prop(&mut self, dyn_idx: usize, key: &str, value: Value) {
+        if dyn_idx >= self.dynamic_function_props.len() {
+            self.dynamic_function_props
+                .resize_with(dyn_idx + 1, HashMap::new);
+        }
+        self.dynamic_function_props[dyn_idx].insert(key.to_string(), value);
+    }
+
+    pub fn alloc_generator(&mut self, state: GeneratorState) -> usize {
+        let id = self.generator_states.len();
+        self.generator_states.push(state);
+        id
+    }
+
+    pub fn get_generator(&self, id: usize) -> Option<&GeneratorState> {
+        self.generator_states.get(id)
+    }
+
+    pub fn get_generator_mut(&mut self, id: usize) -> Option<&mut GeneratorState> {
+        self.generator_states.get_mut(id)
+    }
+
+    pub fn alloc_promise(&mut self, state: PromiseState) -> usize {
+        let id = self.promises.len();
+        self.promises.push(PromiseRecord {
+            state,
+            callbacks: Vec::new(),
+        });
+        id
+    }
+
+    pub fn get_promise(&self, id: usize) -> Option<&PromiseRecord> {
+        self.promises.get(id)
+    }
+
+    pub fn get_promise_mut(&mut self, id: usize) -> Option<&mut PromiseRecord> {
+        self.promises.get_mut(id)
     }
 
     pub fn function_has_own_property(&self, func_index: usize, key: &str) -> bool {

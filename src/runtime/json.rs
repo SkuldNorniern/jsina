@@ -345,7 +345,9 @@ pub fn json_stringify(v: &Value, heap: &Heap) -> Option<String> {
         | Value::DynamicFunction(_)
         | Value::Builtin(_)
         | Value::BoundBuiltin(_, _, _)
-        | Value::BoundFunction(_, _, _) => None,
+        | Value::BoundFunction(_, _, _)
+        | Value::Generator(_)
+        | Value::Promise(_) => None,
         Value::Null => Some("null".to_string()),
         Value::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
         Value::Int(n) => Some(n.to_string()),

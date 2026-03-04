@@ -89,6 +89,9 @@ pub(crate) fn execute_builtin(
             args,
             new_object,
         }),
+        Err(builtins::BuiltinError::ResumeGenerator { gen_id, sent_value }) => {
+            Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value })
+        }
     }
 }
 

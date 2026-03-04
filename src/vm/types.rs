@@ -10,6 +10,10 @@ pub(crate) enum BuiltinResult {
         args: Vec<Value>,
         new_object: Option<usize>,
     },
+    ResumeGenerator {
+        gen_id: usize,
+        sent_value: Value,
+    },
 }
 
 #[derive(Debug, Clone)]

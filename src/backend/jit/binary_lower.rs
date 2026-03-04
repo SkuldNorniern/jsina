@@ -206,6 +206,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         }
     }
 
@@ -257,6 +259,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         assert!(bytecode_to_lamina_binary(&chunk).is_none());
     }

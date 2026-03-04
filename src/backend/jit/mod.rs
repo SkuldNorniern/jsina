@@ -35,6 +35,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         let result = jit.try_compile(0, &chunk).expect("compile");
@@ -52,6 +54,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         let result = jit.try_compile(0, &chunk).expect("compile");
@@ -69,6 +73,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         let result = jit.try_compile(0, &chunk).expect("compile");
@@ -86,6 +92,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         let first_result = jit.try_compile(0, &chunk).expect("compile first time");
@@ -107,6 +115,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         let first_result = jit.try_compile(0, &chunk).expect("compile first time");
@@ -128,6 +138,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         assert_eq!(jit.try_compile(0, &div_chunk).expect("compile"), Some(7));
@@ -141,6 +153,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit2 = JitSession::new();
         assert_eq!(jit2.try_compile(0, &mod_chunk).expect("compile"), Some(2));
@@ -157,6 +171,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         assert_eq!(jit.try_compile(0, &chunk).expect("compile"), Some(1024));
@@ -173,6 +189,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         let result = jit.try_compile(0, &chunk).expect("compile");
@@ -192,6 +210,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         let result = jit
@@ -221,6 +241,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let mut jit = JitSession::new();
         let result = jit

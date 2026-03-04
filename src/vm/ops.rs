@@ -128,6 +128,8 @@ fn value_to_prop_key_impl(v: &Value, heap: Option<&crate::runtime::Heap>) -> Str
         | Value::Builtin(_)
         | Value::BoundBuiltin(_, _, _)
         | Value::BoundFunction(_, _, _) => "function".to_string(),
+        Value::Generator(_) => "[object Generator]".to_string(),
+        Value::Promise(_) => "[object Promise]".to_string(),
     }
 }
 
@@ -305,6 +307,8 @@ pub(crate) fn instanceof_check(value: &Value, constructor: &Value, heap: &Heap) 
         (Value::Object(id), _) => {
             let constructor_proto = match constructor {
                 Value::Object(cid) => heap.get_prop(*cid, "prototype"),
+                Value::Function(fidx) => heap.get_function_prop(*fidx, "prototype"),
+                Value::DynamicFunction(didx) => heap.get_dynamic_function_prop(*didx, "prototype"),
                 _ => return false,
             };
             let proto_id = match &constructor_proto {

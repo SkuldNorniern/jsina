@@ -19,6 +19,8 @@ pub struct HirFunction {
     pub entry_block: HirBlockId,
     pub blocks: Vec<HirBlock>,
     pub exception_regions: Vec<ExceptionRegion>,
+    pub is_generator: bool,
+    pub is_async: bool,
 }
 
 pub type HirBlockId = u32;
@@ -184,6 +186,18 @@ pub enum HirOp {
         slot: u32,
         span: Span,
     },
+    Yield {
+        span: Span,
+    },
+    YieldDelegate {
+        span: Span,
+    },
+    MakeGenerator {
+        span: Span,
+    },
+    Await {
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -247,6 +261,8 @@ mod tests {
                 terminator: HirTerminator::Return { span },
             }],
             exception_regions: vec![],
+            is_generator: false,
+            is_async: false,
         };
         assert_eq!(func.blocks.len(), 1);
     }

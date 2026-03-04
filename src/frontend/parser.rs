@@ -5,6 +5,138 @@ use crate::frontend::token_type::{Token, TokenType};
 
 const MAX_RECURSION: u32 = 256;
 
+fn is_keyword_token(tt: &TokenType) -> bool {
+    matches!(
+        tt,
+        TokenType::Break
+            | TokenType::Case
+            | TokenType::Catch
+            | TokenType::Class
+            | TokenType::Const
+            | TokenType::Continue
+            | TokenType::Debugger
+            | TokenType::Default
+            | TokenType::Delete
+            | TokenType::Do
+            | TokenType::Else
+            | TokenType::Export
+            | TokenType::Extends
+            | TokenType::Finally
+            | TokenType::For
+            | TokenType::Function
+            | TokenType::If
+            | TokenType::Import
+            | TokenType::In
+            | TokenType::Instanceof
+            | TokenType::Of
+            | TokenType::Let
+            | TokenType::New
+            | TokenType::Return
+            | TokenType::Super
+            | TokenType::Switch
+            | TokenType::This
+            | TokenType::Throw
+            | TokenType::Try
+            | TokenType::Typeof
+            | TokenType::Var
+            | TokenType::Void
+            | TokenType::While
+            | TokenType::With
+            | TokenType::Yield
+            | TokenType::Async
+            | TokenType::Await
+            | TokenType::Null
+            | TokenType::True
+            | TokenType::False
+    )
+}
+
+fn process_string_escapes(raw: &str) -> String {
+    let mut result = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            result.push(ch);
+            continue;
+        }
+        match chars.next() {
+            None => result.push('\\'),
+            Some('n') => result.push('\n'),
+            Some('r') => result.push('\r'),
+            Some('t') => result.push('\t'),
+            Some('b') => result.push('\x08'),
+            Some('f') => result.push('\x0C'),
+            Some('v') => result.push('\x0B'),
+            Some('0') => {
+                if chars.peek().map_or(false, |c| c.is_ascii_digit()) {
+                    result.push('\\');
+                    result.push('0');
+                } else {
+                    result.push('\0');
+                }
+            }
+            Some('x') => {
+                let h1 = chars.next();
+                let h2 = chars.next();
+                if let (Some(a), Some(b)) = (h1.and_then(|c| c.to_digit(16)), h2.and_then(|c| c.to_digit(16))) {
+                    let code_point = (a << 4) | b;
+                    // SAFETY: code_point is <= 0xFF so always valid
+                    result.push(char::from_u32(code_point).unwrap());
+                } else {
+                    result.push('x');
+                    if let Some(a) = h1 { result.push(a); }
+                    if let Some(b) = h2 { result.push(b); }
+                }
+            }
+            Some('u') => {
+                if chars.peek() == Some(&'{') {
+                    chars.next();
+                    let mut hex = String::new();
+                    for c in chars.by_ref() {
+                        if c == '}' { break; }
+                        hex.push(c);
+                    }
+                    if let Ok(code_point) = u32::from_str_radix(&hex, 16) {
+                        if let Some(c) = char::from_u32(code_point) {
+                            result.push(c);
+                        } else {
+                            result.push_str("\\u{");
+                            result.push_str(&hex);
+                            result.push('}');
+                        }
+                    } else {
+                        result.push_str("\\u{");
+                        result.push_str(&hex);
+                        result.push('}');
+                    }
+                } else {
+                    let digits: String = chars.by_ref().take(4).collect();
+                    if digits.len() == 4 {
+                        if let Ok(code_point) = u32::from_str_radix(&digits, 16) {
+                            if let Some(c) = char::from_u32(code_point) {
+                                result.push(c);
+                            } else {
+                                result.push_str("\\u");
+                                result.push_str(&digits);
+                            }
+                        } else {
+                            result.push_str("\\u");
+                            result.push_str(&digits);
+                        }
+                    } else {
+                        result.push_str("\\u");
+                        result.push_str(&digits);
+                    }
+                }
+            }
+            Some('\n') => {}
+            Some('\r') => { chars.next_if_eq(&'\n'); }
+            Some(c) => result.push(c),
+        }
+    }
+    result
+}
+
 #[derive(Debug)]
 pub struct ParseError {
     pub code: ErrorCode,
@@ -49,6 +181,9 @@ pub struct Parser {
     pos: usize,
     next_id: u32,
     recursion_depth: u32,
+    /// Nesting depth of generator function bodies. Yield is only a keyword when > 0.
+    generator_depth: u32,
+    async_depth: u32,
 }
 
 impl Parser {
@@ -60,6 +195,8 @@ impl Parser {
             pos: 0,
             next_id: 0,
             recursion_depth: 0,
+            generator_depth: 0,
+            async_depth: 0,
         }
     }
 
@@ -69,12 +206,22 @@ impl Parser {
         }
     }
 
+    fn advance_take(&mut self) -> Token {
+        let tok = self.tokens[self.pos].clone();
+        self.advance();
+        tok
+    }
+
     fn peek(&self) -> Option<&TokenType> {
         self.tokens.get(self.pos + 1).map(|t| &t.token_type)
     }
 
     fn current(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
+    }
+
+    fn parse_expression_no_comma(&mut self) -> Result<Expression, ParseError> {
+        self.parse_expression_prec(2)
     }
 
     fn next_id(&mut self) -> NodeId {
@@ -161,6 +308,8 @@ impl Parser {
         let name = match &token.token_type {
             TokenType::Identifier => token.lexeme.clone(),
             TokenType::Yield => "yield".to_string(),
+            TokenType::Async => "async".to_string(),
+            TokenType::Await => "await".to_string(),
             _ => {
                 return Err(ParseError {
                     code: ErrorCode::ParseUnexpectedToken,
@@ -288,6 +437,14 @@ impl Parser {
 
         match &token.token_type {
             TokenType::Function => self.parse_function_decl(),
+            TokenType::Async => {
+                if matches!(self.peek(), Some(TokenType::Function)) {
+                    self.advance();
+                    self.parse_function_decl_with_async(true)
+                } else {
+                    self.parse_expression_statement()
+                }
+            }
             TokenType::Class => self.parse_class_decl(),
             TokenType::Return => self.parse_return(),
             TokenType::Throw => self.parse_throw(),
@@ -348,9 +505,13 @@ impl Parser {
     }
 
     fn parse_function_decl(&mut self) -> Result<Statement, ParseError> {
+        self.parse_function_decl_with_async(false)
+    }
+
+    fn parse_function_decl_with_async(&mut self, is_async: bool) -> Result<Statement, ParseError> {
         let start_span = self.expect(TokenType::Function)?.span;
         let id = self.next_id();
-        self.optional(TokenType::Multiply);
+        let is_generator = self.optional(TokenType::Multiply);
 
         let name_tok = self.expect(TokenType::Identifier)?;
         let name = name_tok.lexeme.clone();
@@ -359,7 +520,19 @@ impl Parser {
         let params = self.parse_params()?;
         self.expect(TokenType::RightParen)?;
 
+        if is_generator {
+            self.generator_depth += 1;
+        }
+        if is_async {
+            self.async_depth += 1;
+        }
         let body = Box::new(self.parse_block()?);
+        if is_async {
+            self.async_depth -= 1;
+        }
+        if is_generator {
+            self.generator_depth -= 1;
+        }
         let span = start_span.merge(body.span());
 
         Ok(Statement::FunctionDecl(FunctionDeclStmt {
@@ -368,6 +541,8 @@ impl Parser {
             name,
             params,
             body,
+            is_generator,
+            is_async,
         }))
     }
 
@@ -445,15 +620,24 @@ impl Parser {
             name: method_name,
             params,
             body,
+            is_generator: false,
+            is_async: false,
         }))
     }
 
     fn parse_function_expr(
         &mut self,
     ) -> Result<crate::frontend::ast::FunctionExprData, ParseError> {
+        self.parse_function_expr_with_async(false)
+    }
+
+    fn parse_function_expr_with_async(
+        &mut self,
+        is_async: bool,
+    ) -> Result<crate::frontend::ast::FunctionExprData, ParseError> {
         let start_span = self.expect(TokenType::Function)?.span;
         let id = self.next_id();
-        self.optional(TokenType::Multiply);
+        let is_generator = self.optional(TokenType::Multiply);
         let name = if matches!(
             self.current().map(|t| &t.token_type),
             Some(TokenType::Identifier)
@@ -465,7 +649,19 @@ impl Parser {
         self.expect(TokenType::LeftParen)?;
         let params = self.parse_params()?;
         self.expect(TokenType::RightParen)?;
+        if is_generator {
+            self.generator_depth += 1;
+        }
+        if is_async {
+            self.async_depth += 1;
+        }
         let body = Box::new(self.parse_block()?);
+        if is_async {
+            self.async_depth -= 1;
+        }
+        if is_generator {
+            self.generator_depth -= 1;
+        }
         let span = start_span.merge(body.span());
         Ok(crate::frontend::ast::FunctionExprData {
             id,
@@ -473,45 +669,182 @@ impl Parser {
             name,
             params,
             body,
+            is_generator,
+            is_async,
         })
     }
 
-    fn parse_class_expr(&mut self) -> Result<crate::frontend::ast::ClassExprData, ParseError> {
+    fn parse_class_body(&mut self) -> Result<ClassBody, ParseError> {
+        use crate::frontend::ast::{ClassBody, ClassMember, ClassMemberKey, ClassMemberKind};
+        let start_span = self.expect(TokenType::LeftBrace)?.span;
+        let mut members = Vec::new();
+        while !matches!(
+            self.current().map(|t| &t.token_type),
+            Some(TokenType::RightBrace) | None
+        ) {
+            if self.optional(TokenType::Semicolon) {
+                continue;
+            }
+            let member_span_start = self
+                .current()
+                .map(|t| t.span)
+                .unwrap_or(start_span);
+
+            let is_static = matches!(
+                self.current().map(|t| &t.token_type),
+                Some(TokenType::Identifier)
+            ) && self.current().map(|t| t.lexeme.as_str()) == Some("static")
+              && !matches!(
+                self.peek(),
+                Some(TokenType::LeftParen) | Some(TokenType::Semicolon) | Some(TokenType::RightBrace) | None
+            );
+            if is_static {
+                self.advance();
+            }
+
+            let is_get = matches!(
+                self.current().map(|t| &t.token_type),
+                Some(TokenType::Identifier)
+            ) && self.current().map(|t| t.lexeme.as_str()) == Some("get")
+              && !matches!(self.peek(), Some(TokenType::LeftParen));
+            let is_set = matches!(
+                self.current().map(|t| &t.token_type),
+                Some(TokenType::Identifier)
+            ) && self.current().map(|t| t.lexeme.as_str()) == Some("set")
+              && !matches!(self.peek(), Some(TokenType::LeftParen));
+
+            if is_get || is_set {
+                self.advance();
+            }
+
+            let key = if matches!(
+                self.current().map(|t| &t.token_type),
+                Some(TokenType::LeftBracket)
+            ) {
+                self.advance();
+                let expr = self.parse_expression()?;
+                self.expect(TokenType::RightBracket)?;
+                ClassMemberKey::Computed(Box::new(expr))
+            } else {
+                let name = self.parse_property_key_name()?;
+                ClassMemberKey::Ident(name)
+            };
+
+            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftParen)) {
+                self.expect(TokenType::LeftParen)?;
+                let params = self.parse_params()?;
+                self.expect(TokenType::RightParen)?;
+                let body = self.parse_block()?;
+                let fe_span = member_span_start.merge(body.span());
+                let fe_id = self.next_id();
+                let fe = FunctionExprData {
+                    id: fe_id,
+                    span: fe_span,
+                    name: None,
+                    params,
+                    body: Box::new(body),
+                    is_generator: false,
+                    is_async: false,
+                };
+                let kind = if is_get {
+                    ClassMemberKind::Get(fe)
+                } else if is_set {
+                    ClassMemberKind::Set(fe)
+                } else {
+                    ClassMemberKind::Method(fe)
+                };
+                let member_span = member_span_start.merge(fe_span);
+                members.push(ClassMember { span: member_span, key, kind, is_static });
+            } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Assign)) {
+                self.advance();
+                let init = self.parse_expression()?;
+                self.optional(TokenType::Semicolon);
+                let member_span = member_span_start.merge(init.span());
+                members.push(ClassMember {
+                    span: member_span,
+                    key,
+                    kind: ClassMemberKind::Field(Some(Box::new(init))),
+                    is_static,
+                });
+            } else {
+                self.optional(TokenType::Semicolon);
+                members.push(ClassMember {
+                    span: member_span_start,
+                    key,
+                    kind: ClassMemberKind::Field(None),
+                    is_static,
+                });
+            }
+        }
+        let end_span = self
+            .expect(TokenType::RightBrace)?
+            .span;
+        let body_span = start_span.merge(end_span);
+        Ok(ClassBody { span: body_span, members })
+    }
+
+    fn parse_property_key_name(&mut self) -> Result<String, ParseError> {
+        match self.current().map(|t| t.token_type.clone()) {
+            Some(TokenType::Identifier)
+            | Some(TokenType::String)
+            | Some(TokenType::Number) => Ok(self.advance_take().lexeme),
+            Some(ref tt) if is_keyword_token(tt) => Ok(self.advance_take().lexeme),
+            _ => Err(ParseError {
+                code: ErrorCode::ParseUnexpectedToken,
+                message: format!(
+                    "expected property name, got {:?}",
+                    self.current().map(|t| &t.token_type)
+                ),
+                span: self.current().map(|t| t.span),
+            }),
+        }
+    }
+
+    fn parse_class_inner(
+        &mut self,
+        require_name: bool,
+    ) -> Result<(Option<String>, Option<Box<Expression>>, ClassBody, Span), ParseError> {
         let start_span = self.expect(TokenType::Class)?.span;
-        let id = self.next_id();
         let name = if matches!(
             self.current().map(|t| &t.token_type),
             Some(TokenType::Identifier)
         ) {
-            Some(self.expect(TokenType::Identifier)?.lexeme)
+            Some(self.advance_take().lexeme)
+        } else if require_name {
+            return Err(ParseError {
+                code: ErrorCode::ParseUnexpectedToken,
+                message: "class declaration requires a name".to_string(),
+                span: self.current().map(|t| t.span),
+            });
         } else {
             None
         };
-        if self.optional(TokenType::Extends) {
-            self.skip_until_class_body_brace()?;
+        let superclass = if self.optional(TokenType::Extends) {
+            Some(Box::new(self.parse_expression_no_comma()?))
         } else {
-            self.expect(TokenType::LeftBrace)?;
-        }
-        let end_span = self.skip_balanced_braces()?;
-        let span = start_span.merge(end_span);
-        Ok(crate::frontend::ast::ClassExprData { id, span, name })
+            None
+        };
+        let body = self.parse_class_body()?;
+        let span = start_span.merge(body.span);
+        Ok((name, superclass, body, span))
+    }
+
+    fn parse_class_expr(&mut self) -> Result<crate::frontend::ast::ClassExprData, ParseError> {
+        let (name, superclass, body, span) = self.parse_class_inner(false)?;
+        let id = self.next_id();
+        Ok(crate::frontend::ast::ClassExprData { id, span, name, superclass, body })
     }
 
     fn parse_class_decl(&mut self) -> Result<Statement, ParseError> {
-        let start_span = self.expect(TokenType::Class)?.span;
+        let (name, superclass, body, span) = self.parse_class_inner(true)?;
+        let name = name.unwrap();
         let id = self.next_id();
-        let name = self.expect(TokenType::Identifier)?.lexeme;
-        if self.optional(TokenType::Extends) {
-            self.skip_until_class_body_brace()?;
-        } else {
-            self.expect(TokenType::LeftBrace)?;
-        }
-        let end_span = self.skip_balanced_braces()?;
-        let span = start_span.merge(end_span);
         Ok(Statement::ClassDecl(crate::frontend::ast::ClassDeclStmt {
             id,
             span,
             name,
+            superclass,
+            body,
         }))
     }
 
@@ -629,6 +962,86 @@ impl Parser {
         ))
     }
 
+    fn try_parse_async_arrow_function(
+        &mut self,
+        async_span: Span,
+    ) -> Result<Option<(Expression, Span)>, ParseError> {
+        let saved_pos = self.pos;
+        self.advance();
+
+        let mut params = Vec::new();
+        let is_arrow = if matches!(
+            self.current().map(|t| &t.token_type),
+            Some(TokenType::RightParen)
+        ) {
+            self.advance();
+            matches!(
+                self.current().map(|t| &t.token_type),
+                Some(TokenType::Arrow)
+            )
+        } else {
+            let mut looks_like_params = true;
+            loop {
+                let is_rest = self.optional(TokenType::Spread);
+                if !matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::Identifier)
+                ) {
+                    looks_like_params = false;
+                    break;
+                }
+                let name = self.expect(TokenType::Identifier)?.lexeme;
+                let param = if is_rest {
+                    Param::Rest(name)
+                } else if self.optional(TokenType::Assign) {
+                    Param::Default(name, Box::new(self.parse_expression()?))
+                } else {
+                    Param::Ident(name)
+                };
+                params.push(param);
+
+                if is_rest {
+                    break;
+                }
+                if matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::RightParen)
+                ) {
+                    break;
+                }
+                if !self.optional(TokenType::Comma) {
+                    looks_like_params = false;
+                    break;
+                }
+            }
+            if looks_like_params
+                && matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::RightParen)
+                )
+            {
+                self.advance();
+                matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::Arrow)
+                )
+            } else {
+                false
+            }
+        };
+
+        if is_arrow {
+            self.advance();
+            self.async_depth += 1;
+            let (expr, span) = self.parse_arrow_body(async_span, params)?;
+            self.async_depth -= 1;
+            return Ok(Some((expr, span)));
+        }
+
+        self.pos = saved_pos;
+        Ok(None)
+    }
+
     fn parse_template_literal(&mut self, raw: &str, span: Span) -> Result<Expression, ParseError> {
         let inner = raw
             .strip_prefix('`')
@@ -641,19 +1054,79 @@ impl Parser {
 
         while let Some(ch) = chars.next() {
             if ch == '\\' {
-                if let Some(escaped) = chars.next() {
-                    match escaped {
-                        'n' => text_buf.push('\n'),
-                        't' => text_buf.push('\t'),
-                        'r' => text_buf.push('\r'),
-                        '`' => text_buf.push('`'),
-                        '$' => text_buf.push('$'),
-                        '\\' => text_buf.push('\\'),
-                        _ => {
+                match chars.next() {
+                    None => text_buf.push('\\'),
+                    Some('n') => text_buf.push('\n'),
+                    Some('r') => text_buf.push('\r'),
+                    Some('t') => text_buf.push('\t'),
+                    Some('b') => text_buf.push('\x08'),
+                    Some('f') => text_buf.push('\x0C'),
+                    Some('v') => text_buf.push('\x0B'),
+                    Some('0') => {
+                        if chars.peek().map_or(false, |c| c.is_ascii_digit()) {
                             text_buf.push('\\');
-                            text_buf.push(escaped);
+                            text_buf.push('0');
+                        } else {
+                            text_buf.push('\0');
                         }
                     }
+                    Some('x') => {
+                        let h1 = chars.next();
+                        let h2 = chars.next();
+                        if let (Some(a), Some(b)) = (h1.and_then(|c| c.to_digit(16)), h2.and_then(|c| c.to_digit(16))) {
+                            let cp = (a << 4) | b;
+                            // SAFETY: cp is <= 0xFF, always a valid Unicode scalar
+                            text_buf.push(char::from_u32(cp).unwrap());
+                        } else {
+                            text_buf.push('x');
+                            if let Some(a) = h1 { text_buf.push(a); }
+                            if let Some(b) = h2 { text_buf.push(b); }
+                        }
+                    }
+                    Some('u') => {
+                        if chars.peek() == Some(&'{') {
+                            chars.next();
+                            let mut hex = String::new();
+                            for c in chars.by_ref() {
+                                if c == '}' { break; }
+                                hex.push(c);
+                            }
+                            if let Ok(cp) = u32::from_str_radix(&hex, 16) {
+                                if let Some(c) = char::from_u32(cp) {
+                                    text_buf.push(c);
+                                } else {
+                                    text_buf.push_str("\\u{");
+                                    text_buf.push_str(&hex);
+                                    text_buf.push('}');
+                                }
+                            } else {
+                                text_buf.push_str("\\u{");
+                                text_buf.push_str(&hex);
+                                text_buf.push('}');
+                            }
+                        } else {
+                            let digits: String = chars.by_ref().take(4).collect();
+                            if digits.len() == 4 {
+                                if let Ok(cp) = u32::from_str_radix(&digits, 16) {
+                                    if let Some(c) = char::from_u32(cp) {
+                                        text_buf.push(c);
+                                    } else {
+                                        text_buf.push_str("\\u");
+                                        text_buf.push_str(&digits);
+                                    }
+                                } else {
+                                    text_buf.push_str("\\u");
+                                    text_buf.push_str(&digits);
+                                }
+                            } else {
+                                text_buf.push_str("\\u");
+                                text_buf.push_str(&digits);
+                            }
+                        }
+                    }
+                    Some('\n') => {}
+                    Some('\r') => { chars.next_if_eq(&'\n'); }
+                    Some(c) => text_buf.push(c),
                 }
             } else if ch == '$' && chars.peek() == Some(&'{') {
                 chars.next();
@@ -1500,7 +1973,7 @@ impl Parser {
                     };
                     (target, false, default_init)
                 } else {
-                    if !matches!(key_tok.token_type, TokenType::Identifier | TokenType::Yield) {
+                    if !matches!(key_tok.token_type, TokenType::Identifier | TokenType::Yield | TokenType::Async | TokenType::Await) {
                         return Err(ParseError {
                             code: ErrorCode::ParseUnexpectedToken,
                             message: "object binding shorthand must be an identifier".to_string(),
@@ -1571,7 +2044,7 @@ impl Parser {
                 }
                 let binding = if matches!(
                     self.current().map(|t| &t.token_type),
-                    Some(TokenType::Identifier) | Some(TokenType::Yield)
+                    Some(TokenType::Identifier) | Some(TokenType::Yield) | Some(TokenType::Async) | Some(TokenType::Await)
                 ) {
                     let (name, _) = self.expect_binding_identifier()?;
                     Some(name)
@@ -2383,12 +2856,12 @@ impl Parser {
                 let span = token.span;
                 self.advance();
                 let s = token.lexeme;
-                let s = s
+                let raw = s
                     .strip_prefix('"')
                     .and_then(|s| s.strip_suffix('"'))
                     .or_else(|| s.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
-                    .unwrap_or(&s)
-                    .to_string();
+                    .unwrap_or(&s);
+                let s = process_string_escapes(raw);
                 (
                     Expression::Literal(LiteralExpr {
                         id: self.next_id(),
@@ -2467,6 +2940,17 @@ impl Parser {
                     span,
                 )
             }
+            TokenType::Super => {
+                let span = token.span;
+                self.advance();
+                (
+                    Expression::Super(SuperExpr {
+                        id: self.next_id(),
+                        span,
+                    }),
+                    span,
+                )
+            }
             TokenType::Identifier => {
                 let span = token.span;
                 let name = token.lexeme.clone();
@@ -2490,16 +2974,109 @@ impl Parser {
                 )
             }
             TokenType::Yield => {
-                let span = token.span;
+                let start_span = token.span;
+                if self.generator_depth == 0 {
+                    self.advance();
+                    (
+                        Expression::Identifier(IdentifierExpr {
+                            id: self.next_id(),
+                            span: start_span,
+                            name: "yield".to_string(),
+                        }),
+                        start_span,
+                    )
+                } else {
+                    self.advance();
+                    let next_tt = self.current().map(|t| &t.token_type);
+                    let (argument, delegate, span) =
+                        if matches!(next_tt, Some(TokenType::Semicolon) | Some(TokenType::RightBrace) | Some(TokenType::RightParen) | Some(TokenType::RightBracket) | Some(TokenType::Comma) | Some(TokenType::Eof) | None) {
+                            (None, false, start_span)
+                        } else {
+                            let delegate = self.optional(TokenType::Multiply);
+                            let arg = self.parse_expression_prec(1)?;
+                            let span = start_span.merge(arg.span());
+                            (Some(Box::new(arg)), delegate, span)
+                        };
+                    (
+                        Expression::Yield(crate::frontend::ast::YieldExpr {
+                            id: self.next_id(),
+                            span,
+                            argument,
+                            delegate,
+                        }),
+                        span,
+                    )
+                }
+            }
+            TokenType::Await => {
+                if self.async_depth == 0 {
+                    let name = token.lexeme.clone();
+                    self.advance();
+                    (
+                        Expression::Identifier(IdentifierExpr {
+                            id: self.next_id(),
+                            span: token.span,
+                            name,
+                        }),
+                        token.span,
+                    )
+                } else {
+                    let start_span = token.span;
+                    self.advance();
+                    let arg = self.parse_unary()?;
+                    let span = start_span.merge(arg.span());
+                    (
+                        Expression::Await(crate::frontend::ast::AwaitExpr {
+                            id: self.next_id(),
+                            span,
+                            argument: Box::new(arg),
+                        }),
+                        span,
+                    )
+                }
+            }
+            TokenType::Async => {
+                let start_span = token.span;
                 self.advance();
-                (
-                    Expression::Identifier(IdentifierExpr {
+                if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Function)) {
+                    let fe = self.parse_function_expr_with_async(true)?;
+                    let sp = fe.span;
+                    (Expression::FunctionExpr(fe), sp)
+                } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftParen)) {
+                    if let Some((arrow_expr, span)) = self.try_parse_async_arrow_function(start_span)? {
+                        return Ok(arrow_expr);
+                    }
+                    return Err(ParseError {
+                        code: ErrorCode::ParseUnexpectedTokenInExpr,
+                        message: "expected arrow function after async".to_string(),
+                        span: Some(start_span),
+                    });
+                } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
+                    let name_tok = self.expect(TokenType::Identifier)?;
+                    let arrow_tok = self.expect(TokenType::Arrow)?;
+                    let body = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftBrace)) {
+                        crate::frontend::ast::ArrowBody::Block(Box::new(self.parse_block()?))
+                    } else {
+                        crate::frontend::ast::ArrowBody::Expression(Box::new(self.parse_expression_prec(1)?))
+                    };
+                    let span = start_span.merge(match &body {
+                        crate::frontend::ast::ArrowBody::Expression(e) => e.span(),
+                        crate::frontend::ast::ArrowBody::Block(s) => s.span(),
+                    });
+                    (Expression::ArrowFunction(crate::frontend::ast::ArrowFunctionExpr {
                         id: self.next_id(),
                         span,
-                        name: "yield".to_string(),
-                    }),
-                    span,
-                )
+                        params: vec![crate::frontend::ast::Param::Ident(name_tok.lexeme)],
+                        body,
+                    }), span)
+                } else {
+                    let span = start_span;
+                    (Expression::Identifier(IdentifierExpr {
+                        id: self.next_id(),
+                        span,
+                        name: "async".to_string(),
+                    }), span)
+                }
             }
             TokenType::LeftParen => {
                 let start_span = token.span;
@@ -4295,5 +4872,33 @@ mod tests {
             }
         }
         panic!("expected object literal with shorthand and computed keys");
+    }
+
+    #[test]
+    fn string_escape_newline_tab() {
+        assert_eq!(process_string_escapes("\\n"), "\n");
+        assert_eq!(process_string_escapes("\\t"), "\t");
+        assert_eq!(process_string_escapes("\\r"), "\r");
+        assert_eq!(process_string_escapes("\\\\"), "\\");
+    }
+
+    #[test]
+    fn string_escape_hex() {
+        assert_eq!(process_string_escapes("\\x00"), "\x00");
+        assert_eq!(process_string_escapes("\\x41"), "A");
+        assert_eq!(process_string_escapes("\\xFF"), "\u{FF}");
+    }
+
+    #[test]
+    fn string_escape_unicode() {
+        assert_eq!(process_string_escapes("\\u0041"), "A");
+        assert_eq!(process_string_escapes("\\u{1F600}"), "\u{1F600}");
+        assert_eq!(process_string_escapes("\\u{0}"), "\u{0}");
+    }
+
+    #[test]
+    fn string_escape_null() {
+        assert_eq!(process_string_escapes("\\0"), "\0");
+        assert_eq!(process_string_escapes("\\0a"), "\0a");
     }
 }

@@ -157,8 +157,37 @@ pub(crate) fn resolve_get_prop(
                 function_prototype_prop(key)
             }
         }
-        Value::DynamicFunction(_) => function_prototype_prop(key),
+        Value::DynamicFunction(dyn_idx) => {
+            let own = heap.get_dynamic_function_prop(*dyn_idx, key);
+            if own != Value::Undefined {
+                own
+            } else {
+                function_prototype_prop(key)
+            }
+        }
         Value::Builtin(id) => builtin_prop(*id, key, heap),
+        Value::Generator(gen_id) => generator_prop(*gen_id, key),
+        Value::Promise(promise_id) => promise_prop(*promise_id, key),
+        _ => Value::Undefined,
+    }
+}
+
+fn generator_prop(gen_id: usize, key: &str) -> Value {
+    let gen_val = Box::new(Value::Generator(gen_id));
+    match key {
+        "next" => Value::BoundBuiltin(b("Generator", "next"), gen_val, false),
+        "return" => Value::BoundBuiltin(b("Generator", "return"), gen_val, false),
+        "throw" => Value::BoundBuiltin(b("Generator", "throw"), gen_val, false),
+        _ => Value::Undefined,
+    }
+}
+
+fn promise_prop(promise_id: usize, key: &str) -> Value {
+    let id_val = Box::new(Value::Int(promise_id as i32));
+    match key {
+        "then" => Value::BoundBuiltin(b("Promise", "then"), id_val, false),
+        "catch" => Value::BoundBuiltin(b("Promise", "catch"), id_val, false),
+        "finally" => Value::BoundBuiltin(b("Promise", "finally"), id_val, false),
         _ => Value::Undefined,
     }
 }

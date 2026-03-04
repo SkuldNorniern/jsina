@@ -44,6 +44,10 @@ pub fn opcode_name(op: u8) -> &'static str {
         x if x == Opcode::NewMethod as u8 => "NewMethod",
         x if x == Opcode::Throw as u8 => "Throw",
         x if x == Opcode::Rethrow as u8 => "Rethrow",
+        x if x == Opcode::Yield as u8 => "Yield",
+        x if x == Opcode::YieldDelegate as u8 => "YieldDelegate",
+        x if x == Opcode::MakeGenerator as u8 => "MakeGenerator",
+        x if x == Opcode::Await as u8 => "Await",
         x if x == Opcode::JumpIfFalse as u8 => "JumpIfFalse",
         x if x == Opcode::JumpIfNullish as u8 => "JumpIfNullish",
         x if x == Opcode::Jump as u8 => "Jump",
@@ -231,6 +235,10 @@ pub fn disassemble(chunk: &BytecodeChunk) -> String {
             }
             x if x == Opcode::Return as u8 => format!("  {:04}  Return", line_start),
             x if x == Opcode::Throw as u8 => format!("  {:04}  Throw", line_start),
+            x if x == Opcode::Yield as u8 => format!("  {:04}  Yield", line_start),
+            x if x == Opcode::YieldDelegate as u8 => format!("  {:04}  YieldDelegate", line_start),
+            x if x == Opcode::MakeGenerator as u8 => format!("  {:04}  MakeGenerator", line_start),
+            x if x == Opcode::Await as u8 => format!("  {:04}  Await", line_start),
             x if x == Opcode::Rethrow as u8 => {
                 let slot = code.get(pc).copied().unwrap_or(0);
                 pc += 1;
@@ -274,6 +282,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let s = disassemble(&chunk);
         assert!(s.contains("PushConst"));

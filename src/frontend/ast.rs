@@ -54,6 +54,36 @@ pub struct ClassDeclStmt {
     pub id: NodeId,
     pub span: Span,
     pub name: String,
+    pub superclass: Option<Box<Expression>>,
+    pub body: ClassBody,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassBody {
+    pub span: Span,
+    pub members: Vec<ClassMember>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassMember {
+    pub span: Span,
+    pub key: ClassMemberKey,
+    pub kind: ClassMemberKind,
+    pub is_static: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum ClassMemberKey {
+    Ident(String),
+    Computed(Box<Expression>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ClassMemberKind {
+    Method(FunctionExprData),
+    Get(FunctionExprData),
+    Set(FunctionExprData),
+    Field(Option<Box<Expression>>),
 }
 
 #[derive(Debug, Clone)]
@@ -272,6 +302,8 @@ pub struct FunctionDeclStmt {
     pub name: String,
     pub params: Vec<Param>,
     pub body: Box<Statement>,
+    pub is_generator: bool,
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -338,6 +370,30 @@ pub enum Expression {
     New(NewExpr),
     ClassExpr(ClassExprData),
     LogicalAssign(LogicalAssignExpr),
+    Super(SuperExpr),
+    Yield(YieldExpr),
+    Await(AwaitExpr),
+}
+
+#[derive(Debug, Clone)]
+pub struct SuperExpr {
+    pub id: NodeId,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct YieldExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub argument: Option<Box<Expression>>,
+    pub delegate: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AwaitExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub argument: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
@@ -345,6 +401,8 @@ pub struct ClassExprData {
     pub id: NodeId,
     pub span: Span,
     pub name: Option<String>,
+    pub superclass: Option<Box<Expression>>,
+    pub body: ClassBody,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +427,8 @@ pub struct FunctionExprData {
     pub name: Option<String>,
     pub params: Vec<Param>,
     pub body: Box<Statement>,
+    pub is_generator: bool,
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -633,6 +693,9 @@ impl Expression {
             Expression::New(e) => e.span,
             Expression::ClassExpr(e) => e.span,
             Expression::LogicalAssign(e) => e.span,
+            Expression::Super(e) => e.span,
+            Expression::Yield(e) => e.span,
+            Expression::Await(e) => e.span,
         }
     }
 }

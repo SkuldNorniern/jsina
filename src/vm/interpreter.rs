@@ -24,6 +24,10 @@ struct Frame {
     this_value: Value,
     rethrow_after_finally: bool,
     new_object: Option<usize>,
+    /// Set when this frame is executing a generator body. Index into heap.generator_states.
+    generator_id: Option<usize>,
+    /// Whether this frame is executing an async function body.
+    is_async: bool,
 }
 
 /// Mutable execution state for one run. Shared boundary for interpreter and (future) JIT:
@@ -31,8 +35,6 @@ struct Frame {
 struct RunState<'a> {
     stack: Vec<Value>,
     frames: Vec<Frame>,
-    dynamic_chunks: Vec<BytecodeChunk>,
-    dynamic_captures: Vec<Vec<(u32, Value)>>,
     chunks_stack: Vec<BytecodeChunk>,
     getprop_cache: GetPropCache,
     tiering: JitTiering,
@@ -252,6 +254,22 @@ pub fn interpret_program_with_heap_and_entry(
     let num_locals = entry_chunk.num_locals as usize;
     let mut stack = Vec::with_capacity(512);
     stack.extend(std::iter::repeat(Value::Undefined).take(num_locals));
+    // Top-level entry functions (like `main`) may reference user-defined globals
+    // (e.g. class declarations stored in globalThis by __init__) via capture slots
+    // that are never filled by the normal DynamicFunction mechanism because the
+    // driver invokes them directly by chunk index. Seed those slots from globalThis.
+    for cap_name in &entry_chunk.captured_names {
+        if let Some(&slot) = entry_chunk
+            .named_locals
+            .iter()
+            .find_map(|(n, s)| (n == cap_name).then_some(s))
+        {
+            let val = heap.get_global(cap_name);
+            if !matches!(val, Value::Undefined) && (slot as usize) < num_locals {
+                stack[slot as usize] = val;
+            }
+        }
+    }
     let mut state = RunState {
         stack,
         frames: vec![Frame {
@@ -263,9 +281,9 @@ pub fn interpret_program_with_heap_and_entry(
             this_value: Value::Undefined,
             rethrow_after_finally: false,
             new_object: None,
+            generator_id: None,
+            is_async: entry_chunk.is_async,
         }],
-        dynamic_chunks: Vec::new(),
-        dynamic_captures: Vec::new(),
         chunks_stack: Vec::new(),
         getprop_cache: GetPropCache::new(),
         tiering: JitTiering::new(
@@ -401,12 +419,12 @@ pub fn interpret_program_with_heap_and_entry(
                                     captured_slots.push((inner_slot, captured_value));
                                 }
                             }
-                            let dynamic_index = state.dynamic_chunks.len();
-                            state.dynamic_chunks.push(callee_chunk.clone());
-                            if state.dynamic_captures.len() <= dynamic_index {
-                                state.dynamic_captures.resize(dynamic_index + 1, Vec::new());
+                            let dynamic_index = heap.dynamic_chunks.len();
+                            heap.dynamic_chunks.push(callee_chunk.clone());
+                            if heap.dynamic_captures.len() <= dynamic_index {
+                                heap.dynamic_captures.resize(dynamic_index + 1, Vec::new());
                             }
-                            state.dynamic_captures[dynamic_index] = captured_slots;
+                            heap.dynamic_captures[dynamic_index] = captured_slots;
                             Value::DynamicFunction(dynamic_index)
                         }
                     }
@@ -457,12 +475,12 @@ pub fn interpret_program_with_heap_and_entry(
                                     captured_slots.push((inner_slot, captured_value));
                                 }
                             }
-                            let dynamic_index = state.dynamic_chunks.len();
-                            state.dynamic_chunks.push(callee_chunk.clone());
-                            if state.dynamic_captures.len() <= dynamic_index {
-                                state.dynamic_captures.resize(dynamic_index + 1, Vec::new());
+                            let dynamic_index = heap.dynamic_chunks.len();
+                            heap.dynamic_chunks.push(callee_chunk.clone());
+                            if heap.dynamic_captures.len() <= dynamic_index {
+                                heap.dynamic_captures.resize(dynamic_index + 1, Vec::new());
                             }
-                            state.dynamic_captures[dynamic_index] = captured_slots;
+                            heap.dynamic_captures[dynamic_index] = captured_slots;
                             Value::DynamicFunction(dynamic_index)
                         }
                     }
@@ -639,6 +657,7 @@ pub fn interpret_program_with_heap_and_entry(
                     | Value::Builtin(_)
                     | Value::BoundBuiltin(_, _, _)
                     | Value::BoundFunction(_, _, _) => "function",
+                    Value::Generator(_) | Value::Promise(_) => "object",
                 };
                 state.stack.push(Value::String(s.to_string()));
             }
@@ -740,7 +759,21 @@ pub fn interpret_program_with_heap_and_entry(
                     }
                 }
                 let result = if let Some(ref f) = popped {
-                    if let Some(obj_id) = f.new_object {
+                    if let Some(gen_id) = f.generator_id {
+                        // Generator function body completed: return {value, done: true}
+                        if let Some(gs) = heap.get_generator_mut(gen_id) {
+                            gs.status = crate::runtime::GeneratorStatus::Completed;
+                        }
+                        let obj_id = heap.alloc_object();
+                        heap.set_prop(obj_id, "value", val);
+                        heap.set_prop(obj_id, "done", Value::Bool(true));
+                        Value::Object(obj_id)
+                    } else if f.is_async {
+                        // Async function body completed: wrap return value in a fulfilled Promise
+                        let promise_id =
+                            heap.alloc_promise(crate::runtime::PromiseState::Fulfilled(val));
+                        Value::Promise(promise_id)
+                    } else if let Some(obj_id) = f.new_object {
                         if matches!(val, Value::Object(_)) {
                             val
                         } else {
@@ -897,6 +930,13 @@ pub fn interpret_program_with_heap_and_entry(
                     .ok_or(VmError::InvalidConstIndex(func_idx))?;
                 let args = pop_args(&mut state.stack, argc)?;
 
+                if callee.is_generator {
+                    let gen_id = create_generator_state_static(heap, callee, func_idx, &args, Value::Undefined);
+                    state.stack.push(Value::Generator(gen_id));
+                    state.frames[frame_idx].pc = pc;
+                    continue;
+                }
+
                 if let Some(value) =
                     state
                         .tiering
@@ -907,6 +947,7 @@ pub fn interpret_program_with_heap_and_entry(
                     continue;
                 }
 
+                let chunk_is_async = callee.is_async;
                 let callee_locals = setup_callee_locals(callee, &args, heap);
                 let num_locals = callee_locals.len();
                 let stack_base = state.stack.len();
@@ -920,6 +961,8 @@ pub fn interpret_program_with_heap_and_entry(
                     this_value: Value::Undefined,
                     rethrow_after_finally: false,
                     new_object: None,
+                    generator_id: None,
+                    is_async: chunk_is_async,
                 });
             }
 
@@ -931,7 +974,6 @@ pub fn interpret_program_with_heap_and_entry(
                 let call_pc = trace_pc;
                 let mut ctx = builtins::BuiltinContext {
                     heap,
-                    dynamic_chunks: &mut state.dynamic_chunks,
                 };
                 match execute_builtin(builtin_id, argc, &mut state.stack, &mut ctx) {
                     Ok(BuiltinResult::Push(v)) => {
@@ -965,6 +1007,11 @@ pub fn interpret_program_with_heap_and_entry(
                             new_object,
                         )? {
                             return Ok(c);
+                        }
+                    }
+                    Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
+                        if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                            state.stack.push(Value::Undefined);
                         }
                     }
                     Err(e) => return Err(e),
@@ -1003,7 +1050,6 @@ pub fn interpret_program_with_heap_and_entry(
                         }
                         let mut ctx = builtins::BuiltinContext {
                             heap,
-                            dynamic_chunks: &mut state.dynamic_chunks,
                         };
                         match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx) {
                             Ok(BuiltinResult::Push(v)) => {
@@ -1039,19 +1085,25 @@ pub fn interpret_program_with_heap_and_entry(
                                     return Ok(c);
                                 }
                             }
+                            Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
+                                if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                    state.stack.push(Value::Undefined);
+                                }
+                            }
                             Err(e) => return Err(e),
                         }
                     }
                     Value::DynamicFunction(heap_idx) => {
-                        let callee_chunk = state
+                        let callee_chunk = heap
                             .dynamic_chunks
                             .get(heap_idx)
                             .ok_or(VmError::InvalidConstIndex(heap_idx))?
                             .clone();
+                        let chunk_is_async = callee_chunk.is_async;
                         let callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
                         let num_locals = callee_locals.len();
                         let stack_base = state.stack.len();
-                        let captured: Vec<(u32, Value)> = state
+                        let captured: Vec<(u32, Value)> = heap
                             .dynamic_captures
                             .get(heap_idx)
                             .cloned()
@@ -1070,6 +1122,8 @@ pub fn interpret_program_with_heap_and_entry(
                             this_value: receiver,
                             rethrow_after_finally: false,
                             new_object: None,
+                            generator_id: None,
+                            is_async: chunk_is_async,
                         });
                     }
                     Value::Function(func_idx) => {
@@ -1089,6 +1143,7 @@ pub fn interpret_program_with_heap_and_entry(
                             continue;
                         }
 
+                        let chunk_is_async = callee_chunk.is_async;
                         let callee_locals = setup_callee_locals(callee_chunk, &args, heap);
                         let callee_stack_base = state.stack.len();
                         state.stack.extend(callee_locals);
@@ -1101,6 +1156,8 @@ pub fn interpret_program_with_heap_and_entry(
                             this_value: receiver,
                             rethrow_after_finally: false,
                             new_object: None,
+                            generator_id: None,
+                            is_async: chunk_is_async,
                         });
                     }
                     Value::BoundFunction(target, bound_this, bound_args) => {
@@ -1136,7 +1193,6 @@ pub fn interpret_program_with_heap_and_entry(
                         }
                         let mut ctx = builtins::BuiltinContext {
                             heap,
-                            dynamic_chunks: &mut state.dynamic_chunks,
                         };
                         match execute_builtin(
                             builtin_id,
@@ -1177,6 +1233,11 @@ pub fn interpret_program_with_heap_and_entry(
                                     return Ok(c);
                                 }
                             }
+                            Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
+                                if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                    state.stack.push(Value::Undefined);
+                                }
+                            }
                             Err(e) => return Err(e),
                         }
                     }
@@ -1188,7 +1249,6 @@ pub fn interpret_program_with_heap_and_entry(
                             }
                             let mut ctx = builtins::BuiltinContext {
                                 heap,
-                                dynamic_chunks: &mut state.dynamic_chunks,
                             };
                             match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx)
                             {
@@ -1226,6 +1286,11 @@ pub fn interpret_program_with_heap_and_entry(
                                         return Ok(c);
                                     }
                                 }
+                                Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
+                                    if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                        state.stack.push(Value::Undefined);
+                                    }
+                                }
                                 Err(e) => return Err(e),
                             }
                         } else if heap.is_html_dda_object(obj_id) {
@@ -1254,7 +1319,12 @@ pub fn interpret_program_with_heap_and_entry(
                     .chunks
                     .get(func_idx)
                     .ok_or(VmError::InvalidConstIndex(func_idx))?;
-                let obj_id = heap.alloc_object();
+                let proto = heap.get_function_prop(func_idx, "prototype");
+                let obj_id = if let Value::Object(proto_id) = proto {
+                    heap.alloc_object_with_prototype(Some(proto_id))
+                } else {
+                    heap.alloc_object()
+                };
                 let args = pop_args(&mut state.stack, argc)?;
                 let callee_locals = setup_callee_locals(callee, &args, heap);
                 let stack_base = state.stack.len();
@@ -1268,6 +1338,8 @@ pub fn interpret_program_with_heap_and_entry(
                     this_value: Value::Object(obj_id),
                     rethrow_after_finally: false,
                     new_object: Some(obj_id),
+                    generator_id: None,
+                    is_async: false,
                 });
             }
 
@@ -1277,7 +1349,25 @@ pub fn interpret_program_with_heap_and_entry(
                 pc += 1;
                 let args = pop_args(&mut state.stack, argc)?;
                 let callee = state.stack.pop().ok_or_else(underflow)?;
-                let obj_id = heap.alloc_object();
+                let obj_id = match &callee {
+                    Value::Function(func_idx) => {
+                        let proto = heap.get_function_prop(*func_idx, "prototype");
+                        if let Value::Object(proto_id) = proto {
+                            heap.alloc_object_with_prototype(Some(proto_id))
+                        } else {
+                            heap.alloc_object()
+                        }
+                    }
+                    Value::DynamicFunction(dyn_idx) => {
+                        let proto = heap.get_dynamic_function_prop(*dyn_idx, "prototype");
+                        if let Value::Object(proto_id) = proto {
+                            heap.alloc_object_with_prototype(Some(proto_id))
+                        } else {
+                            heap.alloc_object()
+                        }
+                    }
+                    _ => heap.alloc_object(),
+                };
                 let receiver = Value::Object(obj_id);
                 match callee {
                     Value::Builtin(builtin_id) => {
@@ -1287,7 +1377,6 @@ pub fn interpret_program_with_heap_and_entry(
                         }
                         let mut ctx = builtins::BuiltinContext {
                             heap,
-                            dynamic_chunks: &mut state.dynamic_chunks,
                         };
                         match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx) {
                             Ok(BuiltinResult::Push(v)) => {
@@ -1318,11 +1407,16 @@ pub fn interpret_program_with_heap_and_entry(
                                     return Ok(c);
                                 }
                             }
+                            Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
+                                if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                    state.stack.push(Value::Undefined);
+                                }
+                            }
                             Err(e) => return Err(e),
                         }
                     }
                     Value::DynamicFunction(heap_idx) => {
-                        let callee_chunk = state
+                        let callee_chunk = heap
                             .dynamic_chunks
                             .get(heap_idx)
                             .ok_or(VmError::InvalidConstIndex(heap_idx))?
@@ -1330,7 +1424,7 @@ pub fn interpret_program_with_heap_and_entry(
                         let callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
                         let num_locals = callee_locals.len();
                         let stack_base = state.stack.len();
-                        let captured: Vec<(u32, Value)> = state
+                        let captured: Vec<(u32, Value)> = heap
                             .dynamic_captures
                             .get(heap_idx)
                             .cloned()
@@ -1349,6 +1443,8 @@ pub fn interpret_program_with_heap_and_entry(
                             this_value: receiver,
                             rethrow_after_finally: false,
                             new_object: Some(obj_id),
+                            generator_id: None,
+                    is_async: false,
                         });
                     }
                     Value::Function(func_idx) => {
@@ -1368,6 +1464,8 @@ pub fn interpret_program_with_heap_and_entry(
                             this_value: receiver,
                             rethrow_after_finally: false,
                             new_object: Some(obj_id),
+                            generator_id: None,
+                    is_async: false,
                         });
                     }
                     Value::BoundFunction(target, _bound_this, bound_args) => {
@@ -1397,7 +1495,6 @@ pub fn interpret_program_with_heap_and_entry(
                             }
                             let mut ctx = builtins::BuiltinContext {
                                 heap,
-                                dynamic_chunks: &mut state.dynamic_chunks,
                             };
                             match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx)
                             {
@@ -1426,6 +1523,11 @@ pub fn interpret_program_with_heap_and_entry(
                                         new_object,
                                     )? {
                                         return Ok(c);
+                                    }
+                                }
+                                Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
+                                    if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                        state.stack.push(Value::Undefined);
                                     }
                                 }
                                 Err(e) => return Err(e),
@@ -1494,6 +1596,9 @@ pub fn interpret_program_with_heap_and_entry(
                     }
                     Value::Map(id) => heap.map_set(*id, &key_str, value.clone()),
                     Value::Function(i) => heap.set_function_prop(*i, &key_str, value.clone()),
+                    Value::DynamicFunction(i) => {
+                        heap.set_dynamic_function_prop(*i, &key_str, value.clone())
+                    }
                     _ => {}
                 }
                 state.stack.push(value);
@@ -1574,6 +1679,119 @@ pub fn interpret_program_with_heap_and_entry(
                     .push(Value::Object(heap.alloc_object_with_prototype(prototype)));
             }
 
+            // ---- MakeGenerator ----
+            // Wraps the function value on top of the stack into a generator state.
+            // Pops: [func_value, this_value, arg0, arg1, ...] — but at MakeGenerator time
+            // there are no args yet; the function value is already on the stack.
+            // Actually this is used inside the function body prologue: when a generator
+            // function starts executing, MakeGenerator creates the GeneratorState from the
+            // current frame and immediately returns a Value::Generator to the caller.
+            0x62 => {
+                if let Some(gen_id) = state.frames[frame_idx].generator_id {
+                    let frame = &state.frames[frame_idx];
+                    let locals: Vec<Value> = state
+                        .stack
+                        .get(frame.stack_base..frame.stack_base + frame.num_locals)
+                        .unwrap_or(&[])
+                        .to_vec();
+                    let operand: Vec<Value> = state
+                        .stack
+                        .get(frame.stack_base + frame.num_locals..)
+                        .unwrap_or(&[])
+                        .to_vec();
+                    if let Some(gs) = heap.get_generator_mut(gen_id) {
+                        gs.pc = pc;
+                        gs.locals = locals;
+                        gs.operand_stack = operand;
+                        gs.status = crate::runtime::GeneratorStatus::Suspended;
+                    }
+                    state.frames.truncate(frame_idx);
+                    state
+                        .stack
+                        .truncate(state.frames.last().map(|f| f.stack_base + f.num_locals).unwrap_or(0));
+                    state.stack.push(Value::Generator(gen_id));
+                    continue;
+                }
+            }
+
+            // ---- Yield ----
+            0x60 => {
+                let yielded = state.stack.pop().ok_or_else(underflow)?;
+                if let Some(gen_id) = state.frames[frame_idx].generator_id {
+                    let frame = &state.frames[frame_idx];
+                    let stack_base = frame.stack_base;
+                    let num_locals = frame.num_locals;
+                    let locals: Vec<Value> = state
+                        .stack
+                        .get(stack_base..stack_base + num_locals)
+                        .unwrap_or(&[])
+                        .to_vec();
+                    let operand: Vec<Value> = state
+                        .stack
+                        .get(stack_base + num_locals..)
+                        .unwrap_or(&[])
+                        .to_vec();
+                    if let Some(gs) = heap.get_generator_mut(gen_id) {
+                        gs.pc = pc;
+                        gs.locals = locals;
+                        gs.operand_stack = operand;
+                        gs.status = crate::runtime::GeneratorStatus::Suspended;
+                    }
+                    state.frames.truncate(frame_idx);
+                    let outer_base = state
+                        .frames
+                        .last()
+                        .map(|f| f.stack_base + f.num_locals)
+                        .unwrap_or(0);
+                    state.stack.truncate(outer_base);
+                    let result_obj = heap.alloc_object();
+                    heap.set_prop(result_obj, "value", yielded);
+                    heap.set_prop(result_obj, "done", Value::Bool(false));
+                    state.stack.push(Value::Object(result_obj));
+                    continue;
+                }
+                state.stack.push(yielded);
+            }
+
+            // ---- YieldDelegate ----
+            0x61 => {
+                let _iterable = state.stack.pop().ok_or_else(underflow)?;
+                state.stack.push(Value::Undefined);
+            }
+
+            // ---- Await: synchronously unwrap a Promise value ----
+            0x63 => {
+                let val = state.stack.pop().ok_or_else(underflow)?;
+                match val {
+                    Value::Promise(promise_id) => {
+                        let state_val = heap
+                            .get_promise(promise_id)
+                            .map(|p| p.state.clone())
+                            .unwrap_or(crate::runtime::PromiseState::Pending);
+                        match state_val {
+                            crate::runtime::PromiseState::Fulfilled(v) => {
+                                state.stack.push(v);
+                            }
+                            crate::runtime::PromiseState::Rejected(err) => {
+                                let throw_pc = trace_pc;
+                                if let Some((hpc, slot, is_fin)) = find_handler(chunk, throw_pc) {
+                                    state.throw_into_handler_slot(slot, err.clone(), is_fin, hpc);
+                                    pc = hpc;
+                                } else {
+                                    return Ok(Completion::Throw(err));
+                                }
+                            }
+                            crate::runtime::PromiseState::Pending => {
+                                state.stack.push(Value::Undefined);
+                            }
+                        }
+                    }
+                    other => {
+                        state.stack.push(other);
+                    }
+                }
+            }
+
             _ => return Err(VmError::InvalidOpcode(op)),
         }
         if frame_idx < state.frames.len() {
@@ -1632,7 +1850,6 @@ fn handle_apply_invoke(
                 }
                 let mut ctx = builtins::BuiltinContext {
                     heap,
-                    dynamic_chunks: &mut state.dynamic_chunks,
                 };
                 match execute_builtin(*builtin_id, args.len() + 1, &mut state.stack, &mut ctx) {
                     Ok(BuiltinResult::Push(v)) => {
@@ -1658,19 +1875,29 @@ fn handle_apply_invoke(
                         args = a;
                         new_object = no;
                     }
+                    Ok(BuiltinResult::ResumeGenerator { .. }) => {
+                        state.stack.push(Value::Undefined);
+                        return Ok(None);
+                    }
                     Err(e) => return Err(e),
                 }
             }
             Value::DynamicFunction(heap_idx) => {
-                let callee_chunk = state
+                let callee_chunk = heap
                     .dynamic_chunks
                     .get(*heap_idx)
                     .ok_or(VmError::InvalidConstIndex(*heap_idx))?
                     .clone();
+                if callee_chunk.is_generator {
+                    let gen_id = create_generator_state(heap, &callee_chunk, *heap_idx, true, &args, this_arg.clone());
+                    state.stack.push(Value::Generator(gen_id));
+                    return Ok(None);
+                }
+                let chunk_is_async = callee_chunk.is_async;
                 let callee_locals = setup_callee_locals(&callee_chunk, &args, heap);
                 let num_locals = callee_locals.len();
                 let stack_base = state.stack.len();
-                let captured: Vec<(u32, Value)> = state
+                let captured: Vec<(u32, Value)> = heap
                     .dynamic_captures
                     .get(*heap_idx)
                     .cloned()
@@ -1689,6 +1916,8 @@ fn handle_apply_invoke(
                     this_value: this_arg,
                     rethrow_after_finally: false,
                     new_object,
+                    generator_id: None,
+                    is_async: chunk_is_async,
                 });
                 return Ok(None);
             }
@@ -1697,6 +1926,12 @@ fn handle_apply_invoke(
                     .chunks
                     .get(*func_idx)
                     .ok_or(VmError::InvalidConstIndex(*func_idx))?;
+
+                if callee_chunk.is_generator {
+                    let gen_id = create_generator_state_static(heap, callee_chunk, *func_idx, &args, this_arg.clone());
+                    state.stack.push(Value::Generator(gen_id));
+                    return Ok(None);
+                }
 
                 if let Some(value) =
                     state
@@ -1707,6 +1942,7 @@ fn handle_apply_invoke(
                     return Ok(None);
                 }
 
+                let chunk_is_async = callee_chunk.is_async;
                 let callee_locals = setup_callee_locals(callee_chunk, &args, heap);
                 let stack_base = state.stack.len();
                 state.stack.extend(callee_locals);
@@ -1719,6 +1955,8 @@ fn handle_apply_invoke(
                     this_value: this_arg,
                     rethrow_after_finally: false,
                     new_object,
+                    generator_id: None,
+                    is_async: chunk_is_async,
                 });
                 return Ok(None);
             }
@@ -1737,7 +1975,6 @@ fn handle_apply_invoke(
                 }
                 let mut ctx = builtins::BuiltinContext {
                     heap,
-                    dynamic_chunks: &mut state.dynamic_chunks,
                 };
                 match execute_builtin(*builtin_id, call_args.len(), &mut state.stack, &mut ctx) {
                     Ok(BuiltinResult::Push(v)) => {
@@ -1763,6 +2000,10 @@ fn handle_apply_invoke(
                         args = a;
                         new_object = no;
                     }
+                    Ok(BuiltinResult::ResumeGenerator { .. }) => {
+                        state.stack.push(Value::Undefined);
+                        return Ok(None);
+                    }
                     Err(e) => return Err(e),
                 }
             }
@@ -1774,7 +2015,6 @@ fn handle_apply_invoke(
                     }
                     let mut ctx = builtins::BuiltinContext {
                         heap,
-                        dynamic_chunks: &mut state.dynamic_chunks,
                     };
                     match execute_builtin(builtin_id, args.len() + 1, &mut state.stack, &mut ctx) {
                         Ok(BuiltinResult::Push(v)) => {
@@ -1806,6 +2046,10 @@ fn handle_apply_invoke(
                             args = a;
                             new_object = no;
                         }
+                        Ok(BuiltinResult::ResumeGenerator { .. }) => {
+                            state.stack.push(Value::Undefined);
+                            return Ok(None);
+                        }
                         Err(e) => return Err(e),
                     }
                 } else if heap.is_html_dda_object(*obj_id) {
@@ -1825,6 +2069,120 @@ fn handle_apply_invoke(
             }
         }
     }
+}
+
+fn create_generator_state_static(
+    heap: &mut crate::runtime::Heap,
+    chunk: &BytecodeChunk,
+    func_idx: usize,
+    args: &[Value],
+    this_value: Value,
+) -> usize {
+    let locals = super::calls::setup_callee_locals(chunk, args, heap);
+    let gs = crate::runtime::GeneratorState {
+        chunk: chunk.clone(),
+        is_dynamic: false,
+        dyn_index: func_idx,
+        pc: 0,
+        locals,
+        operand_stack: Vec::new(),
+        status: crate::runtime::GeneratorStatus::NotStarted,
+        this_value,
+    };
+    heap.alloc_generator(gs)
+}
+
+fn create_generator_state(
+    heap: &mut crate::runtime::Heap,
+    chunk: &BytecodeChunk,
+    dyn_index: usize,
+    is_dynamic: bool,
+    args: &[Value],
+    this_value: Value,
+) -> usize {
+    let mut locals = super::calls::setup_callee_locals(chunk, args, heap);
+    let captured: Vec<(u32, Value)> = heap
+        .dynamic_captures
+        .get(dyn_index)
+        .cloned()
+        .unwrap_or_default();
+    for (slot, value) in captured {
+        if (slot as usize) < locals.len() {
+            locals[slot as usize] = value;
+        }
+    }
+    let gs = crate::runtime::GeneratorState {
+        chunk: chunk.clone(),
+        is_dynamic,
+        dyn_index,
+        pc: 0,
+        locals,
+        operand_stack: Vec::new(),
+        status: crate::runtime::GeneratorStatus::NotStarted,
+        this_value,
+    };
+    heap.alloc_generator(gs)
+}
+
+fn resume_generator(
+    heap: &mut crate::runtime::Heap,
+    state: &mut RunState,
+    gen_id: usize,
+    sent_value: Value,
+) -> Result<Option<Value>, ()> {
+    let gs = match heap.get_generator(gen_id) {
+        Some(gs) => gs.clone(),
+        None => return Err(()),
+    };
+    match gs.status {
+        crate::runtime::GeneratorStatus::Completed => {
+            let done_obj = heap.alloc_object();
+            heap.set_prop(done_obj, "value", Value::Undefined);
+            heap.set_prop(done_obj, "done", Value::Bool(true));
+            return Ok(Some(Value::Object(done_obj)));
+        }
+        crate::runtime::GeneratorStatus::NotStarted | crate::runtime::GeneratorStatus::Suspended => {
+            let stack_base = state.stack.len();
+            state.stack.extend(gs.locals.iter().cloned());
+            state.stack.extend(gs.operand_stack.iter().cloned());
+            if matches!(gs.status, crate::runtime::GeneratorStatus::Suspended) {
+                state.stack.push(sent_value);
+            }
+            let num_locals = gs.locals.len();
+            if gs.is_dynamic {
+                state.chunks_stack.push(gs.chunk.clone());
+                state.frames.push(Frame {
+                    chunk_index: state.chunks_stack.len() - 1,
+                    is_dynamic: true,
+                    pc: gs.pc,
+                    stack_base,
+                    num_locals,
+                    this_value: gs.this_value.clone(),
+                    rethrow_after_finally: false,
+                    new_object: None,
+                    generator_id: Some(gen_id),
+                    is_async: false,
+                });
+            } else {
+                state.frames.push(Frame {
+                    chunk_index: gs.dyn_index,
+                    is_dynamic: false,
+                    pc: gs.pc,
+                    stack_base,
+                    num_locals,
+                    this_value: gs.this_value.clone(),
+                    rethrow_after_finally: false,
+                    new_object: None,
+                    generator_id: Some(gen_id),
+                    is_async: false,
+                });
+            }
+            if let Some(gs) = heap.get_generator_mut(gen_id) {
+                gs.status = crate::runtime::GeneratorStatus::Suspended;
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Returns (handler_pc, catch_slot, is_finally).
@@ -1868,6 +2226,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(Value::Int(42)) = result {
@@ -1894,6 +2254,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -1942,6 +2304,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -1982,6 +2346,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {
@@ -2031,6 +2397,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let result = interpret(&chunk).expect("interpret");
         if let Completion::Return(v) = result {

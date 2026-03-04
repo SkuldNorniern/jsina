@@ -17,6 +17,8 @@ pub struct BytecodeChunk {
     pub rest_param_index: Option<u32>,
     pub handlers: Vec<ExceptionHandler>,
     pub arguments_slot: Option<u32>,
+    pub is_generator: bool,
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +91,10 @@ pub enum Opcode {
     JumpIfNullish = 0x32,
     Jump = 0x31,
     Return = 0x20,
+    Yield = 0x60,
+    YieldDelegate = 0x61,
+    MakeGenerator = 0x62,
+    Await = 0x63,
 }
 
 #[cfg(test)]
@@ -106,6 +112,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         assert_eq!(chunk.constants.len(), 1);
     }

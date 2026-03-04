@@ -105,6 +105,8 @@ impl Lexer<'_> {
                 "while" => TokenType::While,
                 "with" => TokenType::With,
                 "yield" => TokenType::Yield,
+                "async" => TokenType::Async,
+                "await" => TokenType::Await,
                 "null" => TokenType::Null,
                 "true" => TokenType::True,
                 "false" => TokenType::False,

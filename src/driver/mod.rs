@@ -84,19 +84,22 @@ impl Driver {
     pub fn bc(source: &str) -> Result<String, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
-        let main = funcs
-            .iter()
-            .find(|f| f.name.as_deref() == Some("main"))
-            .or(funcs.first())
-            .ok_or_else(|| {
-                DriverError::Diagnostic(vec![Diagnostic::error(
-                    ErrorCode::BcNoFunction,
-                    "no function to compile",
-                    None,
-                )])
-            })?;
-        let cf = hir_to_bytecode(main);
-        Ok(crate::ir::disassemble(&cf.chunk))
+        let chunks: Vec<_> = funcs.iter().map(|f| (f.name.clone(), hir_to_bytecode(f))).collect();
+        let mut out = String::new();
+        for (i, (name, cf)) in chunks.iter().enumerate() {
+            let label = name.as_deref().unwrap_or("<anonymous>");
+            out.push_str(&format!("=== chunk {} ({}) ===\n", i, label));
+            out.push_str(&crate::ir::disassemble(&cf.chunk));
+            out.push('\n');
+        }
+        if out.is_empty() {
+            return Err(DriverError::Diagnostic(vec![Diagnostic::error(
+                ErrorCode::BcNoFunction,
+                "no function to compile",
+                None,
+            )]));
+        }
+        Ok(out)
     }
 
     pub fn ir(source: &str) -> Result<String, DriverError> {

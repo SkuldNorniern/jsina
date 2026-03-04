@@ -58,6 +58,10 @@ fn block_bytecode_size(block: &HirBlock, const_start: usize) -> usize {
             HirOp::Call { .. } | HirOp::CallBuiltin { .. } | HirOp::New { .. } => 3,
             HirOp::CallMethod { .. } | HirOp::NewMethod { .. } => 2,
             HirOp::Rethrow { .. } => 2,
+            HirOp::Yield { .. }
+            | HirOp::YieldDelegate { .. }
+            | HirOp::MakeGenerator { .. }
+            | HirOp::Await { .. } => 1,
         };
     }
     size += match &block.terminator {
@@ -237,6 +241,18 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                     code.push(Opcode::Rethrow as u8);
                     code.push((*slot).min(255) as u8);
                 }
+                HirOp::Yield { .. } => {
+                    code.push(Opcode::Yield as u8);
+                }
+                HirOp::YieldDelegate { .. } => {
+                    code.push(Opcode::YieldDelegate as u8);
+                }
+                HirOp::MakeGenerator { .. } => {
+                    code.push(Opcode::MakeGenerator as u8);
+                }
+                HirOp::Await { .. } => {
+                    code.push(Opcode::Await as u8);
+                }
             }
         }
         match &block.terminator {
@@ -342,6 +358,8 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 .named_locals
                 .iter()
                 .find_map(|(n, s)| (n == "arguments").then_some(*s)),
+            is_generator: func.is_generator,
+            is_async: func.is_async,
         },
     }
 }
@@ -372,6 +390,8 @@ mod tests {
                 terminator: HirTerminator::Return { span },
             }],
             exception_regions: vec![],
+            is_generator: false,
+            is_async: false,
         };
         let cf = hir_to_bytecode(&func);
         assert_eq!(cf.chunk.constants.len(), 1);

@@ -251,6 +251,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         assert!(extract_branch_loop_limit(&chunk).is_none());
     }
@@ -266,6 +268,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         assert!(extract_branch_loop_limit(&chunk).is_none());
     }

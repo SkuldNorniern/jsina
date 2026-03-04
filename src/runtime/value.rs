@@ -22,6 +22,10 @@ pub enum Value {
     BoundBuiltin(u8, Box<Value>, bool),
     /// (target, bound_this, bound_args) for Function/DynamicFunction.bind()
     BoundFunction(Box<Value>, Box<Value>, Vec<Value>),
+    /// Index into heap.generator_states
+    Generator(usize),
+    /// Index into heap.promises
+    Promise(usize),
 }
 
 impl Value {
@@ -120,6 +124,8 @@ impl Value {
             | Value::Builtin(_)
             | Value::BoundBuiltin(_, _, _)
             | Value::BoundFunction(_, _, _) => "function",
+            Value::Generator(_) => "object",
+            Value::Promise(_) => "object",
         }
     }
 }
@@ -147,6 +153,8 @@ impl std::fmt::Display for Value {
             | Value::BoundFunction(_, _, _) => {
                 write!(f, "[object Function]")
             }
+            Value::Generator(_) => write!(f, "[object Generator]"),
+            Value::Promise(_) => write!(f, "[object Promise]"),
         }
     }
 }

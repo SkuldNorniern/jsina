@@ -54,6 +54,8 @@ pub enum TokenType {
     While,
     With,
     Yield,
+    Async,
+    Await,
     Null,
     True,
     False,
@@ -163,6 +165,8 @@ impl TokenType {
                 | TokenType::While
                 | TokenType::With
                 | TokenType::Yield
+                | TokenType::Async
+                | TokenType::Await
                 | TokenType::Null
                 | TokenType::True
                 | TokenType::False

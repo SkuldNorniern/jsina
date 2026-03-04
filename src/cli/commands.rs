@@ -373,6 +373,15 @@ fn format_expr(expr: &Expression) -> String {
         Expression::ClassExpr(e) => {
             format!("class {}", e.name.as_deref().unwrap_or(""))
         }
+        Expression::Super(_) => "super".to_string(),
+        Expression::Yield(e) => {
+            if let Some(arg) = &e.argument {
+                format!("yield {}", format_expr(arg))
+            } else {
+                "yield".to_string()
+            }
+        }
+        Expression::Await(e) => format!("await {}", format_expr(&e.argument)),
     }
 }
 

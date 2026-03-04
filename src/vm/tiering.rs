@@ -181,6 +181,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let program_chunks = vec![unsupported_chunk.clone()];
 
@@ -212,6 +214,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let program_chunks = vec![trivial_chunk.clone()];
 
@@ -269,6 +273,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let program_chunks = vec![loop_chunk.clone()];
 

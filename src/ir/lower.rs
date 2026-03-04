@@ -67,6 +67,7 @@ const GLOBAL_NAMES: &[&str] = &[
     "Test262Error",
     "$DONOTEVALUATE",
     "Function",
+    "Promise",
     "global",
     "timeout",
     "Temporal",
@@ -232,6 +233,9 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
                 }
             }
         }
+        Statement::ClassDecl(c) => {
+            collect_class_body_fes(c.id, &c.body, c.superclass.is_some(), c.span, out);
+        }
         _ => {}
     }
 }
@@ -250,6 +254,8 @@ fn collect_function_exprs_expr(expr: &Expression, out: &mut Vec<(NodeId, Functio
                 name: None,
                 params: af.params.clone(),
                 body: Box::new(body),
+                is_generator: false,
+                is_async: false,
             };
             out.push((af.id, fe_data.clone()));
             collect_function_exprs_stmt(&fe_data.body, out);
@@ -326,7 +332,57 @@ fn collect_function_exprs_expr(expr: &Expression, out: &mut Vec<(NodeId, Functio
                 }
             }
         }
+        Expression::ClassExpr(ce) => {
+            collect_class_body_fes(ce.id, &ce.body, ce.superclass.is_some(), ce.span, out);
+        }
         _ => {}
+    }
+}
+
+fn collect_class_body_fes(
+    class_id: NodeId,
+    body: &ClassBody,
+    has_superclass: bool,
+    span: Span,
+    out: &mut Vec<(NodeId, FunctionExprData)>,
+) {
+    let has_explicit_ctor = body.members.iter().any(|m| {
+        matches!(&m.key, ClassMemberKey::Ident(n) if n == "constructor") && !m.is_static
+    });
+    if !has_explicit_ctor {
+        // Synthetic default constructor uses a deterministic NodeId derived from the class id.
+        // Bit 30 is set to distinguish from real AST NodeIds (which are assigned sequentially).
+        // make_default_ctor uses the same derivation so scan and compile produce matching IDs.
+        let synthetic_ce = ClassExprData {
+            id: class_id,
+            span,
+            name: None,
+            superclass: if has_superclass {
+                use crate::frontend::ast::{LiteralExpr, LiteralValue};
+                Some(Box::new(Expression::Literal(LiteralExpr {
+                    id: NodeId(0),
+                    span,
+                    value: LiteralValue::Null,
+                })))
+            } else {
+                None
+            },
+            body: ClassBody { span, members: vec![] },
+        };
+        let default_ctor = make_default_ctor(&synthetic_ce, span);
+        out.push((default_ctor.id, default_ctor));
+    }
+    for member in &body.members {
+        match &member.kind {
+            ClassMemberKind::Method(fe) | ClassMemberKind::Get(fe) | ClassMemberKind::Set(fe) => {
+                out.push((fe.id, fe.clone()));
+                collect_function_exprs_stmt(&fe.body, out);
+            }
+            ClassMemberKind::Field(Some(init_expr)) => {
+                collect_function_exprs_expr(init_expr, out);
+            }
+            ClassMemberKind::Field(None) => {}
+        }
     }
 }
 
@@ -396,22 +452,37 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
             | Statement::Break(_)
             | Statement::Continue(_)
             | Statement::Return(_) => top_level_init_stmts.push(stmt),
-            Statement::ClassDecl(c) => {
-                return Err(LowerError::Unsupported(
-                    "class not implemented".to_string(),
-                    Some(c.span),
-                ));
-            }
+            Statement::ClassDecl(_) => top_level_init_stmts.push(stmt),
         }
     }
-    let func_exprs = collect_function_exprs(script);
-    let mut func_expr_map: HashMap<NodeId, u32> = HashMap::new();
+    // Collect FEs only from the top-level init statements (not from function declaration bodies).
+    // FEs inside function declarations are compiled inline during their parent compilation.
+    let init_func_exprs: Vec<(NodeId, FunctionExprData)> = if !top_level_init_stmts.is_empty() {
+        let mut out = Vec::new();
+        for s in &top_level_init_stmts {
+            collect_function_exprs_stmt(s, &mut out);
+        }
+        out
+    } else {
+        Vec::new()
+    };
     let num_declared = func_decls.len() as u32;
-    for (i, (nid, _)) in func_exprs.iter().enumerate() {
-        func_expr_map.insert(*nid, num_declared + i as u32);
+    let n_init_fes = init_func_exprs.len() as u32;
+    // Layout:
+    //   [0]                       = __init__  (when top_level_init_stmts exist)
+    //   [1 .. 1+n_init_fes]       = FEs from __init__, compiled separately
+    //   [1+n_init_fes ..]         = per func_decl: [inline nested funcs, func_decl itself]
+    // func_index_init maps decl names to their eventual indices (after __init__ + init FEs).
+    let has_init = !top_level_init_stmts.is_empty();
+    let decl_offset = if has_init { 1 + n_init_fes } else { 0 };
+    let mut func_expr_map: HashMap<NodeId, u32> = HashMap::new();
+    if has_init {
+        for (i, (nid, _)) in init_func_exprs.iter().enumerate() {
+            func_expr_map.insert(*nid, 1 + i as u32);
+        }
     }
-    let mut functions = Vec::new();
-    if !top_level_init_stmts.is_empty() {
+    let mut functions: Vec<HirFunction> = Vec::new();
+    if has_init {
         let init_span = top_level_init_stmts
             .first()
             .map(|s| s.span())
@@ -421,46 +492,55 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
             span: init_span,
             body: top_level_init_stmts.iter().map(|s| (*s).clone()).collect(),
         };
+        // Decl names shifted by decl_offset in init context.
         let func_index_init: HashMap<String, u32> =
-            func_index.iter().map(|(k, v)| (k.clone(), v + 1)).collect();
-        let func_expr_map_init: HashMap<NodeId, u32> =
-            func_expr_map.iter().map(|(k, v)| (*k, v + 1)).collect();
-        functions.push(compile_init_block(
+            func_index.iter().map(|(k, v)| (k.clone(), v + decl_offset)).collect();
+        // __init__ uses functions: None — FEs resolve via func_expr_map.
+        let (init_hir, _unused) = compile_init_block(
             &init_body,
             &func_index_init,
-            &func_expr_map_init,
-        )?);
+            &func_expr_map,
+            decl_offset,
+        )?;
+        functions.push(init_hir);
+        // Compile each init FE separately and append at indices 1..1+n_init_fes.
+        for (_, fe) in &init_func_exprs {
+            functions.push(compile_function_expr_to_hir(
+                fe,
+                &func_index_init,
+                &func_expr_map,
+                None,
+                decl_offset,
+            )?);
+        }
     }
-    let func_index_comp: HashMap<String, u32> = if functions.is_empty() {
-        func_index.clone()
-    } else {
-        func_index.iter().map(|(k, v)| (k.clone(), v + 1)).collect()
-    };
-    let func_expr_map_comp: HashMap<NodeId, u32> = if functions.is_empty() {
-        func_expr_map.clone()
-    } else {
-        func_expr_map.iter().map(|(k, v)| (*k, v + 1)).collect()
-    };
+    // func_index_comp for function declarations (each at decl_offset + original_idx).
+    let func_index_comp: HashMap<String, u32> = func_index
+        .iter()
+        .map(|(k, v)| (k.clone(), v + decl_offset))
+        .collect();
+    // Empty map suffices for func_expr_map_comp since FEs in func decls compile inline.
+    let func_expr_map_comp: HashMap<NodeId, u32> = HashMap::new();
     for f in func_decls {
-        let mut nested_funcs = Vec::new();
+        // Pre-allocate a slot for `f` so it gets a stable index that inner FEs can
+        // reference (inner FEs are pushed at `base + 1`, `base + 2`, etc.).
         let base = functions.len() as u32;
+        functions.push(hir_placeholder());
+        let mut nested_funcs = Vec::new();
         let hir = compile_function(
             f,
             &func_index_comp,
             &func_expr_map_comp,
             Some(&mut nested_funcs),
-            base,
+            base + 1,
         )?;
         functions.extend(nested_funcs);
-        functions.push(hir);
+        functions[base as usize] = hir;
     }
-    for (_, fe) in &func_exprs {
-        functions.push(compile_function_expr_to_hir(
-            fe,
-            &func_index_comp,
-            &func_expr_map_comp,
-        )?);
-    }
+
+    // With the new pre-allocated ordering, top-level function declarations land
+    // exactly at their func_index_comp positions, so no remap is needed.
+
     Ok(functions)
 }
 
@@ -468,7 +548,8 @@ fn compile_init_block(
     block: &BlockStmt,
     func_index: &HashMap<String, u32>,
     func_expr_map: &HashMap<NodeId, u32>,
-) -> Result<HirFunction, LowerError> {
+    functions_base: u32,
+) -> Result<(HirFunction, Vec<HirFunction>), LowerError> {
     let span = block.span;
     let mut ctx = LowerCtx {
         blocks: vec![HirBlock {
@@ -485,7 +566,7 @@ fn compile_init_block(
         block_func_index: None,
         func_expr_map,
         functions: None,
-        functions_base: 0,
+        functions_base,
         loop_stack: Vec::new(),
         switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
@@ -498,7 +579,7 @@ fn compile_init_block(
         let _ = compile_statement(s, &mut ctx)?;
     }
     ctx.blocks[ctx.current_block].terminator = HirTerminator::Return { span };
-    Ok(HirFunction {
+    let init_hir = HirFunction {
         name: Some("__init__".to_string()),
         params: Vec::new(),
         num_locals: ctx.next_slot,
@@ -508,7 +589,10 @@ fn compile_init_block(
         entry_block: 0,
         blocks: ctx.blocks,
         exception_regions: ctx.exception_regions,
-    })
+        is_generator: false,
+        is_async: false,
+    };
+    Ok((init_hir, Vec::new()))
 }
 
 struct LowerCtx<'a> {
@@ -534,6 +618,28 @@ struct LowerCtx<'a> {
 
 fn get_func_index<'a>(ctx: &'a LowerCtx<'a>) -> &'a HashMap<String, u32> {
     ctx.block_func_index.as_ref().unwrap_or(ctx.func_index)
+}
+
+fn hir_placeholder() -> HirFunction {
+    use crate::diagnostics::{Position, Span};
+    let span = Span::point(Position::start());
+    HirFunction {
+        name: None,
+        params: vec![],
+        num_locals: 0,
+        named_locals: vec![],
+        captured_names: vec![],
+        rest_param_index: None,
+        entry_block: 0,
+        blocks: vec![HirBlock {
+            id: 0,
+            ops: vec![],
+            terminator: HirTerminator::Return { span },
+        }],
+        exception_regions: vec![],
+        is_generator: false,
+        is_async: false,
+    }
 }
 
 fn loop_stack_push(ctx: &mut LowerCtx<'_>, continue_target: HirBlockId, exit_target: HirBlockId) {
@@ -1233,6 +1339,8 @@ fn compile_function(
         entry_block: 0,
         blocks: ctx.blocks,
         exception_regions: ctx.exception_regions,
+        is_generator: f.is_generator,
+        is_async: f.is_async,
     })
 }
 
@@ -1263,6 +1371,12 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             for s in &b.body {
                 if let Statement::FunctionDecl(nested) = s {
                     if let Some(ref mut funcs) = ctx.functions {
+                        // Pre-allocate `nested`'s slot so it has a stable index
+                        // before inner FEs (pushed during compilation) are added.
+                        let pre_alloc_pos = funcs.len();
+                        let idx = ctx.functions_base + pre_alloc_pos as u32;
+                        funcs.push(hir_placeholder());
+                        block_func_index.insert(nested.name.clone(), idx);
                         let hir = compile_function(
                             nested,
                             &block_func_index,
@@ -1270,9 +1384,14 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
                             Some(funcs),
                             ctx.functions_base,
                         )?;
-                        funcs.push(hir);
-                        let idx = ctx.functions_base + (funcs.len() - 1) as u32;
-                        block_func_index.insert(nested.name.clone(), idx);
+                        let nested_captures: Vec<String> = hir.captured_names.clone();
+                        funcs[pre_alloc_pos] = hir;
+                        let _ = funcs;
+                        for captured in nested_captures {
+                            if !ctx.locals.contains_key(&captured) {
+                                get_or_alloc_capture_slot(ctx, &captured);
+                            }
+                        }
                         let slot = *ctx.locals.entry(nested.name.clone()).or_insert_with(|| {
                             let s = ctx.next_slot;
                             ctx.next_slot += 1;
@@ -1713,10 +1832,34 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
         }
         Statement::FunctionDecl(_) => return Ok(false),
         Statement::ClassDecl(c) => {
-            return Err(LowerError::Unsupported(
-                "class not implemented".to_string(),
-                Some(c.span),
-            ));
+            let ce = ClassExprData {
+                id: c.id,
+                span: c.span,
+                name: Some(c.name.clone()),
+                superclass: c.superclass.clone(),
+                body: c.body.clone(),
+            };
+            compile_class_expr(&ce, ctx)?;
+            // Stack: [..., ctor_fn]
+
+            // Store locally for use within this scope.
+            let slot = *ctx.locals.entry(c.name.clone()).or_insert_with(|| {
+                let s = ctx.next_slot;
+                ctx.next_slot += 1;
+                s
+            });
+            op(ctx, HirOp::Dup { span: c.span });
+            op(ctx, HirOp::StoreLocal { id: slot, span: c.span });
+
+            // Also publish to globalThis so other functions can access the class by name.
+            // SetProp needs [value, obj] with obj (globalThis) on top.
+            op(ctx, HirOp::LoadConst {
+                value: HirConst::Global("globalThis".to_string()),
+                span: c.span,
+            });
+            op(ctx, HirOp::SetProp { key: c.name.clone(), span: c.span });
+            op(ctx, HirOp::Pop { span: c.span });
+            return Ok(false);
         }
         Statement::For(f) => {
             let cond_slot = ctx.next_slot;
@@ -1965,24 +2108,25 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             ctx.current_block = exit_id as usize;
         }
         Statement::ForOf(f) => {
-            let right_slot = ctx.next_slot;
+            // Use iterator protocol: call getIterator(iterable), then loop calling .next()
+            let iter_slot = ctx.next_slot;
             ctx.next_slot += 1;
-            let index_slot = ctx.next_slot;
+            let result_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+            let done_slot = ctx.next_slot;
             ctx.next_slot += 1;
             let iter_value_slot = ctx.next_slot;
             ctx.next_slot += 1;
 
+            // Get iterator from iterable
             compile_expression(&f.right, ctx)?;
-            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                id: right_slot,
-                span: f.span,
-            });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                value: HirConst::Int(0),
+            ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                builtin: b("Iterator", "getIterator"),
+                argc: 1,
                 span: f.span,
             });
             ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                id: index_slot,
+                id: iter_slot,
                 span: f.span,
             });
 
@@ -2007,50 +2151,61 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
 
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
 
-            let cond_slot = ctx.next_slot;
-            ctx.next_slot += 1;
+            // Loop head: call iter.next(), check done
             ctx.current_block = loop_id as usize;
+            // Stack: [iter(receiver), iter(for getprop), "next"-method] → CallMethod(0) → result
             ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                id: index_slot,
-                span: f.span,
-            });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                id: right_slot,
-                span: f.span,
-            });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
-                key: "length".to_string(),
+                id: iter_slot,
                 span: f.span,
             });
             ctx.blocks[ctx.current_block]
                 .ops
-                .push(HirOp::Lt { span: f.span });
+                .push(HirOp::Dup { span: f.span });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                key: "next".to_string(),
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                argc: 0,
+                span: f.span,
+            });
             ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                id: cond_slot,
+                id: result_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+                id: result_slot,
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                key: "done".to_string(),
+                span: f.span,
+            });
+            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+                id: done_slot,
                 span: f.span,
             });
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
-                cond: cond_slot,
-                then_block: body_id,
-                else_block: exit_id,
+                cond: done_slot,
+                then_block: exit_id,
+                else_block: body_id,
             };
 
             loop_stack_push(ctx, loop_id, exit_id);
             if let Some(label) = ctx.current_loop_label.take() {
                 ctx.label_map.insert(label, (loop_id, exit_id));
             }
+
+            // Body: extract value from result, bind to loop variable, run body
             ctx.current_block = body_id as usize;
             ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                id: right_slot,
+                id: result_slot,
                 span: f.span,
             });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                id: index_slot,
+            ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                key: "value".to_string(),
                 span: f.span,
             });
-            ctx.blocks[ctx.current_block]
-                .ops
-                .push(HirOp::GetPropDyn { span: f.span });
             ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
                 id: iter_value_slot,
                 span: f.span,
@@ -2059,21 +2214,6 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             let body_exits = compile_statement(&f.body, ctx)?;
             loop_stack_pop(ctx);
             if !body_exits {
-                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                    id: index_slot,
-                    span: f.span,
-                });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                    value: HirConst::Int(1),
-                    span: f.span,
-                });
-                ctx.blocks[ctx.current_block]
-                    .ops
-                    .push(HirOp::Add { span: f.span });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                    id: index_slot,
-                    span: f.span,
-                });
                 ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: loop_id };
             } else {
                 ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
@@ -2257,10 +2397,341 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
     Ok(false)
 }
 
+fn load_super(ctx: &mut LowerCtx<'_>, span: Span) {
+    if let Some(&slot) = ctx.locals.get("__super__") {
+        op(ctx, HirOp::LoadLocal { id: slot, span });
+    } else if let Some(slot) = get_or_alloc_capture_slot(ctx, "__super__") {
+        op(ctx, HirOp::LoadLocal { id: slot, span });
+    } else {
+        op(ctx, HirOp::LoadConst { value: HirConst::Undefined, span });
+    }
+}
+
+fn compile_super_call(
+    args: &[CallArg],
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    // super(...args) compiles to SuperClass.call(this, ...args)
+    // CallMethod expects: [this_receiver, callee, arg1, ...] on stack
+    // We need: super as receiver, super.call as callee, then this + user args
+    let super_slot = alloc_slot(ctx);
+    load_super(ctx, span);
+    op(ctx, HirOp::StoreLocal { id: super_slot, span });
+    op(ctx, HirOp::LoadLocal { id: super_slot, span });
+    op(ctx, HirOp::GetProp { key: "call".to_string(), span });
+    let call_fn_slot = alloc_slot(ctx);
+    op(ctx, HirOp::StoreLocal { id: call_fn_slot, span });
+    // Stack for CallMethod: push receiver (super), then callee (super.call), then args
+    op(ctx, HirOp::LoadLocal { id: super_slot, span });
+    op(ctx, HirOp::LoadLocal { id: call_fn_slot, span });
+    op(ctx, HirOp::LoadThis { span });
+    for arg in args {
+        compile_call_arg(arg, ctx, span)?;
+    }
+    op(ctx, HirOp::CallMethod { argc: 1 + args.len() as u32, span });
+    Ok(())
+}
+
+fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
+    let span = ce.span;
+
+    // Allocate a named slot "__super__" for the superclass so constructor and methods
+    // can reference it via closure capture.
+    let has_super = ce.superclass.is_some();
+    if let Some(superclass_expr) = &ce.superclass {
+        compile_expression(superclass_expr, ctx)?;
+        let s = *ctx.locals.entry("__super__".to_string()).or_insert_with(|| {
+            let idx = ctx.next_slot;
+            ctx.next_slot += 1;
+            idx
+        });
+        op(ctx, HirOp::StoreLocal { id: s, span });
+    }
+
+    // Find the constructor method if present.
+    let constructor_member = ce.body.members.iter().find(|m| {
+        matches!(&m.key, ClassMemberKey::Ident(name) if name == "constructor") && !m.is_static
+    });
+
+    let ctor_fe = if let Some(member) = constructor_member {
+        if let ClassMemberKind::Method(fe) = &member.kind {
+            fe.clone()
+        } else {
+            make_default_ctor(ce, span)
+        }
+    } else {
+        make_default_ctor(ce, span)
+    };
+
+    compile_function_expr(&ctor_fe, ctx)?;
+    // Stack: [..., ctor_fn]
+
+    // Set the class name property: SetProp needs [value, obj] with obj on top.
+    if let Some(name) = &ce.name {
+        op(ctx, HirOp::Dup { span });
+        op(ctx, HirOp::LoadConst { value: HirConst::String(name.clone()), span });
+        op(ctx, HirOp::Swap { span });
+        op(ctx, HirOp::SetProp { key: "name".to_string(), span });
+        op(ctx, HirOp::Pop { span });
+    }
+    // Stack: [..., ctor_fn]
+
+    // Save ctor in a slot; original stays on stack as the final result of this expression.
+    let ctor_slot = alloc_slot(ctx);
+    op(ctx, HirOp::Dup { span });
+    op(ctx, HirOp::StoreLocal { id: ctor_slot, span });
+    // Stack: [..., ctor_fn]
+
+    // Create an explicit prototype object for the constructor so that:
+    //   - `new ClassName()` can inherit from it
+    //   - methods can be stored on it
+    let proto_slot = alloc_slot(ctx);
+    op(ctx, HirOp::NewObject { span });
+    op(ctx, HirOp::Dup { span });
+    op(ctx, HirOp::StoreLocal { id: proto_slot, span });
+    // Stack: [..., ctor_fn, proto_obj]
+
+    // proto.constructor = ctor: SetProp needs [value, obj] with obj on top.
+    op(ctx, HirOp::LoadLocal { id: ctor_slot, span }); // value
+    op(ctx, HirOp::Swap { span });                     // proto_obj (obj) goes back to top
+    op(ctx, HirOp::SetProp { key: "constructor".to_string(), span });
+    op(ctx, HirOp::Pop { span });
+    // Stack: [..., ctor_fn]
+
+    // ctor.prototype = proto: SetProp needs [value, obj] with obj on top.
+    op(ctx, HirOp::LoadLocal { id: proto_slot, span }); // value
+    op(ctx, HirOp::LoadLocal { id: ctor_slot, span });  // obj (ctor_fn) on top
+    op(ctx, HirOp::SetProp { key: "prototype".to_string(), span });
+    op(ctx, HirOp::Pop { span });
+    // Stack: [..., ctor_fn]
+
+    // Set up prototype chain if extends is present.
+    // CallBuiltin(setPrototypeOf, 2) pops args: buf[1] = top (2nd arg), buf[0] = next (1st arg).
+    if has_super {
+        // Object.setPrototypeOf(proto, super.prototype) — makes instances inherit from super
+        op(ctx, HirOp::LoadLocal { id: proto_slot, span }); // arg0: proto
+        load_super(ctx, span);
+        op(ctx, HirOp::GetProp { key: "prototype".to_string(), span }); // arg1: super.prototype
+        op(ctx, HirOp::CallBuiltin { builtin: b("Object", "setPrototypeOf"), argc: 2, span });
+        op(ctx, HirOp::Pop { span });
+    }
+    // Stack: [..., ctor_fn]
+
+    // Install prototype methods and static members.
+    for member in &ce.body.members {
+        // Skip constructor – already compiled above.
+        if !member.is_static {
+            if let ClassMemberKey::Ident(name) = &member.key {
+                if name == "constructor" {
+                    continue;
+                }
+            }
+        }
+
+        match &member.kind {
+            ClassMemberKind::Method(fe) => {
+                compile_function_expr(fe, ctx)?;
+                let method_slot = alloc_slot(ctx);
+                op(ctx, HirOp::StoreLocal { id: method_slot, span });
+
+                match &member.key {
+                    ClassMemberKey::Ident(name) => {
+                        // SetProp needs [value, obj] with obj on top.
+                        op(ctx, HirOp::LoadLocal { id: method_slot, span }); // value
+                        if member.is_static {
+                            op(ctx, HirOp::LoadLocal { id: ctor_slot, span }); // obj on top
+                        } else {
+                            op(ctx, HirOp::LoadLocal { id: proto_slot, span }); // obj on top
+                        }
+                        op(ctx, HirOp::SetProp { key: name.clone(), span });
+                    }
+                    ClassMemberKey::Computed(key_expr) => {
+                        // SetPropDyn needs [obj, key, value] with value on top.
+                        let obj_slot = alloc_slot(ctx);
+                        if member.is_static {
+                            op(ctx, HirOp::LoadLocal { id: ctor_slot, span });
+                        } else {
+                            op(ctx, HirOp::LoadLocal { id: proto_slot, span });
+                        }
+                        op(ctx, HirOp::StoreLocal { id: obj_slot, span });
+                        let key_slot = alloc_slot(ctx);
+                        compile_expression(key_expr, ctx)?;
+                        op(ctx, HirOp::StoreLocal { id: key_slot, span });
+                        op(ctx, HirOp::LoadLocal { id: obj_slot, span });
+                        op(ctx, HirOp::LoadLocal { id: key_slot, span });
+                        op(ctx, HirOp::LoadLocal { id: method_slot, span });
+                        op(ctx, HirOp::SetPropDyn { span });
+                    }
+                }
+                op(ctx, HirOp::Pop { span });
+            }
+            ClassMemberKind::Get(fe) | ClassMemberKind::Set(fe) => {
+                let is_getter = matches!(&member.kind, ClassMemberKind::Get(_));
+                compile_function_expr(fe, ctx)?;
+                let accessor_slot = alloc_slot(ctx);
+                op(ctx, HirOp::StoreLocal { id: accessor_slot, span });
+
+                // Build descriptor object: { get/set: fn, configurable: true }
+                op(ctx, HirOp::NewObject { span });
+                let desc_slot = alloc_slot(ctx);
+                op(ctx, HirOp::StoreLocal { id: desc_slot, span });
+
+                // desc.get/set = accessor: SetProp needs [value, obj] with obj on top.
+                let accessor_prop = if is_getter { "get" } else { "set" };
+                op(ctx, HirOp::LoadLocal { id: accessor_slot, span }); // value
+                op(ctx, HirOp::LoadLocal { id: desc_slot, span });     // obj on top
+                op(ctx, HirOp::SetProp { key: accessor_prop.to_string(), span });
+                op(ctx, HirOp::Pop { span });
+
+                // desc.configurable = true: SetProp needs [value, obj] with obj on top.
+                op(ctx, HirOp::LoadConst { value: HirConst::Bool(true), span }); // value
+                op(ctx, HirOp::LoadLocal { id: desc_slot, span });               // obj on top
+                op(ctx, HirOp::SetProp { key: "configurable".to_string(), span });
+                op(ctx, HirOp::Pop { span });
+
+                // Object.defineProperty(target, key, desc)
+                // CallBuiltin(defineProperty, 3): args[0]=target, args[1]=key, args[2]=desc
+                if member.is_static {
+                    op(ctx, HirOp::LoadLocal { id: ctor_slot, span }); // arg0: target
+                } else {
+                    op(ctx, HirOp::LoadLocal { id: proto_slot, span }); // arg0: target
+                }
+                match &member.key {
+                    ClassMemberKey::Ident(name) => {
+                        op(ctx, HirOp::LoadConst { value: HirConst::String(name.clone()), span });
+                    }
+                    ClassMemberKey::Computed(key_expr) => {
+                        compile_expression(key_expr, ctx)?;
+                    }
+                }
+                op(ctx, HirOp::LoadLocal { id: desc_slot, span }); // arg2: desc
+                op(ctx, HirOp::CallBuiltin { builtin: b("Object", "defineProperty"), argc: 3, span });
+                op(ctx, HirOp::Pop { span });
+            }
+            ClassMemberKind::Field(init_expr) => {
+                if member.is_static {
+                    // SetProp needs [value, obj] with obj on top.
+                    match &member.key {
+                        ClassMemberKey::Ident(name) => {
+                            if let Some(init) = init_expr {
+                                compile_expression(init, ctx)?;
+                            } else {
+                                op(ctx, HirOp::LoadConst { value: HirConst::Undefined, span });
+                            }
+                            op(ctx, HirOp::LoadLocal { id: ctor_slot, span }); // obj on top
+                            op(ctx, HirOp::SetProp { key: name.clone(), span });
+                        }
+                        ClassMemberKey::Computed(key_expr) => {
+                            // SetPropDyn needs [obj, key, value] with value on top.
+                            let value_slot = alloc_slot(ctx);
+                            if let Some(init) = init_expr {
+                                compile_expression(init, ctx)?;
+                            } else {
+                                op(ctx, HirOp::LoadConst { value: HirConst::Undefined, span });
+                            }
+                            op(ctx, HirOp::StoreLocal { id: value_slot, span });
+                            let key_slot = alloc_slot(ctx);
+                            compile_expression(key_expr, ctx)?;
+                            op(ctx, HirOp::StoreLocal { id: key_slot, span });
+                            op(ctx, HirOp::LoadLocal { id: ctor_slot, span });
+                            op(ctx, HirOp::LoadLocal { id: key_slot, span });
+                            op(ctx, HirOp::LoadLocal { id: value_slot, span });
+                            op(ctx, HirOp::SetPropDyn { span });
+                        }
+                    }
+                    op(ctx, HirOp::Pop { span });
+                }
+                // Instance fields are handled in the constructor body.
+            }
+        }
+    }
+
+    // The original ctor_fn is still on the stack as the class expression result.
+    Ok(())
+}
+
+fn make_default_ctor(ce: &ClassExprData, span: Span) -> FunctionExprData {
+    use crate::frontend::ast::*;
+    // Use a deterministic NodeId derived from the class's id so pre-scanning
+    // and compilation produce matching IDs. Bit 30 is set to distinguish from
+    // real AST NodeIds (real ones are assigned sequentially from 0).
+    let synthetic_id = NodeId(ce.id.0 | 0x40000000);
+    let inner_id = NodeId(u32::MAX);
+    if ce.superclass.is_some() {
+        // Default constructor with super: constructor(...args) { super(...args); }
+        FunctionExprData {
+            id: synthetic_id,
+            span,
+            name: ce.name.clone(),
+            params: vec![Param::Rest("args".to_string())],
+            body: Box::new(Statement::Block(BlockStmt {
+                id: inner_id,
+                span,
+                body: vec![Statement::Expression(ExpressionStmt {
+                    id: inner_id,
+                    span,
+                    expression: Box::new(Expression::Call(CallExpr {
+                        id: inner_id,
+                        span,
+                        callee: Box::new(Expression::Super(SuperExpr { id: inner_id, span })),
+                        args: vec![CallArg::Spread(Expression::Identifier(IdentifierExpr {
+                            id: inner_id,
+                            span,
+                            name: "args".to_string(),
+                        }))],
+                    })),
+                })],
+            })),
+            is_generator: false,
+            is_async: false,
+        }
+    } else {
+        FunctionExprData {
+            id: synthetic_id,
+            span,
+            name: ce.name.clone(),
+            params: vec![],
+            body: Box::new(Statement::Block(BlockStmt {
+                id: inner_id,
+                span,
+                body: vec![],
+            })),
+            is_generator: false,
+            is_async: false,
+        }
+    }
+}
+
 fn compile_function_expr(fe: &FunctionExprData, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
-    let idx = *ctx.func_expr_map.get(&fe.id).ok_or_else(|| {
-        LowerError::Unsupported("function expression not in map".to_string(), Some(fe.span))
-    })?;
+    let idx = if ctx.functions.is_some() {
+        let mut taken_funcs = ctx.functions.take().unwrap();
+        let visible_func_index = get_func_index(ctx).clone();
+        let hir = compile_function_expr_to_hir(
+            fe,
+            &visible_func_index,
+            ctx.func_expr_map,
+            Some(&mut taken_funcs),
+            ctx.functions_base,
+        )?;
+        let nested_captures: Vec<String> = hir
+            .captured_names
+            .iter()
+            .filter(|n| !ctx.locals.contains_key(*n))
+            .cloned()
+            .collect();
+        taken_funcs.push(hir);
+        let computed_idx = ctx.functions_base + (taken_funcs.len() - 1) as u32;
+        ctx.functions = Some(taken_funcs);
+        for cap in nested_captures {
+            get_or_alloc_capture_slot(ctx, &cap);
+        }
+        computed_idx
+    } else {
+        *ctx.func_expr_map.get(&fe.id).ok_or_else(|| {
+            LowerError::Unsupported("function expression not in map".to_string(), Some(fe.span))
+        })?
+    };
     ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
         value: HirConst::Function(idx),
         span: fe.span,
@@ -2291,6 +2762,8 @@ fn compile_function_expr_to_hir(
     fe: &FunctionExprData,
     func_index: &HashMap<String, u32>,
     func_expr_map: &HashMap<NodeId, u32>,
+    functions: Option<&mut Vec<HirFunction>>,
+    functions_base: u32,
 ) -> Result<HirFunction, LowerError> {
     let span = fe.span;
     let mut ctx = LowerCtx {
@@ -2307,8 +2780,8 @@ fn compile_function_expr_to_hir(
         func_index,
         block_func_index: None,
         func_expr_map,
-        functions: None,
-        functions_base: 0,
+        functions,
+        functions_base,
         loop_stack: Vec::new(),
         switch_break_stack: Vec::new(),
         exception_regions: Vec::new(),
@@ -2340,7 +2813,24 @@ fn compile_function_expr_to_hir(
         entry_block: 0,
         blocks: ctx.blocks,
         exception_regions: ctx.exception_regions,
+        is_generator: fe.is_generator,
+        is_async: fe.is_async,
     })
+}
+
+fn compile_arrow_inline(af: &ArrowFunctionExpr, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
+    let span = af.span;
+    let body_stmt = arrow_body_to_block(&af.body, span);
+    let as_fe = FunctionExprData {
+        id: af.id,
+        span,
+        name: None,
+        params: af.params.clone(),
+        body: Box::new(body_stmt),
+        is_generator: false,
+        is_async: false,
+    };
+    compile_function_expr(&as_fe, ctx)
 }
 
 fn compile_call_arg(arg: &CallArg, ctx: &mut LowerCtx<'_>, span: Span) -> Result<(), LowerError> {
@@ -2668,6 +3158,24 @@ enum HofKind {
     FlatMap,
 }
 
+fn emit_hof_increment(
+    ctx: &mut LowerCtx<'_>,
+    i_slot: u32,
+    decrement: bool,
+    header_id: HirBlockId,
+    span: Span,
+) {
+    op(ctx, HirOp::LoadLocal { id: i_slot, span });
+    op(ctx, HirOp::LoadConst { value: HirConst::Int(1), span });
+    if decrement {
+        op(ctx, HirOp::Sub { span });
+    } else {
+        op(ctx, HirOp::Add { span });
+    }
+    op(ctx, HirOp::StoreLocal { id: i_slot, span });
+    jump_to(ctx, header_id);
+}
+
 fn compile_array_hof(
     kind: HofKind,
     arr_expr: &Expression,
@@ -2933,15 +3441,10 @@ fn compile_array_hof(
         }
         HofKind::Find | HofKind::FindLast => {
             let found_slot = alloc_slot(ctx);
-            op(
-                ctx,
-                HirOp::StoreLocal {
-                    id: found_slot,
-                    span,
-                },
-            );
+            op(ctx, HirOp::StoreLocal { id: found_slot, span });
             let early_exit_id = new_block(ctx, span);
             let keep_looking_id = new_block(ctx, span);
+            let join_id = new_block(ctx, span);
             set_term(
                 ctx,
                 HirTerminator::Branch {
@@ -2951,40 +3454,22 @@ fn compile_array_hof(
                 },
             );
             ctx.current_block = early_exit_id as usize;
-            op(
-                ctx,
-                HirOp::LoadLocal {
-                    id: elem_slot,
-                    span,
-                },
-            );
-            let return_block = new_block(ctx, span);
-            jump_to(ctx, return_block);
+            op(ctx, HirOp::LoadLocal { id: elem_slot, span });
+            set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = keep_looking_id as usize;
-            jump_to(ctx, increment_id);
-            ctx.current_block = return_block as usize;
-            jump_to(ctx, exit_id);
+            emit_hof_increment(ctx, i_slot, is_from_right, header_id, span);
             ctx.current_block = exit_id as usize;
-            op(
-                ctx,
-                HirOp::LoadConst {
-                    value: HirConst::Undefined,
-                    span,
-                },
-            );
+            op(ctx, HirOp::LoadConst { value: HirConst::Undefined, span });
+            set_term(ctx, HirTerminator::Jump { target: join_id });
+            ctx.current_block = join_id as usize;
             return Ok(());
         }
         HofKind::FindIndex | HofKind::FindLastIndex => {
             let found_slot = alloc_slot(ctx);
-            op(
-                ctx,
-                HirOp::StoreLocal {
-                    id: found_slot,
-                    span,
-                },
-            );
+            op(ctx, HirOp::StoreLocal { id: found_slot, span });
             let early_exit_id = new_block(ctx, span);
             let keep_looking_id = new_block(ctx, span);
+            let join_id = new_block(ctx, span);
             set_term(
                 ctx,
                 HirTerminator::Branch {
@@ -2995,33 +3480,21 @@ fn compile_array_hof(
             );
             ctx.current_block = early_exit_id as usize;
             op(ctx, HirOp::LoadLocal { id: i_slot, span });
-            let return_block = new_block(ctx, span);
-            jump_to(ctx, return_block);
+            set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = keep_looking_id as usize;
-            jump_to(ctx, increment_id);
-            ctx.current_block = return_block as usize;
-            jump_to(ctx, exit_id);
+            emit_hof_increment(ctx, i_slot, is_from_right, header_id, span);
             ctx.current_block = exit_id as usize;
-            op(
-                ctx,
-                HirOp::LoadConst {
-                    value: HirConst::Int(-1),
-                    span,
-                },
-            );
+            op(ctx, HirOp::LoadConst { value: HirConst::Int(-1), span });
+            set_term(ctx, HirTerminator::Jump { target: join_id });
+            ctx.current_block = join_id as usize;
             return Ok(());
         }
         HofKind::Some => {
             let found_slot = alloc_slot(ctx);
-            op(
-                ctx,
-                HirOp::StoreLocal {
-                    id: found_slot,
-                    span,
-                },
-            );
+            op(ctx, HirOp::StoreLocal { id: found_slot, span });
             let early_exit_id = new_block(ctx, span);
             let keep_looking_id = new_block(ctx, span);
+            let join_id = new_block(ctx, span);
             set_term(
                 ctx,
                 HirTerminator::Branch {
@@ -3031,40 +3504,22 @@ fn compile_array_hof(
                 },
             );
             ctx.current_block = early_exit_id as usize;
-            op(
-                ctx,
-                HirOp::LoadConst {
-                    value: HirConst::Bool(true),
-                    span,
-                },
-            );
-            let return_block = new_block(ctx, span);
-            jump_to(ctx, return_block);
+            op(ctx, HirOp::LoadConst { value: HirConst::Bool(true), span });
+            set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = keep_looking_id as usize;
-            jump_to(ctx, increment_id);
-            ctx.current_block = return_block as usize;
-            jump_to(ctx, exit_id);
+            emit_hof_increment(ctx, i_slot, false, header_id, span);
             ctx.current_block = exit_id as usize;
-            op(
-                ctx,
-                HirOp::LoadConst {
-                    value: HirConst::Bool(false),
-                    span,
-                },
-            );
+            op(ctx, HirOp::LoadConst { value: HirConst::Bool(false), span });
+            set_term(ctx, HirTerminator::Jump { target: join_id });
+            ctx.current_block = join_id as usize;
             return Ok(());
         }
         HofKind::Every => {
             let pass_slot = alloc_slot(ctx);
-            op(
-                ctx,
-                HirOp::StoreLocal {
-                    id: pass_slot,
-                    span,
-                },
-            );
+            op(ctx, HirOp::StoreLocal { id: pass_slot, span });
             let continue_id = new_block(ctx, span);
             let early_fail_id = new_block(ctx, span);
+            let join_id = new_block(ctx, span);
             set_term(
                 ctx,
                 HirTerminator::Branch {
@@ -3074,27 +3529,14 @@ fn compile_array_hof(
                 },
             );
             ctx.current_block = early_fail_id as usize;
-            op(
-                ctx,
-                HirOp::LoadConst {
-                    value: HirConst::Bool(false),
-                    span,
-                },
-            );
-            let return_block = new_block(ctx, span);
-            jump_to(ctx, return_block);
+            op(ctx, HirOp::LoadConst { value: HirConst::Bool(false), span });
+            set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = continue_id as usize;
-            jump_to(ctx, increment_id);
-            ctx.current_block = return_block as usize;
-            jump_to(ctx, exit_id);
+            emit_hof_increment(ctx, i_slot, false, header_id, span);
             ctx.current_block = exit_id as usize;
-            op(
-                ctx,
-                HirOp::LoadConst {
-                    value: HirConst::Bool(true),
-                    span,
-                },
-            );
+            op(ctx, HirOp::LoadConst { value: HirConst::Bool(true), span });
+            set_term(ctx, HirTerminator::Jump { target: join_id });
+            ctx.current_block = join_id as usize;
             return Ok(());
         }
     }
@@ -3360,6 +3802,17 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
             } else if let Some(slot) = get_or_alloc_capture_slot(ctx, &e.name) {
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
                     id: slot,
+                    span: e.span,
+                });
+            } else if ctx.allow_function_captures {
+                // Name not found in any local or captured scope; resolve via globalThis
+                // to support user-defined globals like class declarations.
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                    value: HirConst::Global("globalThis".to_string()),
+                    span: e.span,
+                });
+                ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                    key: e.name.clone(),
                     span: e.span,
                 });
             } else {
@@ -3650,6 +4103,20 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
         Expression::Unary(e) => match e.op {
             UnaryOp::Plus => compile_expression(&e.argument, ctx)?,
             UnaryOp::Minus => {
+                if let Expression::Literal(lit) = e.argument.as_ref() {
+                    if let LiteralValue::BigInt(s) = &lit.value {
+                        let negated = if s.starts_with('-') {
+                            s[1..].to_string()
+                        } else {
+                            format!("-{}", s)
+                        };
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                            value: HirConst::BigInt(negated),
+                            span: e.span,
+                        });
+                        return Ok(());
+                    }
+                }
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                     value: HirConst::Int(0),
                     span: e.span,
@@ -3901,6 +4368,28 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
             compile_logical_assign(e, ctx)?;
         }
         Expression::Call(e) => match e.callee.as_ref() {
+            Expression::Member(m) if matches!(m.object.as_ref(), Expression::Super(_)) => {
+                // super.method(args) → SuperClass.prototype.method called with this as receiver
+                // CallMethod stack: [this_receiver, method_fn, ...args] → result
+                let super_span = m.object.span();
+                op(ctx, HirOp::LoadThis { span: e.span });
+                load_super(ctx, super_span);
+                op(ctx, HirOp::GetProp { key: "prototype".to_string(), span: super_span });
+                match &m.property {
+                    MemberProperty::Identifier(name) => {
+                        op(ctx, HirOp::GetProp { key: name.clone(), span: e.span });
+                    }
+                    MemberProperty::Expression(key_expr) => {
+                        op(ctx, HirOp::Dup { span: e.span });
+                        compile_expression(key_expr, ctx)?;
+                        op(ctx, HirOp::GetPropDyn { span: e.span });
+                    }
+                }
+                for arg in &e.args {
+                    compile_call_arg(arg, ctx, e.span)?;
+                }
+                op(ctx, HirOp::CallMethod { argc: e.args.len() as u32, span: e.span });
+            }
             Expression::Member(m) => {
                 if let MemberProperty::Expression(key_expr) = &m.property {
                     let only_spread = e.args.len() == 1 && matches!(&e.args[0], CallArg::Spread(_));
@@ -4814,16 +5303,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         value: HirConst::Undefined,
                         span: e.span,
                     });
-                    let idx = *ctx.func_expr_map.get(&af.id).ok_or_else(|| {
-                        LowerError::Unsupported(
-                            "arrow function not in map".to_string(),
-                            Some(af.span),
-                        )
-                    })?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                        value: HirConst::Function(idx),
-                        span: af.span,
-                    });
+                    compile_arrow_inline(af, ctx)?;
                     for arg in &e.args {
                         compile_call_arg(arg, ctx, e.span)?;
                     }
@@ -4986,6 +5466,26 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     span: e.span,
                 });
             }
+            Expression::Identifier(id) if id.name == "escape" => {
+                for arg in &e.args {
+                    compile_call_arg(arg, ctx, e.span)?;
+                }
+                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                    builtin: b("Global", "escape"),
+                    argc: e.args.len() as u32,
+                    span: e.span,
+                });
+            }
+            Expression::Identifier(id) if id.name == "unescape" => {
+                for arg in &e.args {
+                    compile_call_arg(arg, ctx, e.span)?;
+                }
+                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                    builtin: b("Global", "unescape"),
+                    argc: e.args.len() as u32,
+                    span: e.span,
+                });
+            }
             Expression::Identifier(id) if id.name == "RegExp" => {
                 for arg in &e.args {
                     compile_call_arg(arg, ctx, e.span)?;
@@ -5017,16 +5517,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 });
             }
             Expression::Identifier(id) => {
-                if let Some(&idx) = func_index.get(&id.name) {
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::Call {
-                        func_index: idx,
-                        argc: e.args.len() as u32,
-                        span: e.span,
-                    });
-                } else if let Some(&slot) = ctx.locals.get(&id.name) {
+                if let Some(&slot) = ctx.locals.get(&id.name) {
                     ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                         value: HirConst::Undefined,
                         span: e.span,
@@ -5039,6 +5530,15 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         compile_call_arg(arg, ctx, e.span)?;
                     }
                     ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                } else if let Some(&idx) = func_index.get(&id.name) {
+                    for arg in &e.args {
+                        compile_call_arg(arg, ctx, e.span)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Call {
+                        func_index: idx,
                         argc: e.args.len() as u32,
                         span: e.span,
                     });
@@ -5096,6 +5596,24 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         argc: e.args.len() as u32,
                         span: e.span,
                     });
+                } else if id.name == "escape" {
+                    for arg in &e.args {
+                        compile_call_arg(arg, ctx, e.span)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: b("Global", "escape"),
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
+                } else if id.name == "unescape" {
+                    for arg in &e.args {
+                        compile_call_arg(arg, ctx, e.span)?;
+                    }
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                        builtin: b("Global", "unescape"),
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    });
                 } else if GLOBAL_NAMES.contains(&id.name.as_str()) {
                     ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                         value: HirConst::Global("globalThis".to_string()),
@@ -5142,6 +5660,10 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                 }
+            }
+            Expression::Super(s) => {
+                // super(...args) in a constructor: calls SuperClass.call(this, ...args)
+                compile_super_call(&e.args, s.span, ctx)?;
             }
             _ => {
                 let only_spread = e.args.len() == 1 && matches!(&e.args[0], CallArg::Spread(_));
@@ -5531,6 +6053,22 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 }
             }
         }
+        Expression::Member(e) if matches!(e.object.as_ref(), Expression::Super(_)) && !e.optional => {
+            // super.prop → SuperClass.prototype.prop
+            let super_span = e.object.span();
+            load_super(ctx, super_span);
+            op(ctx, HirOp::GetProp { key: "prototype".to_string(), span: super_span });
+            match &e.property {
+                MemberProperty::Identifier(name) => {
+                    op(ctx, HirOp::GetProp { key: name.clone(), span: e.span });
+                }
+                MemberProperty::Expression(key_expr) => {
+                    op(ctx, HirOp::Dup { span: e.span });
+                    compile_expression(key_expr, ctx)?;
+                    op(ctx, HirOp::GetPropDyn { span: e.span });
+                }
+            }
+        }
         Expression::Member(e) => {
             compile_expression(&e.object, ctx)?;
             if e.optional {
@@ -5613,19 +6151,38 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
             compile_function_expr(fe, ctx)?;
         }
         Expression::ArrowFunction(af) => {
-            let idx = *ctx.func_expr_map.get(&af.id).ok_or_else(|| {
-                LowerError::Unsupported("arrow function not in map".to_string(), Some(af.span))
-            })?;
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                value: HirConst::Function(idx),
-                span: af.span,
-            });
+            compile_arrow_inline(af, ctx)?;
         }
         Expression::ClassExpr(ce) => {
-            return Err(LowerError::Unsupported(
-                "class not implemented".to_string(),
-                Some(ce.span),
-            ));
+            compile_class_expr(&ce.clone(), ctx)?;
+        }
+        Expression::Super(s) => {
+            load_super(ctx, s.span);
+        }
+        Expression::Yield(y) => {
+            if let Some(arg) = &y.argument {
+                compile_expression(arg, ctx)?;
+            } else {
+                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                    value: HirConst::Undefined,
+                    span: y.span,
+                });
+            }
+            if y.delegate {
+                ctx.blocks[ctx.current_block]
+                    .ops
+                    .push(HirOp::YieldDelegate { span: y.span });
+            } else {
+                ctx.blocks[ctx.current_block]
+                    .ops
+                    .push(HirOp::Yield { span: y.span });
+            }
+        }
+        Expression::Await(a) => {
+            compile_expression(&a.argument, ctx)?;
+            ctx.blocks[ctx.current_block]
+                .ops
+                .push(HirOp::Await { span: a.span });
         }
     }
     Ok(())

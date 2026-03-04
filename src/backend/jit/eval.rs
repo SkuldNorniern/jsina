@@ -791,6 +791,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         }
     }
 
@@ -820,6 +822,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         assert!(!is_self_contained_int_loop(&chunk));
     }
@@ -877,6 +881,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         let result = execute_int_loop(&chunk, &[]);
         assert_eq!(result, Some(45));
@@ -900,6 +906,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         assert!(supports_eval_subset(&chunk));
         let result = execute_int_loop(&chunk, &[]);
@@ -917,6 +925,8 @@ mod tests {
             rest_param_index: None,
             handlers: vec![],
             arguments_slot: None,
+            is_generator: false,
+            is_async: false,
         };
         assert!(supports_eval_subset(&chunk));
     }
