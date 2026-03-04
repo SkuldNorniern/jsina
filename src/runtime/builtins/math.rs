@@ -143,11 +143,7 @@ mod tests {
     #[test]
     fn sum_precise_basic() {
         let mut heap = Heap::new();
-        let args = [
-            Value::Number(0.1),
-            Value::Number(0.2),
-            Value::Number(0.3),
-        ];
+        let args = [Value::Number(0.1), Value::Number(0.2), Value::Number(0.3)];
         let r = sum_precise(&args, &mut heap);
         assert!(matches!(r, Value::Number(n) if (n - 0.6).abs() < 1e-10));
     }

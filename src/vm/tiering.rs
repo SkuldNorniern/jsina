@@ -185,9 +185,11 @@ mod tests {
         let program_chunks = vec![unsupported_chunk.clone()];
 
         for _ in 0..tiering.hot_call_threshold() {
-            assert!(tiering
-                .maybe_execute(0, &unsupported_chunk, &[], &program_chunks)
-                .is_none());
+            assert!(
+                tiering
+                    .maybe_execute(0, &unsupported_chunk, &[], &program_chunks)
+                    .is_none()
+            );
         }
 
         assert_eq!(tiering.chunk_states[0], ChunkTierState::Rejected);
@@ -214,9 +216,11 @@ mod tests {
         let program_chunks = vec![trivial_chunk.clone()];
 
         for _ in 0..(tiering.hot_call_threshold() - 1) {
-            assert!(tiering
-                .maybe_execute(0, &trivial_chunk, &[], &program_chunks)
-                .is_none());
+            assert!(
+                tiering
+                    .maybe_execute(0, &trivial_chunk, &[], &program_chunks)
+                    .is_none()
+            );
         }
 
         let compiled_result = tiering.maybe_execute(0, &trivial_chunk, &[], &program_chunks);

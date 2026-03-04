@@ -171,12 +171,11 @@ impl Lexer<'_> {
                         lexeme.push(ch);
                         raw_for_span.push(ch);
                         self.advance();
-                        if self.consume_digits_with_separators(
-                            &mut lexeme,
-                            &mut raw_for_span,
-                            |c| c.is_ascii_hexdigit(),
-                        )
-                        .is_some()
+                        if self
+                            .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
+                                c.is_ascii_hexdigit()
+                            })
+                            .is_some()
                         {
                             let span = Span::from_text(start_pos, &raw_for_span);
                             return Token::new(
@@ -190,12 +189,11 @@ impl Lexer<'_> {
                         lexeme.push(ch);
                         raw_for_span.push(ch);
                         self.advance();
-                        if self.consume_digits_with_separators(
-                            &mut lexeme,
-                            &mut raw_for_span,
-                            |c| c == '0' || c == '1',
-                        )
-                        .is_some()
+                        if self
+                            .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
+                                c == '0' || c == '1'
+                            })
+                            .is_some()
                         {
                             let span = Span::from_text(start_pos, &raw_for_span);
                             return Token::new(
@@ -209,12 +207,11 @@ impl Lexer<'_> {
                         lexeme.push(ch);
                         raw_for_span.push(ch);
                         self.advance();
-                        if self.consume_digits_with_separators(
-                            &mut lexeme,
-                            &mut raw_for_span,
-                            |c| c.is_ascii_digit() && c < '8',
-                        )
-                        .is_some()
+                        if self
+                            .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
+                                c.is_ascii_digit() && c < '8'
+                            })
+                            .is_some()
                         {
                             let span = Span::from_text(start_pos, &raw_for_span);
                             return Token::new(
@@ -225,12 +222,11 @@ impl Lexer<'_> {
                         }
                     }
                     _ => {
-                        if self.consume_digits_with_separators(
-                            &mut lexeme,
-                            &mut raw_for_span,
-                            |c| c.is_ascii_digit(),
-                        )
-                        .is_some()
+                        if self
+                            .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
+                                c.is_ascii_digit()
+                            })
+                            .is_some()
                         {
                             let span = Span::from_text(start_pos, &raw_for_span);
                             return Token::new(
@@ -243,12 +239,11 @@ impl Lexer<'_> {
                 }
             }
         } else {
-            if self.consume_digits_with_separators(
-                &mut lexeme,
-                &mut raw_for_span,
-                |c| c.is_ascii_digit(),
-            )
-            .is_some()
+            if self
+                .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
+                    c.is_ascii_digit()
+                })
+                .is_some()
             {
                 let span = Span::from_text(start_pos, &raw_for_span);
                 return Token::new(
@@ -270,12 +265,11 @@ impl Lexer<'_> {
             lexeme.push('.');
             raw_for_span.push('.');
             self.advance();
-            if self.consume_digits_with_separators(
-                &mut lexeme,
-                &mut raw_for_span,
-                |c| c.is_ascii_digit(),
-            )
-            .is_some()
+            if self
+                .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
+                    c.is_ascii_digit()
+                })
+                .is_some()
             {
                 let span = Span::from_text(start_pos, &raw_for_span);
                 return Token::new(
@@ -299,12 +293,11 @@ impl Lexer<'_> {
                 raw_for_span.push(ch);
                 self.advance();
             }
-            if self.consume_digits_with_separators(
-                &mut lexeme,
-                &mut raw_for_span,
-                |c| c.is_ascii_digit(),
-            )
-            .is_some()
+            if self
+                .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
+                    c.is_ascii_digit()
+                })
+                .is_some()
             {
                 let span = Span::from_text(start_pos, &raw_for_span);
                 return Token::new(
@@ -327,7 +320,8 @@ impl Lexer<'_> {
         lexeme.push(ch);
         raw_for_span.push(ch);
         self.advance();
-        if self.consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| c.is_ascii_digit())
+        if self
+            .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| c.is_ascii_digit())
             .is_some()
         {
             let span = Span::from_text(start_pos, &raw_for_span);
@@ -350,7 +344,10 @@ impl Lexer<'_> {
                 raw_for_span.push(ch);
                 self.advance();
             }
-            if self.consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| c.is_ascii_digit())
+            if self
+                .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
+                    c.is_ascii_digit()
+                })
                 .is_some()
             {
                 let span = Span::from_text(start_pos, &raw_for_span);

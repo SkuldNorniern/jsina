@@ -200,16 +200,12 @@ pub fn vm_error_to_diagnostic(e: &VmError) -> Diagnostic {
             pc,
             opcode,
             stack_len,
-        } => Diagnostic::error(
-            ErrorCode::RunStackUnderflow,
-            "stack underflow",
-            None,
-        )
-        .with_cause(format!(
-            "opcode 0x{:02x} at chunk={} pc={} tried to pop with stack_len={}",
-            opcode, chunk_index, pc, stack_len
-        ))
-        .with_help("this usually indicates a compiler bug or invalid bytecode"),
+        } => Diagnostic::error(ErrorCode::RunStackUnderflow, "stack underflow", None)
+            .with_cause(format!(
+                "opcode 0x{:02x} at chunk={} pc={} tried to pop with stack_len={}",
+                opcode, chunk_index, pc, stack_len
+            ))
+            .with_help("this usually indicates a compiler bug or invalid bytecode"),
 
         VmError::InvalidOpcode(op) => Diagnostic::error(
             ErrorCode::RunInvalidOpcode,

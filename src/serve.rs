@@ -58,8 +58,11 @@ fn handle_client(mut stream: TcpStream, root: &Path) {
     let (status, content_type, body) = if path == "/run" {
         let file = query
             .and_then(|q| {
-                q.split('&')
-                    .find_map(|p| p.split_once('=').filter(|(k, _)| *k == "file").map(|(_, v)| v))
+                q.split('&').find_map(|p| {
+                    p.split_once('=')
+                        .filter(|(k, _)| *k == "file")
+                        .map(|(_, v)| v)
+                })
             })
             .unwrap_or("app.js");
         let result = run_js_file(root, file);

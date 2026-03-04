@@ -43,13 +43,7 @@ pub fn build_loop_sum_module(limit: u32) -> lamina::ir::Module<'static> {
             var("sum"),
             var("i"),
         )
-        .binary(
-            BinaryOp::Add,
-            "i_new",
-            PrimitiveType::I64,
-            var("i"),
-            i64(1),
-        )
+        .binary(BinaryOp::Add, "i_new", PrimitiveType::I64, var("i"), i64(1))
         .cmp(
             CmpOp::Gt,
             "cond",

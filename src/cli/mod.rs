@@ -68,11 +68,12 @@ EXAMPLES:
 pub fn run(args: &[String]) -> Result<(), CliError> {
     let (command, path) = parse_args(args)?;
     let cmd = command.as_deref().unwrap_or("run");
-    let source = if cmd == "test262" || cmd == "serve" || cmd == "help" || cmd == "-h" || cmd == "--help" {
-        String::new()
-    } else {
-        load_source(path)?
-    };
+    let source =
+        if cmd == "test262" || cmd == "serve" || cmd == "help" || cmd == "-h" || cmd == "--help" {
+            String::new()
+        } else {
+            load_source(path)?
+        };
 
     match cmd {
         "serve" => {
@@ -86,7 +87,12 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             }
             let jit_enabled = jit || jit_stats;
             let result = if jit_stats {
-                Driver::run_with_host_and_jit_stats(&crate::host::CliHost, &source, trace, jit_enabled)?
+                Driver::run_with_host_and_jit_stats(
+                    &crate::host::CliHost,
+                    &source,
+                    trace,
+                    jit_enabled,
+                )?
             } else if jit_enabled {
                 Driver::run_with_host(&crate::host::CliHost, &source, trace, true)?
             } else {
@@ -157,7 +163,11 @@ fn parse_args(args: &[String]) -> Result<(Option<String>, Option<&str>), CliErro
         } else if arg == "--port" {
             i += 2;
             continue;
-        } else if ["run", "serve", "tokens", "ast", "hir", "bc", "ir", "test262"].contains(&arg.as_str()) {
+        } else if [
+            "run", "serve", "tokens", "ast", "hir", "bc", "ir", "test262",
+        ]
+        .contains(&arg.as_str())
+        {
             if command.is_none() {
                 command = Some(arg.clone());
             } else if path.is_none() {

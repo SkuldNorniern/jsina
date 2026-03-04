@@ -65,9 +65,21 @@ impl Heap {
         self.global_object_id = global_id;
 
         let obj_proto_id = self.alloc_object();
-        self.set_prop(obj_proto_id, "toString", Value::Builtin(b("Object", "toString")));
-        self.set_prop(obj_proto_id, "hasOwnProperty", Value::Builtin(b("Object", "hasOwnProperty")));
-        self.set_prop(obj_proto_id, "propertyIsEnumerable", Value::Builtin(b("Object", "propertyIsEnumerable")));
+        self.set_prop(
+            obj_proto_id,
+            "toString",
+            Value::Builtin(b("Object", "toString")),
+        );
+        self.set_prop(
+            obj_proto_id,
+            "hasOwnProperty",
+            Value::Builtin(b("Object", "hasOwnProperty")),
+        );
+        self.set_prop(
+            obj_proto_id,
+            "propertyIsEnumerable",
+            Value::Builtin(b("Object", "propertyIsEnumerable")),
+        );
         let obj_id = self.alloc_object();
         self.set_prop(obj_id, "prototype", Value::Object(obj_proto_id));
         self.set_prop(obj_id, "create", Value::Builtin(b("Object", "create")));
@@ -75,65 +87,185 @@ impl Heap {
         self.set_prop(obj_id, "values", Value::Builtin(b("Object", "values")));
         self.set_prop(obj_id, "entries", Value::Builtin(b("Object", "entries")));
         self.set_prop(obj_id, "assign", Value::Builtin(b("Object", "assign")));
-        self.set_prop(obj_id, "hasOwnProperty", Value::Builtin(b("Object", "hasOwnProperty")));
-        self.set_prop(obj_id, "preventExtensions", Value::Builtin(b("Object", "preventExtensions")));
+        self.set_prop(
+            obj_id,
+            "hasOwnProperty",
+            Value::Builtin(b("Object", "hasOwnProperty")),
+        );
+        self.set_prop(
+            obj_id,
+            "preventExtensions",
+            Value::Builtin(b("Object", "preventExtensions")),
+        );
         self.set_prop(obj_id, "seal", Value::Builtin(b("Object", "seal")));
-        self.set_prop(obj_id, "setPrototypeOf", Value::Builtin(b("Object", "setPrototypeOf")));
-        self.set_prop(obj_id, "propertyIsEnumerable", Value::Builtin(b("Object", "propertyIsEnumerable")));
-        self.set_prop(obj_id, "getPrototypeOf", Value::Builtin(b("Object", "getPrototypeOf")));
+        self.set_prop(
+            obj_id,
+            "setPrototypeOf",
+            Value::Builtin(b("Object", "setPrototypeOf")),
+        );
+        self.set_prop(
+            obj_id,
+            "propertyIsEnumerable",
+            Value::Builtin(b("Object", "propertyIsEnumerable")),
+        );
+        self.set_prop(
+            obj_id,
+            "getPrototypeOf",
+            Value::Builtin(b("Object", "getPrototypeOf")),
+        );
         self.set_prop(obj_id, "freeze", Value::Builtin(b("Object", "freeze")));
-        self.set_prop(obj_id, "isExtensible", Value::Builtin(b("Object", "isExtensible")));
+        self.set_prop(
+            obj_id,
+            "isExtensible",
+            Value::Builtin(b("Object", "isExtensible")),
+        );
         self.set_prop(obj_id, "isFrozen", Value::Builtin(b("Object", "isFrozen")));
         self.set_prop(obj_id, "isSealed", Value::Builtin(b("Object", "isSealed")));
         self.set_prop(obj_id, "hasOwn", Value::Builtin(b("Object", "hasOwn")));
         self.set_prop(obj_id, "is", Value::Builtin(b("Object", "is")));
-        self.set_prop(obj_id, "fromEntries", Value::Builtin(b("Object", "fromEntries")));
-        self.set_prop(obj_id, "getOwnPropertyDescriptor", Value::Builtin(b("Object", "getOwnPropertyDescriptor")));
-        self.set_prop(obj_id, "getOwnPropertyNames", Value::Builtin(b("Object", "getOwnPropertyNames")));
-        self.set_prop(obj_id, "defineProperty", Value::Builtin(b("Object", "defineProperty")));
-        self.set_prop(obj_id, "defineProperties", Value::Builtin(b("Object", "defineProperties")));
+        self.set_prop(
+            obj_id,
+            "fromEntries",
+            Value::Builtin(b("Object", "fromEntries")),
+        );
+        self.set_prop(
+            obj_id,
+            "getOwnPropertyDescriptor",
+            Value::Builtin(b("Object", "getOwnPropertyDescriptor")),
+        );
+        self.set_prop(
+            obj_id,
+            "getOwnPropertyNames",
+            Value::Builtin(b("Object", "getOwnPropertyNames")),
+        );
+        self.set_prop(
+            obj_id,
+            "defineProperty",
+            Value::Builtin(b("Object", "defineProperty")),
+        );
+        self.set_prop(
+            obj_id,
+            "defineProperties",
+            Value::Builtin(b("Object", "defineProperties")),
+        );
         self.set_prop(global_id, "Object", Value::Object(obj_id));
 
         let arr_proto_id = self.alloc_object();
         self.set_prop(arr_proto_id, "push", Value::Builtin(b("Array", "push")));
         self.set_prop(arr_proto_id, "pop", Value::Builtin(b("Array", "pop")));
-        self.set_prop(arr_proto_id, "isArray", Value::Builtin(b("Array", "isArray")));
+        self.set_prop(
+            arr_proto_id,
+            "isArray",
+            Value::Builtin(b("Array", "isArray")),
+        );
         self.set_prop(arr_proto_id, "slice", Value::Builtin(b("Array", "slice")));
         self.set_prop(arr_proto_id, "concat", Value::Builtin(b("Array", "concat")));
-        self.set_prop(arr_proto_id, "indexOf", Value::Builtin(b("Array", "indexOf")));
+        self.set_prop(
+            arr_proto_id,
+            "indexOf",
+            Value::Builtin(b("Array", "indexOf")),
+        );
         self.set_prop(arr_proto_id, "join", Value::Builtin(b("Array", "join")));
         self.set_prop(arr_proto_id, "shift", Value::Builtin(b("Array", "shift")));
-        self.set_prop(arr_proto_id, "unshift", Value::Builtin(b("Array", "unshift")));
-        self.set_prop(arr_proto_id, "reverse", Value::Builtin(b("Array", "reverse")));
-        self.set_prop(arr_proto_id, "includes", Value::Builtin(b("Array", "includes")));
+        self.set_prop(
+            arr_proto_id,
+            "unshift",
+            Value::Builtin(b("Array", "unshift")),
+        );
+        self.set_prop(
+            arr_proto_id,
+            "reverse",
+            Value::Builtin(b("Array", "reverse")),
+        );
+        self.set_prop(
+            arr_proto_id,
+            "includes",
+            Value::Builtin(b("Array", "includes")),
+        );
         self.set_prop(arr_proto_id, "at", Value::Builtin(b("Array", "at")));
         self.set_prop(arr_proto_id, "fill", Value::Builtin(b("Array", "fill")));
-        self.set_prop(arr_proto_id, "lastIndexOf", Value::Builtin(b("Array", "lastIndexOf")));
-        self.set_prop(arr_proto_id, "toString", Value::Builtin(b("Array", "toString")));
+        self.set_prop(
+            arr_proto_id,
+            "lastIndexOf",
+            Value::Builtin(b("Array", "lastIndexOf")),
+        );
+        self.set_prop(
+            arr_proto_id,
+            "toString",
+            Value::Builtin(b("Array", "toString")),
+        );
         self.set_prop(arr_proto_id, "length", Value::Int(0));
         self.set_prop(arr_proto_id, "map", Value::Builtin(b("Array", "map")));
         self.set_prop(arr_proto_id, "reduce", Value::Builtin(b("Array", "reduce")));
-        self.set_prop(arr_proto_id, "reduceRight", Value::Builtin(b("Array", "reduceRight")));
+        self.set_prop(
+            arr_proto_id,
+            "reduceRight",
+            Value::Builtin(b("Array", "reduceRight")),
+        );
         self.set_prop(arr_proto_id, "some", Value::Builtin(b("Array", "some")));
         self.set_prop(arr_proto_id, "every", Value::Builtin(b("Array", "every")));
-        self.set_prop(arr_proto_id, "forEach", Value::Builtin(b("Array", "forEach")));
+        self.set_prop(
+            arr_proto_id,
+            "forEach",
+            Value::Builtin(b("Array", "forEach")),
+        );
         self.set_prop(arr_proto_id, "filter", Value::Builtin(b("Array", "filter")));
         self.set_prop(arr_proto_id, "splice", Value::Builtin(b("Array", "splice")));
         self.set_prop(arr_proto_id, "sort", Value::Builtin(b("Array", "sort")));
-        self.set_prop(arr_proto_id, "toLocaleString", Value::Builtin(b("Array", "toLocaleString")));
+        self.set_prop(
+            arr_proto_id,
+            "toLocaleString",
+            Value::Builtin(b("Array", "toLocaleString")),
+        );
         self.set_prop(arr_proto_id, "values", Value::Builtin(b("Array", "values")));
         self.set_prop(arr_proto_id, "keys", Value::Builtin(b("Array", "keys")));
-        self.set_prop(arr_proto_id, "entries", Value::Builtin(b("Array", "entries")));
+        self.set_prop(
+            arr_proto_id,
+            "entries",
+            Value::Builtin(b("Array", "entries")),
+        );
         self.set_prop(arr_proto_id, "find", Value::Builtin(b("Array", "find")));
-        self.set_prop(arr_proto_id, "findIndex", Value::Builtin(b("Array", "findIndex")));
-        self.set_prop(arr_proto_id, "findLast", Value::Builtin(b("Array", "findLast")));
-        self.set_prop(arr_proto_id, "findLastIndex", Value::Builtin(b("Array", "findLastIndex")));
+        self.set_prop(
+            arr_proto_id,
+            "findIndex",
+            Value::Builtin(b("Array", "findIndex")),
+        );
+        self.set_prop(
+            arr_proto_id,
+            "findLast",
+            Value::Builtin(b("Array", "findLast")),
+        );
+        self.set_prop(
+            arr_proto_id,
+            "findLastIndex",
+            Value::Builtin(b("Array", "findLastIndex")),
+        );
         self.set_prop(arr_proto_id, "flat", Value::Builtin(b("Array", "flat")));
-        self.set_prop(arr_proto_id, "flatMap", Value::Builtin(b("Array", "flatMap")));
-        self.set_prop(arr_proto_id, "copyWithin", Value::Builtin(b("Array", "copyWithin")));
-        self.set_prop(arr_proto_id, "toReversed", Value::Builtin(b("Array", "toReversed")));
-        self.set_prop(arr_proto_id, "toSorted", Value::Builtin(b("Array", "toSorted")));
-        self.set_prop(arr_proto_id, "toSpliced", Value::Builtin(b("Array", "toSpliced")));
+        self.set_prop(
+            arr_proto_id,
+            "flatMap",
+            Value::Builtin(b("Array", "flatMap")),
+        );
+        self.set_prop(
+            arr_proto_id,
+            "copyWithin",
+            Value::Builtin(b("Array", "copyWithin")),
+        );
+        self.set_prop(
+            arr_proto_id,
+            "toReversed",
+            Value::Builtin(b("Array", "toReversed")),
+        );
+        self.set_prop(
+            arr_proto_id,
+            "toSorted",
+            Value::Builtin(b("Array", "toSorted")),
+        );
+        self.set_prop(
+            arr_proto_id,
+            "toSpliced",
+            Value::Builtin(b("Array", "toSpliced")),
+        );
         self.set_prop(arr_proto_id, "with", Value::Builtin(b("Array", "with")));
         self.array_prototype_id = Some(arr_proto_id);
 
@@ -156,7 +288,11 @@ impl Heap {
         self.set_prop(math_id, "random", Value::Builtin(b("Math", "random")));
         self.set_prop(math_id, "sign", Value::Builtin(b("Math", "sign")));
         self.set_prop(math_id, "trunc", Value::Builtin(b("Math", "trunc")));
-        self.set_prop(math_id, "sumPrecise", Value::Builtin(b("Math", "sumPrecise")));
+        self.set_prop(
+            math_id,
+            "sumPrecise",
+            Value::Builtin(b("Math", "sumPrecise")),
+        );
         self.set_prop(global_id, "Math", Value::Object(math_id));
 
         let json_id = self.alloc_object();
@@ -167,41 +303,133 @@ impl Heap {
         let str_proto_id = self.alloc_object();
         self.set_prop(str_proto_id, "split", Value::Builtin(b("String", "split")));
         self.set_prop(str_proto_id, "match", Value::Builtin(b("String", "match")));
-        self.set_prop(str_proto_id, "search", Value::Builtin(b("String", "search")));
-        self.set_prop(str_proto_id, "replace", Value::Builtin(b("String", "replace")));
-        self.set_prop(str_proto_id, "replaceAll", Value::Builtin(b("String", "replace")));
+        self.set_prop(
+            str_proto_id,
+            "search",
+            Value::Builtin(b("String", "search")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "replace",
+            Value::Builtin(b("String", "replace")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "replaceAll",
+            Value::Builtin(b("String", "replace")),
+        );
         self.set_prop(str_proto_id, "trim", Value::Builtin(b("String", "trim")));
-        self.set_prop(str_proto_id, "startsWith", Value::Builtin(b("String", "startsWith")));
-        self.set_prop(str_proto_id, "endsWith", Value::Builtin(b("String", "endsWith")));
-        self.set_prop(str_proto_id, "toLowerCase", Value::Builtin(b("String", "toLowerCase")));
-        self.set_prop(str_proto_id, "toUpperCase", Value::Builtin(b("String", "toUpperCase")));
-        self.set_prop(str_proto_id, "charAt", Value::Builtin(b("String", "charAt")));
+        self.set_prop(
+            str_proto_id,
+            "startsWith",
+            Value::Builtin(b("String", "startsWith")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "endsWith",
+            Value::Builtin(b("String", "endsWith")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "toLowerCase",
+            Value::Builtin(b("String", "toLowerCase")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "toUpperCase",
+            Value::Builtin(b("String", "toUpperCase")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "charAt",
+            Value::Builtin(b("String", "charAt")),
+        );
         self.set_prop(str_proto_id, "at", Value::Builtin(b("String", "at")));
-        self.set_prop(str_proto_id, "includes", Value::Builtin(b("String", "includes")));
-        self.set_prop(str_proto_id, "padStart", Value::Builtin(b("String", "padStart")));
-        self.set_prop(str_proto_id, "padEnd", Value::Builtin(b("String", "padEnd")));
-        self.set_prop(str_proto_id, "indexOf", Value::Builtin(b("Array", "indexOf")));
-        self.set_prop(str_proto_id, "lastIndexOf", Value::Builtin(b("Array", "lastIndexOf")));
-        self.set_prop(str_proto_id, "repeat", Value::Builtin(b("String", "repeat")));
-        self.set_prop(str_proto_id, "anchor", Value::Builtin(b("String", "anchor")));
+        self.set_prop(
+            str_proto_id,
+            "includes",
+            Value::Builtin(b("String", "includes")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "padStart",
+            Value::Builtin(b("String", "padStart")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "padEnd",
+            Value::Builtin(b("String", "padEnd")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "indexOf",
+            Value::Builtin(b("Array", "indexOf")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "lastIndexOf",
+            Value::Builtin(b("Array", "lastIndexOf")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "repeat",
+            Value::Builtin(b("String", "repeat")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "anchor",
+            Value::Builtin(b("String", "anchor")),
+        );
         self.set_prop(str_proto_id, "big", Value::Builtin(b("String", "big")));
         self.set_prop(str_proto_id, "blink", Value::Builtin(b("String", "blink")));
         self.set_prop(str_proto_id, "bold", Value::Builtin(b("String", "bold")));
         self.set_prop(str_proto_id, "fixed", Value::Builtin(b("String", "fixed")));
-        self.set_prop(str_proto_id, "fontcolor", Value::Builtin(b("String", "fontcolor")));
-        self.set_prop(str_proto_id, "fontsize", Value::Builtin(b("String", "fontsize")));
-        self.set_prop(str_proto_id, "italics", Value::Builtin(b("String", "italics")));
+        self.set_prop(
+            str_proto_id,
+            "fontcolor",
+            Value::Builtin(b("String", "fontcolor")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "fontsize",
+            Value::Builtin(b("String", "fontsize")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "italics",
+            Value::Builtin(b("String", "italics")),
+        );
         self.set_prop(str_proto_id, "link", Value::Builtin(b("String", "link")));
         self.set_prop(str_proto_id, "small", Value::Builtin(b("String", "small")));
-        self.set_prop(str_proto_id, "strike", Value::Builtin(b("String", "strike")));
+        self.set_prop(
+            str_proto_id,
+            "strike",
+            Value::Builtin(b("String", "strike")),
+        );
         self.set_prop(str_proto_id, "sub", Value::Builtin(b("String", "sub")));
-        self.set_prop(str_proto_id, "substr", Value::Builtin(b("String", "substr")));
+        self.set_prop(
+            str_proto_id,
+            "substr",
+            Value::Builtin(b("String", "substr")),
+        );
         self.set_prop(str_proto_id, "sup", Value::Builtin(b("String", "sup")));
-        self.set_prop(str_proto_id, "trimLeft", Value::Builtin(b("String", "trimLeft")));
-        self.set_prop(str_proto_id, "trimRight", Value::Builtin(b("String", "trimRight")));
+        self.set_prop(
+            str_proto_id,
+            "trimLeft",
+            Value::Builtin(b("String", "trimLeft")),
+        );
+        self.set_prop(
+            str_proto_id,
+            "trimRight",
+            Value::Builtin(b("String", "trimRight")),
+        );
         let str_id = self.alloc_object();
         self.set_prop(str_id, "prototype", Value::Object(str_proto_id));
-        self.set_prop(str_id, "fromCharCode", Value::Builtin(b("String", "fromCharCode")));
+        self.set_prop(
+            str_id,
+            "fromCharCode",
+            Value::Builtin(b("String", "fromCharCode")),
+        );
         self.set_prop(global_id, "String", Value::Object(str_id));
 
         let num_id = self.alloc_object();
@@ -217,8 +445,16 @@ impl Heap {
             "MAX_SAFE_INTEGER",
             Value::Number(9007199254740991.0),
         );
-        self.set_prop(num_id, "isInteger", Value::Builtin(b("Number", "isInteger")));
-        self.set_prop(num_id, "isSafeInteger", Value::Builtin(b("Number", "isSafeInteger")));
+        self.set_prop(
+            num_id,
+            "isInteger",
+            Value::Builtin(b("Number", "isInteger")),
+        );
+        self.set_prop(
+            num_id,
+            "isSafeInteger",
+            Value::Builtin(b("Number", "isSafeInteger")),
+        );
         self.set_prop(num_id, "isFinite", Value::Builtin(b("Number", "isFinite")));
         self.set_prop(num_id, "isNaN", Value::Builtin(b("Number", "isNaN")));
         self.set_prop(global_id, "Number", Value::Object(num_id));
@@ -259,7 +495,11 @@ impl Heap {
             "name",
             Value::String("SyntaxError".to_string()),
         );
-        self.set_prop(syntax_err_id, "__call__", Value::Builtin(b("Type", "Error")));
+        self.set_prop(
+            syntax_err_id,
+            "__call__",
+            Value::Builtin(b("Type", "Error")),
+        );
         self.set_prop(global_id, "SyntaxError", Value::Object(syntax_err_id));
 
         let uri_err_id = self.alloc_object();
@@ -278,14 +518,22 @@ impl Heap {
             "name",
             Value::String("AggregateError".to_string()),
         );
-        self.set_prop(aggregate_err_id, "__call__", Value::Builtin(b("Type", "Error")));
+        self.set_prop(
+            aggregate_err_id,
+            "__call__",
+            Value::Builtin(b("Type", "Error")),
+        );
         self.set_prop(global_id, "AggregateError", Value::Object(aggregate_err_id));
 
         let regexp_proto_id = self.alloc_object();
         self.regexp_prototype_id = Some(regexp_proto_id);
         self.set_prop(regexp_proto_id, "exec", Value::Builtin(b("RegExp", "exec")));
         self.set_prop(regexp_proto_id, "test", Value::Builtin(b("RegExp", "test")));
-        self.set_prop(regexp_proto_id, "compile", Value::Builtin(b("RegExp", "compile")));
+        self.set_prop(
+            regexp_proto_id,
+            "compile",
+            Value::Builtin(b("RegExp", "compile")),
+        );
         self.set_prop(
             regexp_proto_id,
             "Symbol.match",
@@ -326,19 +574,51 @@ impl Heap {
 
         let date_id = self.alloc_object();
         let date_proto_id = self.alloc_object();
-        self.set_prop(date_proto_id, "getTime", Value::Builtin(b("Date", "getTime")));
-        self.set_prop(date_proto_id, "toString", Value::Builtin(b("Date", "toString")));
-        self.set_prop(date_proto_id, "toISOString", Value::Builtin(b("Date", "toISOString")));
-        self.set_prop(date_proto_id, "getYear", Value::Builtin(b("Date", "getYear")));
-        self.set_prop(date_proto_id, "getFullYear", Value::Builtin(b("Date", "getFullYear")));
-        self.set_prop(date_proto_id, "setYear", Value::Builtin(b("Date", "setYear")));
-        self.set_prop(date_proto_id, "toGMTString", Value::Builtin(b("Date", "toGMTString")));
+        self.set_prop(
+            date_proto_id,
+            "getTime",
+            Value::Builtin(b("Date", "getTime")),
+        );
+        self.set_prop(
+            date_proto_id,
+            "toString",
+            Value::Builtin(b("Date", "toString")),
+        );
+        self.set_prop(
+            date_proto_id,
+            "toISOString",
+            Value::Builtin(b("Date", "toISOString")),
+        );
+        self.set_prop(
+            date_proto_id,
+            "getYear",
+            Value::Builtin(b("Date", "getYear")),
+        );
+        self.set_prop(
+            date_proto_id,
+            "getFullYear",
+            Value::Builtin(b("Date", "getFullYear")),
+        );
+        self.set_prop(
+            date_proto_id,
+            "setYear",
+            Value::Builtin(b("Date", "setYear")),
+        );
+        self.set_prop(
+            date_proto_id,
+            "toGMTString",
+            Value::Builtin(b("Date", "toGMTString")),
+        );
         self.set_prop(date_id, "prototype", Value::Object(date_proto_id));
         self.set_prop(date_id, "__call__", Value::Builtin(b("Date", "create")));
         self.set_prop(date_id, "now", Value::Builtin(b("Date", "now")));
         self.set_prop(date_id, "getTime", Value::Builtin(b("Date", "getTime")));
         self.set_prop(date_id, "toString", Value::Builtin(b("Date", "toString")));
-        self.set_prop(date_id, "toISOString", Value::Builtin(b("Date", "toISOString")));
+        self.set_prop(
+            date_id,
+            "toISOString",
+            Value::Builtin(b("Date", "toISOString")),
+        );
         self.set_prop(global_id, "Date", Value::Object(date_id));
 
         self.set_prop(global_id, "NaN", Value::Number(f64::NAN));
@@ -369,20 +649,56 @@ impl Heap {
 
         self.set_prop(global_id, "print", Value::Builtin(b("Host", "print")));
         self.set_prop(global_id, "eval", Value::Builtin(b("Global", "eval")));
-        self.set_prop(global_id, "encodeURI", Value::Builtin(b("Global", "encodeURI")));
-        self.set_prop(global_id, "encodeURIComponent", Value::Builtin(b("Global", "encodeURIComponent")));
-        self.set_prop(global_id, "decodeURI", Value::Builtin(b("Global", "decodeURI")));
-        self.set_prop(global_id, "decodeURIComponent", Value::Builtin(b("Global", "decodeURIComponent")));
-        self.set_prop(global_id, "parseInt", Value::Builtin(b("Global", "parseInt")));
-        self.set_prop(global_id, "parseFloat", Value::Builtin(b("Global", "parseFloat")));
+        self.set_prop(
+            global_id,
+            "encodeURI",
+            Value::Builtin(b("Global", "encodeURI")),
+        );
+        self.set_prop(
+            global_id,
+            "encodeURIComponent",
+            Value::Builtin(b("Global", "encodeURIComponent")),
+        );
+        self.set_prop(
+            global_id,
+            "decodeURI",
+            Value::Builtin(b("Global", "decodeURI")),
+        );
+        self.set_prop(
+            global_id,
+            "decodeURIComponent",
+            Value::Builtin(b("Global", "decodeURIComponent")),
+        );
+        self.set_prop(
+            global_id,
+            "parseInt",
+            Value::Builtin(b("Global", "parseInt")),
+        );
+        self.set_prop(
+            global_id,
+            "parseFloat",
+            Value::Builtin(b("Global", "parseFloat")),
+        );
         self.set_prop(global_id, "escape", Value::Builtin(b("Global", "escape")));
-        self.set_prop(global_id, "unescape", Value::Builtin(b("Global", "unescape")));
+        self.set_prop(
+            global_id,
+            "unescape",
+            Value::Builtin(b("Global", "unescape")),
+        );
         let int32array = b("TypedArray", "Int32Array");
         self.set_prop(global_id, "Int32Array", Value::Builtin(int32array));
         self.set_prop(global_id, "Int8Array", Value::Builtin(int32array));
         self.set_prop(global_id, "Int16Array", Value::Builtin(int32array));
-        self.set_prop(global_id, "Uint8Array", Value::Builtin(b("TypedArray", "Uint8Array")));
-        self.set_prop(global_id, "Uint8ClampedArray", Value::Builtin(b("TypedArray", "Uint8ClampedArray")));
+        self.set_prop(
+            global_id,
+            "Uint8Array",
+            Value::Builtin(b("TypedArray", "Uint8Array")),
+        );
+        self.set_prop(
+            global_id,
+            "Uint8ClampedArray",
+            Value::Builtin(b("TypedArray", "Uint8ClampedArray")),
+        );
         self.set_prop(global_id, "Uint16Array", Value::Builtin(int32array));
         self.set_prop(global_id, "Uint32Array", Value::Builtin(int32array));
         self.set_prop(global_id, "Float32Array", Value::Builtin(int32array));
@@ -390,21 +706,37 @@ impl Heap {
         self.set_prop(global_id, "Float16Array", Value::Builtin(int32array));
         self.set_prop(global_id, "BigInt64Array", Value::Builtin(int32array));
         self.set_prop(global_id, "BigUint64Array", Value::Builtin(int32array));
-        self.set_prop(global_id, "ArrayBuffer", Value::Builtin(b("TypedArray", "ArrayBuffer")));
+        self.set_prop(
+            global_id,
+            "ArrayBuffer",
+            Value::Builtin(b("TypedArray", "ArrayBuffer")),
+        );
         let func_proto_id = self.alloc_object();
         self.set_prop(func_proto_id, "call", Value::Builtin(b("Function", "call")));
         self.set_prop(func_proto_id, "bind", Value::Builtin(b("Function", "bind")));
-        self.set_prop(func_proto_id, "apply", Value::Builtin(b("Function", "apply")));
+        self.set_prop(
+            func_proto_id,
+            "apply",
+            Value::Builtin(b("Function", "apply")),
+        );
         let func_id = self.alloc_object();
         self.set_prop(func_id, "prototype", Value::Object(func_proto_id));
         self.set_prop(func_id, "__call__", Value::Builtin(b("Global", "Function")));
         self.set_prop(global_id, "Function", Value::Object(func_id));
         self.set_prop(global_id, "isNaN", Value::Builtin(b("Global", "isNaN")));
-        self.set_prop(global_id, "isFinite", Value::Builtin(b("Global", "isFinite")));
+        self.set_prop(
+            global_id,
+            "isFinite",
+            Value::Builtin(b("Global", "isFinite")),
+        );
         let reflect_id = self.alloc_object();
         self.set_prop(reflect_id, "get", Value::Builtin(b("Reflect", "get")));
         self.set_prop(reflect_id, "apply", Value::Builtin(b("Reflect", "apply")));
-        self.set_prop(reflect_id, "construct", Value::Builtin(b("Reflect", "construct")));
+        self.set_prop(
+            reflect_id,
+            "construct",
+            Value::Builtin(b("Reflect", "construct")),
+        );
         self.set_prop(global_id, "Reflect", Value::Object(reflect_id));
         let weakmap_id = self.alloc_object();
         self.set_prop(global_id, "WeakMap", Value::Object(weakmap_id));
@@ -858,14 +1190,11 @@ impl Heap {
                     _ => String::new(),
                 };
                 let name_str = if name.is_empty() {
-                    if let crate::runtime::Value::Object(ctor_id) = self.get_prop(*id, "constructor")
+                    if let crate::runtime::Value::Object(ctor_id) =
+                        self.get_prop(*id, "constructor")
                     {
                         if let crate::runtime::Value::String(s) = self.get_prop(ctor_id, "name") {
-                            if !s.is_empty() {
-                                s
-                            } else {
-                                String::new()
-                            }
+                            if !s.is_empty() { s } else { String::new() }
                         } else {
                             String::new()
                         }

@@ -132,9 +132,9 @@ pub fn supports_eval_subset(chunk: &BytecodeChunk) -> bool {
                 }
                 pc += 2;
             }
-            OP_RETURN | OP_POP | OP_DUP | OP_SWAP | OP_ADD | OP_SUB | OP_MUL | OP_DIV
-            | OP_MOD | OP_POW | OP_LT | OP_LTE | OP_GT | OP_GTE | OP_STRICT_EQ | OP_STRICT_NE
-            | OP_NOT | OP_SHL | OP_SHR | OP_USHR | OP_AND | OP_OR | OP_XOR | OP_BNOT => {}
+            OP_RETURN | OP_POP | OP_DUP | OP_SWAP | OP_ADD | OP_SUB | OP_MUL | OP_DIV | OP_MOD
+            | OP_POW | OP_LT | OP_LTE | OP_GT | OP_GTE | OP_STRICT_EQ | OP_STRICT_NE | OP_NOT
+            | OP_SHL | OP_SHR | OP_USHR | OP_AND | OP_OR | OP_XOR | OP_BNOT => {}
             _ => return false,
         }
     }
@@ -438,16 +438,14 @@ pub fn execute_int_loop(chunk: &BytecodeChunk, args: &[i64]) -> Option<i64> {
                     return None;
                 }
                 sp -= 1;
-                stack[sp - 1] =
-                    (stack[sp - 1] as i32).wrapping_shl(stack[sp] as u32) as i64;
+                stack[sp - 1] = (stack[sp - 1] as i32).wrapping_shl(stack[sp] as u32) as i64;
             }
             OP_SHR => {
                 if sp < 2 {
                     return None;
                 }
                 sp -= 1;
-                stack[sp - 1] =
-                    (stack[sp - 1] as i32).wrapping_shr(stack[sp] as u32) as i64;
+                stack[sp - 1] = (stack[sp - 1] as i32).wrapping_shr(stack[sp] as u32) as i64;
             }
             OP_USHR => {
                 if sp < 2 {
@@ -512,7 +510,15 @@ pub fn evaluate_cached(
                 return Some(r);
             }
         }
-        evaluate_cached(ci, a, program_chunks, depth + 1, stack_cache, result_cache, invoke_compiled)
+        evaluate_cached(
+            ci,
+            a,
+            program_chunks,
+            depth + 1,
+            stack_cache,
+            result_cache,
+            invoke_compiled,
+        )
     };
     let result = evaluate_chunk_impl(chunk, args, &mut recursive_call, program_chunks)?;
     stack_cache.insert(key.clone(), result);
@@ -735,28 +741,43 @@ mod tests {
     fn simple_loop_chunk(limit: i64) -> BytecodeChunk {
         BytecodeChunk {
             code: vec![
-                Opcode::PushConst as u8, 0,
-                Opcode::StoreLocal as u8, 0,
-                Opcode::PushConst as u8, 0,
-                Opcode::StoreLocal as u8, 1,
+                Opcode::PushConst as u8,
+                0,
+                Opcode::StoreLocal as u8,
+                0,
+                Opcode::PushConst as u8,
+                0,
+                Opcode::StoreLocal as u8,
+                1,
                 // loop body: sum += i
-                Opcode::LoadLocal as u8, 0,
-                Opcode::LoadLocal as u8, 1,
+                Opcode::LoadLocal as u8,
+                0,
+                Opcode::LoadLocal as u8,
+                1,
                 Opcode::Add as u8,
-                Opcode::StoreLocal as u8, 0,
+                Opcode::StoreLocal as u8,
+                0,
                 // i++
-                Opcode::LoadLocal as u8, 1,
-                Opcode::PushConst as u8, 2,
+                Opcode::LoadLocal as u8,
+                1,
+                Opcode::PushConst as u8,
+                2,
                 Opcode::Add as u8,
-                Opcode::StoreLocal as u8, 1,
+                Opcode::StoreLocal as u8,
+                1,
                 // i < limit
-                Opcode::LoadLocal as u8, 1,
-                Opcode::PushConst as u8, 1,
+                Opcode::LoadLocal as u8,
+                1,
+                Opcode::PushConst as u8,
+                1,
                 Opcode::Lt as u8,
                 // JumpIfFalse to after loop (offset = -(loop body size))
-                Opcode::JumpIfFalse as u8, 0xEE, 0xFF,
+                Opcode::JumpIfFalse as u8,
+                0xEE,
+                0xFF,
                 // return sum
-                Opcode::LoadLocal as u8, 0,
+                Opcode::LoadLocal as u8,
+                0,
                 Opcode::Return as u8,
             ],
             constants: vec![
@@ -791,10 +812,7 @@ mod tests {
     #[test]
     fn int_loop_rejects_no_loop() {
         let chunk = BytecodeChunk {
-            code: vec![
-                Opcode::PushConst as u8, 0,
-                Opcode::Return as u8,
-            ],
+            code: vec![Opcode::PushConst as u8, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(42)],
             num_locals: 0,
             named_locals: vec![],
@@ -810,36 +828,49 @@ mod tests {
     fn execute_int_loop_simple_sum() {
         let chunk = BytecodeChunk {
             code: vec![
-                Opcode::PushConst as u8, 0,
-                Opcode::StoreLocal as u8, 0,
-                Opcode::PushConst as u8, 0,
-                Opcode::StoreLocal as u8, 1,
+                Opcode::PushConst as u8,
+                0,
+                Opcode::StoreLocal as u8,
+                0,
+                Opcode::PushConst as u8,
+                0,
+                Opcode::StoreLocal as u8,
+                1,
                 // loop start (pc=8):
-                Opcode::LoadLocal as u8, 1,
-                Opcode::PushConst as u8, 1,
+                Opcode::LoadLocal as u8,
+                1,
+                Opcode::PushConst as u8,
+                1,
                 Opcode::Lt as u8,
-                Opcode::JumpIfFalse as u8, 0x11, 0x00,
+                Opcode::JumpIfFalse as u8,
+                0x11,
+                0x00,
                 // sum += i
-                Opcode::LoadLocal as u8, 0,
-                Opcode::LoadLocal as u8, 1,
+                Opcode::LoadLocal as u8,
+                0,
+                Opcode::LoadLocal as u8,
+                1,
                 Opcode::Add as u8,
-                Opcode::StoreLocal as u8, 0,
+                Opcode::StoreLocal as u8,
+                0,
                 // i++
-                Opcode::LoadLocal as u8, 1,
-                Opcode::PushConst as u8, 2,
+                Opcode::LoadLocal as u8,
+                1,
+                Opcode::PushConst as u8,
+                2,
                 Opcode::Add as u8,
-                Opcode::StoreLocal as u8, 1,
+                Opcode::StoreLocal as u8,
+                1,
                 // jump back to loop start
-                Opcode::Jump as u8, 0xE7, 0xFF,
+                Opcode::Jump as u8,
+                0xE7,
+                0xFF,
                 // return sum
-                Opcode::LoadLocal as u8, 0,
+                Opcode::LoadLocal as u8,
+                0,
                 Opcode::Return as u8,
             ],
-            constants: vec![
-                ConstEntry::Int(0),
-                ConstEntry::Int(10),
-                ConstEntry::Int(1),
-            ],
+            constants: vec![ConstEntry::Int(0), ConstEntry::Int(10), ConstEntry::Int(1)],
             num_locals: 2,
             named_locals: vec![],
             captured_names: vec![],
@@ -855,8 +886,10 @@ mod tests {
     fn eval_pow_supported() {
         let chunk = BytecodeChunk {
             code: vec![
-                Opcode::PushConst as u8, 0,
-                Opcode::PushConst as u8, 1,
+                Opcode::PushConst as u8,
+                0,
+                Opcode::PushConst as u8,
+                1,
                 Opcode::Pow as u8,
                 Opcode::Return as u8,
             ],
@@ -876,10 +909,7 @@ mod tests {
     #[test]
     fn supports_eval_with_pushconst16() {
         let chunk = BytecodeChunk {
-            code: vec![
-                Opcode::PushConst16 as u8, 0, 0,
-                Opcode::Return as u8,
-            ],
+            code: vec![Opcode::PushConst16 as u8, 0, 0, Opcode::Return as u8],
             constants: vec![ConstEntry::Int(99)],
             num_locals: 0,
             named_locals: vec![],

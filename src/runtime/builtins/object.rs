@@ -84,7 +84,10 @@ pub fn values(args: &[Value], heap: &mut Heap) -> Value {
             }
         }
         Some(Value::Array(id)) => {
-            let elems = heap.array_elements(*id).map(|s| s.to_vec()).unwrap_or_default();
+            let elems = heap
+                .array_elements(*id)
+                .map(|s| s.to_vec())
+                .unwrap_or_default();
             for v in elems {
                 heap.array_push(arr_id, v);
             }
@@ -98,7 +101,10 @@ pub fn entries(args: &[Value], heap: &mut Heap) -> Value {
     let outer_id = heap.alloc_array();
     if let Some(Value::Object(obj_id)) = args.first() {
         let ks = heap.object_keys(*obj_id);
-        let pairs: Vec<(String, Value)> = ks.iter().map(|k| (k.clone(), heap.get_prop(*obj_id, k))).collect();
+        let pairs: Vec<(String, Value)> = ks
+            .iter()
+            .map(|k| (k.clone(), heap.get_prop(*obj_id, k)))
+            .collect();
         for (k, v) in pairs {
             let pair_id = heap.alloc_array();
             heap.array_push(pair_id, Value::String(k));
@@ -130,7 +136,10 @@ pub fn assign(args: &[Value], heap: &mut Heap) -> Value {
 }
 
 pub fn has_own_property(args: &[Value], heap: &mut Heap) -> Value {
-    let key = args.get(1).map(|v| to_prop_key_with_heap(v, heap)).unwrap_or_default();
+    let key = args
+        .get(1)
+        .map(|v| to_prop_key_with_heap(v, heap))
+        .unwrap_or_default();
     let result = match args.first() {
         Some(Value::Object(id)) => heap.object_has_own_property(*id, &key),
         Some(Value::Function(function_index)) => {
@@ -167,7 +176,10 @@ pub fn set_prototype_of(args: &[Value], heap: &mut Heap) -> Value {
 }
 
 pub fn property_is_enumerable(args: &[Value], heap: &mut Heap) -> Value {
-    let key = args.get(1).map(|v| to_prop_key_with_heap(v, heap)).unwrap_or_default();
+    let key = args
+        .get(1)
+        .map(|v| to_prop_key_with_heap(v, heap))
+        .unwrap_or_default();
     let result = match args.first() {
         Some(Value::Object(id)) => heap.object_has_own_property(*id, &key),
         Some(Value::Function(function_index)) => {
@@ -198,7 +210,9 @@ pub fn to_string(args: &[Value], heap: &mut Heap) -> Value {
                 "Object"
             }
         }
-        Some(Value::Function(_)) | Some(Value::DynamicFunction(_)) | Some(Value::Builtin(_))
+        Some(Value::Function(_))
+        | Some(Value::DynamicFunction(_))
+        | Some(Value::Builtin(_))
         | Some(Value::BoundBuiltin(_, _, _))
         | Some(Value::BoundFunction(_, _, _)) => "Function",
         Some(Value::Array(_)) => "Array",
@@ -238,7 +252,10 @@ pub fn is_sealed(_args: &[Value], _heap: &mut Heap) -> Value {
 }
 
 pub fn has_own(args: &[Value], heap: &mut Heap) -> Value {
-    let key = args.get(1).map(|v| to_prop_key_with_heap(v, heap)).unwrap_or_default();
+    let key = args
+        .get(1)
+        .map(|v| to_prop_key_with_heap(v, heap))
+        .unwrap_or_default();
     let result = match args.first() {
         Some(Value::Object(id)) => heap.object_has_own_property(*id, &key),
         Some(Value::Function(function_index)) => {
@@ -296,7 +313,10 @@ pub fn get_own_property_descriptor(args: &[Value], heap: &mut Heap) -> Value {
         Some(value) => value,
         None => return Value::Undefined,
     };
-    let key = args.get(1).map(|v| to_prop_key_with_heap(v, heap)).unwrap_or_default();
+    let key = args
+        .get(1)
+        .map(|v| to_prop_key_with_heap(v, heap))
+        .unwrap_or_default();
     match target {
         Value::Object(id) => {
             if !heap.object_has_own_property(*id, &key) {
@@ -343,13 +363,7 @@ pub fn get_own_property_descriptor(args: &[Value], heap: &mut Heap) -> Value {
                 create_data_descriptor(Value::Int(len), false, false, true, heap)
             } else if key == "name" {
                 let name = builtins::name(*id);
-                create_data_descriptor(
-                    Value::String(name.to_string()),
-                    false,
-                    false,
-                    true,
-                    heap,
-                )
+                create_data_descriptor(Value::String(name.to_string()), false, false, true, heap)
             } else {
                 Value::Undefined
             }
@@ -398,7 +412,10 @@ pub fn define_property(args: &[Value], heap: &mut Heap) -> Value {
         Some(value) => value.clone(),
         None => return Value::Undefined,
     };
-    let key = args.get(1).map(|v| to_prop_key_with_heap(v, heap)).unwrap_or_default();
+    let key = args
+        .get(1)
+        .map(|v| to_prop_key_with_heap(v, heap))
+        .unwrap_or_default();
     let descriptor = args.get(2).cloned().unwrap_or(Value::Undefined);
     let descriptor_value = match descriptor {
         Value::Object(descriptor_id) => {
@@ -508,7 +525,10 @@ mod tests {
         let mut heap = Heap::new();
         let escape_id = crate::runtime::builtins::resolve("Global", "escape").expect("escape");
         let descriptor = get_own_property_descriptor(
-            &[Value::Builtin(escape_id), Value::String("length".to_string())],
+            &[
+                Value::Builtin(escape_id),
+                Value::String("length".to_string()),
+            ],
             &mut heap,
         );
         let descriptor_id = match descriptor {
@@ -520,9 +540,15 @@ mod tests {
             Value::Int(1),
             "escape.length must be 1"
         );
-        assert_eq!(heap.get_prop(descriptor_id, "enumerable"), Value::Bool(false));
+        assert_eq!(
+            heap.get_prop(descriptor_id, "enumerable"),
+            Value::Bool(false)
+        );
         assert_eq!(heap.get_prop(descriptor_id, "writable"), Value::Bool(false));
-        assert_eq!(heap.get_prop(descriptor_id, "configurable"), Value::Bool(true));
+        assert_eq!(
+            heap.get_prop(descriptor_id, "configurable"),
+            Value::Bool(true)
+        );
     }
 
     #[test]

@@ -28,7 +28,11 @@ fn binary_op_precedence(op: BinaryOp) -> u8 {
         BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => 12,
         BinaryOp::Add | BinaryOp::Sub => 11,
         BinaryOp::LeftShift | BinaryOp::RightShift | BinaryOp::UnsignedRightShift => 10,
-        BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte | BinaryOp::Instanceof
+        BinaryOp::Lt
+        | BinaryOp::Lte
+        | BinaryOp::Gt
+        | BinaryOp::Gte
+        | BinaryOp::Instanceof
         | BinaryOp::In => 9,
         BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::StrictEq | BinaryOp::StrictNotEq => 8,
         BinaryOp::BitwiseAnd => 7,
@@ -378,6 +382,27 @@ impl Parser {
                 let token = self.expect(TokenType::Identifier)?;
                 params.push(crate::frontend::ast::Param::Rest(token.lexeme));
                 break;
+            }
+            if matches!(
+                self.current().map(|t| &t.token_type),
+                Some(TokenType::LeftBrace) | Some(TokenType::LeftBracket)
+            ) {
+                let (binding, _) = self.parse_binding()?;
+                match binding {
+                    Binding::ObjectPattern(props) => {
+                        params.push(crate::frontend::ast::Param::ObjectPattern(props));
+                    }
+                    Binding::ArrayPattern(elems) => {
+                        params.push(crate::frontend::ast::Param::ArrayPattern(elems));
+                    }
+                    Binding::Ident(_) => {
+                        unreachable!("parse_binding starting with brace or bracket returns pattern")
+                    }
+                }
+                if !self.optional(TokenType::Comma) {
+                    break;
+                }
+                continue;
             }
             if matches!(
                 self.current().map(|t| &t.token_type),
@@ -1530,7 +1555,10 @@ impl Parser {
                     });
                     continue;
                 }
-                if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Spread)) {
+                if matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::Spread)
+                ) {
                     self.advance();
                     let (rest_name, _) = self.expect_binding_identifier()?;
                     elems.push(ArrayPatternElem {

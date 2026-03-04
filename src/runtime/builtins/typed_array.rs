@@ -59,9 +59,10 @@ pub fn data_view(
         Value::Array(id) => heap.array_len(*id),
         _ => 0,
     };
-    let byte_length = args.get(2).map(|v| v.to_i64().max(0) as usize).unwrap_or(
-        buffer_len.saturating_sub(byte_offset),
-    );
+    let byte_length = args
+        .get(2)
+        .map(|v| v.to_i64().max(0) as usize)
+        .unwrap_or(buffer_len.saturating_sub(byte_offset));
     let id = heap.alloc_object();
     heap.set_prop(id, "buffer", buffer);
     heap.set_prop(id, "byteOffset", Value::Int(byte_offset as i32));

@@ -6,9 +6,9 @@ use lamina::ir::{IRBuilder, PrimitiveType, Type};
 use crate::ir::bytecode::{BytecodeChunk, ConstEntry, Opcode};
 
 const TEMP_NAMES: [&str; 32] = [
-    "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10", "t11", "t12", "t13",
-    "t14", "t15", "t16", "t17", "t18", "t19", "t20", "t21", "t22", "t23", "t24", "t25", "t26",
-    "t27", "t28", "t29", "t30", "t31",
+    "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10", "t11", "t12", "t13", "t14",
+    "t15", "t16", "t17", "t18", "t19", "t20", "t21", "t22", "t23", "t24", "t25", "t26", "t27",
+    "t28", "t29", "t30", "t31",
 ];
 
 const OP_PUSH: u8 = Opcode::PushConst as u8;
@@ -213,8 +213,10 @@ mod tests {
     fn binary_add_two_params() {
         let chunk = make_binary_chunk(
             vec![
-                Opcode::LoadLocal as u8, 0,
-                Opcode::LoadLocal as u8, 1,
+                Opcode::LoadLocal as u8,
+                0,
+                Opcode::LoadLocal as u8,
+                1,
                 Opcode::Add as u8,
                 Opcode::Return as u8,
             ],
@@ -228,10 +230,13 @@ mod tests {
     fn binary_add_with_const() {
         let chunk = make_binary_chunk(
             vec![
-                Opcode::LoadLocal as u8, 0,
-                Opcode::LoadLocal as u8, 1,
+                Opcode::LoadLocal as u8,
+                0,
+                Opcode::LoadLocal as u8,
+                1,
                 Opcode::Add as u8,
-                Opcode::PushConst as u8, 0,
+                Opcode::PushConst as u8,
+                0,
                 Opcode::Mul as u8,
                 Opcode::Return as u8,
             ],

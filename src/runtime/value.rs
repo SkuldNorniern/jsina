@@ -115,8 +115,11 @@ impl Value {
             Value::Map(_) => "map",
             Value::Set(_) => "set",
             Value::Date(_) => "date",
-            Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_)
-            | Value::BoundBuiltin(_, _, _) | Value::BoundFunction(_, _, _) => "function",
+            Value::Function(_)
+            | Value::DynamicFunction(_)
+            | Value::Builtin(_)
+            | Value::BoundBuiltin(_, _, _)
+            | Value::BoundFunction(_, _, _) => "function",
         }
     }
 }
@@ -137,8 +140,11 @@ impl std::fmt::Display for Value {
             Value::Map(_) => write!(f, "[object Map]"),
             Value::Set(_) => write!(f, "[object Set]"),
             Value::Date(_) => write!(f, "[object Date]"),
-            Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_)
-            | Value::BoundBuiltin(_, _, _) | Value::BoundFunction(_, _, _) => {
+            Value::Function(_)
+            | Value::DynamicFunction(_)
+            | Value::Builtin(_)
+            | Value::BoundBuiltin(_, _, _)
+            | Value::BoundFunction(_, _, _) => {
                 write!(f, "[object Function]")
             }
         }

@@ -18,17 +18,27 @@ struct Slot {
 
 #[inline(always)]
 fn slot_hash(obj_id: usize, is_array: bool, key: &str) -> usize {
-    obj_id.wrapping_mul(31)
+    obj_id
+        .wrapping_mul(31)
         .wrapping_add(is_array as usize)
         .wrapping_mul(31)
         .wrapping_add(key.len())
-        .wrapping_add(key.bytes().take(4).map(|b| b as usize).fold(0usize, |a, b| a.wrapping_add(b)))
+        .wrapping_add(
+            key.bytes()
+                .take(4)
+                .map(|b| b as usize)
+                .fold(0usize, |a, b| a.wrapping_add(b)),
+        )
 }
 
 #[inline(always)]
 fn key_hash(key: &str) -> u64 {
-    (key.len() as u64)
-        .wrapping_add(key.bytes().take(8).map(|b| b as u64).fold(0u64, |a, b| a.wrapping_add(b)))
+    (key.len() as u64).wrapping_add(
+        key.bytes()
+            .take(8)
+            .map(|b| b as u64)
+            .fold(0u64, |a, b| a.wrapping_add(b)),
+    )
 }
 
 fn empty_slot() -> Slot {

@@ -197,7 +197,9 @@ fn extract_sum_loop_limit(chunk: &crate::ir::bytecode::BytecodeChunk) -> Option<
     }
 }
 
-pub fn bytecode_to_lamina_loop(chunk: &crate::ir::bytecode::BytecodeChunk) -> Option<lamina::ir::Module<'static>> {
+pub fn bytecode_to_lamina_loop(
+    chunk: &crate::ir::bytecode::BytecodeChunk,
+) -> Option<lamina::ir::Module<'static>> {
     if !chunk.handlers.is_empty() || chunk.rest_param_index.is_some() {
         return None;
     }
@@ -256,11 +258,7 @@ mod tests {
     #[test]
     fn extract_branch_loop_rejects_call() {
         let chunk = BytecodeChunk {
-            code: vec![
-                Opcode::Call as u8,
-                0,
-                0,
-            ],
+            code: vec![Opcode::Call as u8, 0, 0],
             constants: vec![],
             num_locals: 2,
             named_locals: vec![],

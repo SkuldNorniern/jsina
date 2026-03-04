@@ -1,7 +1,7 @@
 //! Function.prototype.call, bind, apply - required for propertyHelper and test262 harness.
 //! call invokes builtins with explicit this. apply supports Function, Builtin, DynamicFunction.
 
-use super::{to_number, BuiltinContext, BuiltinError};
+use super::{BuiltinContext, BuiltinError, to_number};
 use crate::runtime::{Heap, Value};
 
 fn array_like_to_values(arr: &Value, heap: &Heap) -> Vec<Value> {
@@ -30,10 +30,7 @@ fn array_like_to_values(arr: &Value, heap: &Heap) -> Vec<Value> {
     out
 }
 
-pub fn function_call(
-    args: &[Value],
-    ctx: &mut BuiltinContext,
-) -> Result<Value, BuiltinError> {
+pub fn function_call(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
     if args.is_empty() {
         return Err(BuiltinError::Throw(Value::String(
             "Function.prototype.call requires at least one argument".to_string(),
@@ -62,10 +59,7 @@ pub fn function_call(
     }
 }
 
-pub fn function_apply(
-    args: &[Value],
-    ctx: &mut BuiltinContext,
-) -> Result<Value, BuiltinError> {
+pub fn function_apply(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
     if args.is_empty() {
         return Err(BuiltinError::Throw(Value::String(
             "Function.prototype.apply requires at least one argument".to_string(),
@@ -102,10 +96,7 @@ pub fn function_apply(
     })
 }
 
-pub fn function_bind(
-    args: &[Value],
-    _ctx: &mut BuiltinContext,
-) -> Result<Value, BuiltinError> {
+pub fn function_bind(args: &[Value], _ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
     if args.len() < 2 {
         return Err(BuiltinError::Throw(Value::String(
             "Function.prototype.bind requires at least one argument".to_string(),
@@ -114,13 +105,16 @@ pub fn function_bind(
     let target = &args[0];
     let bound_this = args.get(1).cloned().unwrap_or(Value::Undefined);
     let bound_args: Vec<Value> = args.iter().skip(2).cloned().collect();
-    let call_id = super::resolve("Function", "call").ok_or_else(|| {
-        BuiltinError::Throw(Value::String("Function.call not found".to_string()))
-    })?;
+    let call_id = super::resolve("Function", "call")
+        .ok_or_else(|| BuiltinError::Throw(Value::String("Function.call not found".to_string())))?;
     match target {
         Value::Builtin(builtin_id) => {
             let append_target = *builtin_id == call_id;
-            Ok(Value::BoundBuiltin(*builtin_id, Box::new(bound_this), append_target))
+            Ok(Value::BoundBuiltin(
+                *builtin_id,
+                Box::new(bound_this),
+                append_target,
+            ))
         }
         Value::BoundBuiltin(builtin_id, bound_val, append) => {
             Ok(Value::BoundBuiltin(*builtin_id, bound_val.clone(), *append))
@@ -149,7 +143,7 @@ pub fn function_bind(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::builtins::{resolve, BuiltinContext};
+    use crate::runtime::builtins::{BuiltinContext, resolve};
 
     #[test]
     fn bind_creates_bound_builtin_for_call_and_method() {

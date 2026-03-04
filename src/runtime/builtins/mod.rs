@@ -110,7 +110,9 @@ pub(crate) fn to_prop_key(v: &Value) -> String {
         Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => {
             "[object Object]".to_string()
         }
-        Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_)
+        Value::Function(_)
+        | Value::DynamicFunction(_)
+        | Value::Builtin(_)
         | Value::BoundBuiltin(_, _, _)
         | Value::BoundFunction(_, _, _) => "function".to_string(),
     }
@@ -1184,8 +1186,12 @@ pub fn name(id: u8) -> &'static str {
 pub fn length(id: u8) -> i32 {
     get(id)
         .map(|b| match (b.category, b.name) {
-            ("String", "anchor") | ("String", "fontcolor") | ("String", "fontsize")
-            | ("String", "link") | ("String", "match") | ("String", "search") => 1,
+            ("String", "anchor")
+            | ("String", "fontcolor")
+            | ("String", "fontsize")
+            | ("String", "link")
+            | ("String", "match")
+            | ("String", "search") => 1,
             ("String", "replace") => 2,
             ("String", "substr") => 2,
             ("Date", "setYear") => 1,
@@ -1290,14 +1296,14 @@ mod tests {
     #[test]
     fn strict_eq_bigint() {
         use crate::runtime::Value;
-        assert!(strict_eq(&Value::BigInt("1".to_string()), &Value::BigInt("1".to_string())));
+        assert!(strict_eq(
+            &Value::BigInt("1".to_string()),
+            &Value::BigInt("1".to_string())
+        ));
         assert!(!strict_eq(
             &Value::BigInt("1".to_string()),
             &Value::BigInt("2".to_string())
         ));
-        assert!(!strict_eq(
-            &Value::BigInt("1".to_string()),
-            &Value::Int(1)
-        ));
+        assert!(!strict_eq(&Value::BigInt("1".to_string()), &Value::Int(1)));
     }
 }

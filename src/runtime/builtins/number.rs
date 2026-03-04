@@ -111,10 +111,7 @@ mod tests {
     #[test]
     fn is_integer_returns_true_for_integers() {
         let mut heap = Heap::new();
-        assert_eq!(
-            is_integer(&[Value::Int(42)], &mut heap),
-            Value::Bool(true)
-        );
+        assert_eq!(is_integer(&[Value::Int(42)], &mut heap), Value::Bool(true));
         assert_eq!(
             is_integer(&[Value::Number(3.0)], &mut heap),
             Value::Bool(true)

@@ -20,10 +20,14 @@ pub fn function_constructor(
     if actual.is_empty() {
         let wrapped = "function main() { return (function() {}); }\n";
         let script = Parser::new(wrapped).parse().map_err(|_| {
-            BuiltinError::Throw(Value::String("SyntaxError: Invalid function body".to_string()))
+            BuiltinError::Throw(Value::String(
+                "SyntaxError: Invalid function body".to_string(),
+            ))
         })?;
         let funcs = script_to_hir(&script).map_err(|_| {
-            BuiltinError::Throw(Value::String("SyntaxError: Invalid function body".to_string()))
+            BuiltinError::Throw(Value::String(
+                "SyntaxError: Invalid function body".to_string(),
+            ))
         })?;
         let entry = funcs.iter().position(|f| f.name.as_deref() == Some("main"));
         let entry = match entry {
@@ -47,7 +51,9 @@ pub fn function_constructor(
             init_entry: None,
             global_funcs,
         };
-        return match interpret_program_with_heap(&program, ctx.heap, false, None, false, false, None) {
+        return match interpret_program_with_heap(
+            &program, ctx.heap, false, None, false, false, None,
+        ) {
             Ok(Completion::Return(v)) => {
                 if let Value::Function(inner_idx) = v {
                     if let Some(inner_chunk) = program.chunks.get(inner_idx) {

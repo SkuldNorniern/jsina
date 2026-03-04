@@ -10,8 +10,7 @@ pub fn create_realm(
 ) -> Result<Value, super::BuiltinError> {
     let heap = &mut ctx.heap;
     let global_id = heap.global_object();
-    let eval_id = builtins::resolve("Global", "eval")
-        .expect("eval builtin must exist");
+    let eval_id = builtins::resolve("Global", "eval").expect("eval builtin must exist");
     let realm_id = heap.alloc_object();
     heap.set_prop(realm_id, "global", Value::Object(global_id));
     heap.set_prop(realm_id, "evalScript", Value::Builtin(eval_id));

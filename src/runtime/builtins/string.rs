@@ -1,4 +1,4 @@
-use super::{to_number, to_prop_key, BuiltinContext, BuiltinError};
+use super::{BuiltinContext, BuiltinError, to_number, to_prop_key};
 use crate::runtime::{Heap, Value};
 
 fn html_escape(s: &str) -> String {
@@ -64,10 +64,7 @@ pub fn to_upper_case(args: &[Value], _heap: &mut Heap) -> Value {
 pub fn starts_with(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
     let search = args.get(1).map(|v| v.to_string()).unwrap_or_default();
-    let pos = args
-        .get(2)
-        .map(|v| super::to_number(v))
-        .unwrap_or(0.0);
+    let pos = args.get(2).map(|v| super::to_number(v)).unwrap_or(0.0);
     let pos = if pos.is_nan() || pos < 0.0 {
         0
     } else {
@@ -80,10 +77,7 @@ pub fn ends_with(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
     let search = args.get(1).map(|v| v.to_string()).unwrap_or_default();
     let len = s.len() as f64;
-    let end = args
-        .get(2)
-        .map(|v| super::to_number(v))
-        .unwrap_or(len);
+    let end = args.get(2).map(|v| super::to_number(v)).unwrap_or(len);
     let end = if end.is_nan() || end < 0.0 {
         len
     } else {
@@ -95,7 +89,10 @@ pub fn ends_with(args: &[Value], _heap: &mut Heap) -> Value {
 
 pub fn pad_start(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
-    let target_len = args.get(1).map(|v| super::to_number(v) as usize).unwrap_or(0);
+    let target_len = args
+        .get(1)
+        .map(|v| super::to_number(v) as usize)
+        .unwrap_or(0);
     let pad_str = args
         .get(2)
         .map(|v| v.to_string())
@@ -111,7 +108,10 @@ pub fn pad_start(args: &[Value], _heap: &mut Heap) -> Value {
 
 pub fn pad_end(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
-    let target_len = args.get(1).map(|v| super::to_number(v) as usize).unwrap_or(0);
+    let target_len = args
+        .get(1)
+        .map(|v| super::to_number(v) as usize)
+        .unwrap_or(0);
     let pad_str = args
         .get(2)
         .map(|v| v.to_string())
@@ -171,7 +171,10 @@ fn match_impl(receiver: &Value, regexp: Option<&Value>, heap: &mut Heap) -> Valu
             _ => return Value::Null,
         };
         if let Some(start) = s.find(pattern.as_str()) {
-            let matched = s.get(start..start + pattern.len()).unwrap_or("").to_string();
+            let matched = s
+                .get(start..start + pattern.len())
+                .unwrap_or("")
+                .to_string();
             let arr_id = heap.alloc_array();
             heap.array_push(arr_id, Value::String(matched));
             heap.set_array_prop(arr_id, "index", Value::Int(start as i32));
@@ -246,7 +249,12 @@ pub fn search_throwing(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value
     Ok(search_impl(&receiver, regexp_val, ctx.heap))
 }
 
-fn replace_impl(receiver: &Value, search_val: Option<&Value>, replace_val: Option<&Value>, heap: &mut Heap) -> Value {
+fn replace_impl(
+    receiver: &Value,
+    search_val: Option<&Value>,
+    replace_val: Option<&Value>,
+    heap: &mut Heap,
+) -> Value {
     let s = match receiver {
         Value::String(x) => x.clone(),
         _ => receiver.to_string(),
@@ -305,7 +313,12 @@ pub fn replace_throwing(args: &[Value], ctx: &mut BuiltinContext) -> Result<Valu
             });
         }
     }
-    Ok(replace_impl(&receiver, search_val, replace_val.as_ref(), ctx.heap))
+    Ok(replace_impl(
+        &receiver,
+        search_val,
+        replace_val.as_ref(),
+        ctx.heap,
+    ))
 }
 
 pub fn at(args: &[Value], _heap: &mut Heap) -> Value {
@@ -570,11 +583,23 @@ mod tests {
     fn starts_with_basic() {
         let mut heap = Heap::new();
         assert_eq!(
-            starts_with(&[Value::String("hello".to_string()), Value::String("he".to_string())], &mut heap),
+            starts_with(
+                &[
+                    Value::String("hello".to_string()),
+                    Value::String("he".to_string())
+                ],
+                &mut heap
+            ),
             Value::Bool(true)
         );
         assert_eq!(
-            starts_with(&[Value::String("hello".to_string()), Value::String("lo".to_string())], &mut heap),
+            starts_with(
+                &[
+                    Value::String("hello".to_string()),
+                    Value::String("lo".to_string())
+                ],
+                &mut heap
+            ),
             Value::Bool(false)
         );
     }
@@ -583,11 +608,23 @@ mod tests {
     fn ends_with_basic() {
         let mut heap = Heap::new();
         assert_eq!(
-            ends_with(&[Value::String("hello".to_string()), Value::String("lo".to_string())], &mut heap),
+            ends_with(
+                &[
+                    Value::String("hello".to_string()),
+                    Value::String("lo".to_string())
+                ],
+                &mut heap
+            ),
             Value::Bool(true)
         );
         assert_eq!(
-            ends_with(&[Value::String("hello".to_string()), Value::String("he".to_string())], &mut heap),
+            ends_with(
+                &[
+                    Value::String("hello".to_string()),
+                    Value::String("he".to_string())
+                ],
+                &mut heap
+            ),
             Value::Bool(false)
         );
     }
@@ -595,10 +632,7 @@ mod tests {
     #[test]
     fn char_code_at_returns_code_at_index() {
         let mut heap = Heap::new();
-        let args = [
-            Value::String("hello".to_string()),
-            Value::Int(1),
-        ];
+        let args = [Value::String("hello".to_string()), Value::Int(1)];
         let result = char_code_at(&args, &mut heap);
         assert_eq!(result, Value::Number(101.0), "'e' has code 101");
     }
@@ -606,10 +640,7 @@ mod tests {
     #[test]
     fn char_code_at_out_of_range_returns_nan() {
         let mut heap = Heap::new();
-        let args = [
-            Value::String("hi".to_string()),
-            Value::Int(99),
-        ];
+        let args = [Value::String("hi".to_string()), Value::Int(99)];
         let result = char_code_at(&args, &mut heap);
         assert!(matches!(result, Value::Number(n) if n.is_nan()));
     }

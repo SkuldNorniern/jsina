@@ -1,6 +1,6 @@
 //! Reflect builtin stubs for test262. apply throws; get/construct implement [[Get]]/[[Construct]].
 
-use super::{error, to_prop_key_with_heap, BuiltinContext, BuiltinError};
+use super::{BuiltinContext, BuiltinError, error, to_prop_key_with_heap};
 use crate::runtime::Value;
 
 fn array_like_to_values(arr: &Value, heap: &crate::runtime::Heap) -> Vec<Value> {
@@ -32,7 +32,9 @@ fn array_like_to_values(arr: &Value, heap: &crate::runtime::Heap) -> Vec<Value> 
 fn builtin_prop_value(id: u8, key: &str) -> Option<Value> {
     match key {
         "length" => Some(Value::Int(crate::runtime::builtins::length(id))),
-        "name" => Some(Value::String(crate::runtime::builtins::name(id).to_string())),
+        "name" => Some(Value::String(
+            crate::runtime::builtins::name(id).to_string(),
+        )),
         _ => None,
     }
 }
@@ -40,13 +42,17 @@ fn builtin_prop_value(id: u8, key: &str) -> Option<Value> {
 pub fn reflect_get(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
     let target = args.first().ok_or_else(|| {
         BuiltinError::Throw(error::type_error(
-            &[Value::String("Reflect.get requires at least 2 arguments".to_string())],
+            &[Value::String(
+                "Reflect.get requires at least 2 arguments".to_string(),
+            )],
             ctx.heap,
         ))
     })?;
     let key_val = args.get(1).ok_or_else(|| {
         BuiltinError::Throw(error::type_error(
-            &[Value::String("Reflect.get requires at least 2 arguments".to_string())],
+            &[Value::String(
+                "Reflect.get requires at least 2 arguments".to_string(),
+            )],
             ctx.heap,
         ))
     })?;
@@ -58,9 +64,11 @@ pub fn reflect_get(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Bu
         Value::Builtin(id) => builtin_prop_value(*id, &key).unwrap_or(Value::Undefined),
         _ => {
             return Err(BuiltinError::Throw(error::type_error(
-                &[Value::String("Reflect.get: target must be an object".to_string())],
+                &[Value::String(
+                    "Reflect.get: target must be an object".to_string(),
+                )],
                 heap,
-            )))
+            )));
         }
     };
     Ok(value)
@@ -92,7 +100,9 @@ pub fn reflect_apply(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, 
     );
     if !is_callable {
         return Err(BuiltinError::Throw(error::type_error(
-            &[Value::String("Reflect.apply: target is not callable".to_string())],
+            &[Value::String(
+                "Reflect.apply: target is not callable".to_string(),
+            )],
             ctx.heap,
         )));
     }
@@ -112,7 +122,9 @@ pub fn reflect_apply(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, 
 pub fn reflect_construct(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
     let target = args.first().ok_or_else(|| {
         BuiltinError::Throw(error::type_error(
-            &[Value::String("Reflect.construct requires at least 2 arguments".to_string())],
+            &[Value::String(
+                "Reflect.construct requires at least 2 arguments".to_string(),
+            )],
             ctx.heap,
         ))
     })?;
@@ -134,11 +146,7 @@ pub fn reflect_construct(args: &[Value], ctx: &mut BuiltinContext) -> Result<Val
                         heap: ctx.heap,
                         dynamic_chunks: &mut dynamic_chunks,
                     };
-                    match super::dispatch(
-                        builtin_id,
-                        &construct_args,
-                        &mut inner_ctx,
-                    ) {
+                    match super::dispatch(builtin_id, &construct_args, &mut inner_ctx) {
                         Ok(result) => {
                             let use_result = matches!(
                                 result,
@@ -161,7 +169,9 @@ pub fn reflect_construct(args: &[Value], ctx: &mut BuiltinContext) -> Result<Val
                     new_object: Some(new_object),
                 }),
                 _ => Err(BuiltinError::Throw(error::type_error(
-                    &[Value::String("Reflect.construct: target is not a constructor".to_string())],
+                    &[Value::String(
+                        "Reflect.construct: target is not a constructor".to_string(),
+                    )],
                     ctx.heap,
                 ))),
             }
@@ -183,15 +193,15 @@ pub fn reflect_construct(args: &[Value], ctx: &mut BuiltinContext) -> Result<Val
                     Ok(if use_result { result } else { new_obj_value })
                 }
                 Err(BuiltinError::Throw(v)) => Err(BuiltinError::Throw(v)),
-                Err(BuiltinError::Invoke { .. }) => {
-                    Err(BuiltinError::Throw(Value::String(
-                        "Reflect.construct: nested construct".to_string(),
-                    )))
-                }
+                Err(BuiltinError::Invoke { .. }) => Err(BuiltinError::Throw(Value::String(
+                    "Reflect.construct: nested construct".to_string(),
+                ))),
             }
         }
         _ => Err(BuiltinError::Throw(error::type_error(
-            &[Value::String("Reflect.construct: target is not a constructor".to_string())],
+            &[Value::String(
+                "Reflect.construct: target is not a constructor".to_string(),
+            )],
             ctx.heap,
         ))),
     }
@@ -218,25 +228,31 @@ mod tests {
     #[test]
     fn reflect_apply_returns_invoke() {
         let mut heap = Heap::new();
-        let builtin_id = crate::runtime::builtins::resolve("Array", "isArray").expect("isArray builtin");
+        let builtin_id =
+            crate::runtime::builtins::resolve("Array", "isArray").expect("isArray builtin");
         let target = Value::Builtin(builtin_id);
         let this_arg = Value::Undefined;
         let args_array = heap.alloc_array();
         heap.array_push(args_array, Value::Int(1));
         heap.array_push(args_array, Value::Int(2));
-        let args = [
-            target,
-            this_arg,
-            Value::Array(args_array),
-        ];
+        let args = [target, this_arg, Value::Array(args_array)];
         let mut dynamic_chunks = Vec::new();
         let mut ctx = BuiltinContext {
             heap: &mut heap,
             dynamic_chunks: &mut dynamic_chunks,
         };
         let r = reflect_apply(&args, &mut ctx);
-        assert!(r.is_err(), "Reflect.apply returns Err(Invoke) to trigger VM dispatch");
-        if let Err(BuiltinError::Invoke { callee, this_arg, args: invoke_args, new_object }) = r {
+        assert!(
+            r.is_err(),
+            "Reflect.apply returns Err(Invoke) to trigger VM dispatch"
+        );
+        if let Err(BuiltinError::Invoke {
+            callee,
+            this_arg,
+            args: invoke_args,
+            new_object,
+        }) = r
+        {
             assert!(matches!(callee, Value::Builtin(_)));
             assert!(matches!(this_arg, Value::Undefined));
             assert_eq!(invoke_args.len(), 2);
@@ -256,10 +272,7 @@ mod tests {
             heap: &mut heap,
             dynamic_chunks: &mut dynamic_chunks,
         };
-        let args = [
-            Value::Object(obj_id),
-            Value::String("x".to_string()),
-        ];
+        let args = [Value::Object(obj_id), Value::String("x".to_string())];
         let r = reflect_get(&args, &mut ctx);
         assert!(r.is_ok(), "reflect_get failed: {:?}", r);
         let v = r.unwrap();

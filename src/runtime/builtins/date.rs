@@ -12,22 +12,10 @@ pub fn create(args: &[Value], heap: &mut Heap) -> Value {
             .map(|v| super::to_number(v) as i32)
             .unwrap_or(1)
             .clamp(1, 31);
-        let h = args
-            .get(3)
-            .map(|v| super::to_number(v) as i32)
-            .unwrap_or(0);
-        let m = args
-            .get(4)
-            .map(|v| super::to_number(v) as i32)
-            .unwrap_or(0);
-        let s = args
-            .get(5)
-            .map(|v| super::to_number(v) as i32)
-            .unwrap_or(0);
-        let ms_arg = args
-            .get(6)
-            .map(|v| super::to_number(v))
-            .unwrap_or(0.0);
+        let h = args.get(3).map(|v| super::to_number(v) as i32).unwrap_or(0);
+        let m = args.get(4).map(|v| super::to_number(v) as i32).unwrap_or(0);
+        let s = args.get(5).map(|v| super::to_number(v) as i32).unwrap_or(0);
+        let ms_arg = args.get(6).map(|v| super::to_number(v)).unwrap_or(0.0);
         let mo_1_12 = (mo % 12 + 12) % 12 + 1;
         let days = ymd_to_days(y, mo_1_12, d);
         (days * 86400 + h as i64 * 3600 + m as i64 * 60 + s as i64) as f64 * 1000.0 + ms_arg

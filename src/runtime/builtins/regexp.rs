@@ -43,7 +43,10 @@ pub fn exec(args: &[Value], heap: &mut Heap) -> Value {
         Some(i) => i,
         None => return Value::Null,
     };
-    let full_match = s.get(start..start + pattern.len()).unwrap_or("").to_string();
+    let full_match = s
+        .get(start..start + pattern.len())
+        .unwrap_or("")
+        .to_string();
     let arr_id = heap.alloc_array();
     heap.array_push(arr_id, Value::String(full_match));
     heap.set_array_prop(arr_id, "index", Value::Int(start as i32));
@@ -105,8 +108,14 @@ pub fn compile(args: &[Value], heap: &mut Heap) -> Value {
                 _ => (String::new(), String::new()),
             }
         }
-        Some(Value::String(s)) => (s.clone(), args.get(2).map(|v| v.to_string()).unwrap_or_default()),
-        Some(v) => (v.to_string(), args.get(2).map(|v| v.to_string()).unwrap_or_default()),
+        Some(Value::String(s)) => (
+            s.clone(),
+            args.get(2).map(|v| v.to_string()).unwrap_or_default(),
+        ),
+        Some(v) => (
+            v.to_string(),
+            args.get(2).map(|v| v.to_string()).unwrap_or_default(),
+        ),
         None => {
             let existing = heap.get_prop(obj_id, "__regexp_pattern");
             let pattern = match existing {
@@ -183,7 +192,10 @@ pub fn symbol_split(args: &[Value], heap: &mut Heap) -> Value {
         Some(v) => v.to_string(),
         None => String::new(),
     };
-    let limit = args.get(2).map(|v| super::to_number(v) as i32).unwrap_or(i32::MAX);
+    let limit = args
+        .get(2)
+        .map(|v| super::to_number(v) as i32)
+        .unwrap_or(i32::MAX);
     let parts: Vec<&str> = s.split(pattern.as_str()).collect();
     let take = if limit >= 0 {
         parts.len().min(limit as usize)

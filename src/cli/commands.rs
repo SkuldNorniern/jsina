@@ -76,7 +76,12 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
             print_stmt(0, &s.body, indent + 1);
         }
         Statement::DoWhile(s) => {
-            println!("{}[{}] DoWhile cond: {}", pad, idx, format_expr(&s.condition));
+            println!(
+                "{}[{}] DoWhile cond: {}",
+                pad,
+                idx,
+                format_expr(&s.condition)
+            );
             print_stmt(0, &s.body, indent + 1);
         }
         Statement::For(s) => {
@@ -263,7 +268,9 @@ fn format_expr(expr: &Expression) -> String {
                 .iter()
                 .map(|a| match a {
                     crate::frontend::ast::CallArg::Expr(expr) => format_expr(expr),
-                    crate::frontend::ast::CallArg::Spread(expr) => format!("...{}", format_expr(expr)),
+                    crate::frontend::ast::CallArg::Spread(expr) => {
+                        format!("...{}", format_expr(expr))
+                    }
                 })
                 .collect();
             format!("{}({})", format_expr(&e.callee), args.join(", "))
@@ -275,7 +282,12 @@ fn format_expr(expr: &Expression) -> String {
                 crate::frontend::ast::LogicalAssignOp::And => "&&=",
                 crate::frontend::ast::LogicalAssignOp::Nullish => "??=",
             };
-            format!("{} {} {}", format_expr(&e.left), op_str, format_expr(&e.right))
+            format!(
+                "{} {} {}",
+                format_expr(&e.left),
+                op_str,
+                format_expr(&e.right)
+            )
         }
         Expression::Conditional(e) => format!(
             "{} ? {} : {}",
@@ -288,7 +300,8 @@ fn format_expr(expr: &Expression) -> String {
                 .properties
                 .iter()
                 .filter_map(|property| {
-                    let crate::frontend::ast::ObjectPropertyOrSpread::Property(prop) = property else {
+                    let crate::frontend::ast::ObjectPropertyOrSpread::Property(prop) = property
+                    else {
                         return Some("...".to_string());
                     };
                     let key = match &prop.key {
@@ -309,7 +322,9 @@ fn format_expr(expr: &Expression) -> String {
                 .map(|o| match o {
                     crate::frontend::ast::ArrayElement::Expr(expr) => format_expr(expr),
                     crate::frontend::ast::ArrayElement::Hole => String::new(),
-                    crate::frontend::ast::ArrayElement::Spread(expr) => format!("...{}", format_expr(expr)),
+                    crate::frontend::ast::ArrayElement::Spread(expr) => {
+                        format!("...{}", format_expr(expr))
+                    }
                 })
                 .collect();
             format!("[{}]", elems.join(", "))
@@ -322,7 +337,12 @@ fn format_expr(expr: &Expression) -> String {
                 }
                 crate::frontend::ast::MemberProperty::Expression(inner) => {
                     let bracket = if e.optional { "?." } else { "" };
-                    format!("{}{}[{}]", format_expr(&e.object), bracket, format_expr(inner))
+                    format!(
+                        "{}{}[{}]",
+                        format_expr(&e.object),
+                        bracket,
+                        format_expr(inner)
+                    )
                 }
             }
         }
@@ -343,7 +363,9 @@ fn format_expr(expr: &Expression) -> String {
                 .iter()
                 .map(|a| match a {
                     crate::frontend::ast::CallArg::Expr(expr) => format_expr(expr),
-                    crate::frontend::ast::CallArg::Spread(expr) => format!("...{}", format_expr(expr)),
+                    crate::frontend::ast::CallArg::Spread(expr) => {
+                        format!("...{}", format_expr(expr))
+                    }
                 })
                 .collect();
             format!("new {}({})", format_expr(&e.callee), args.join(", "))
@@ -382,7 +404,10 @@ pub fn test262(
             }
         });
 
-    let (test_paths, allowlist_by_path): (Vec<String>, std::collections::HashMap<String, crate::test262::AllowlistEntry>) = if all {
+    let (test_paths, allowlist_by_path): (
+        Vec<String>,
+        std::collections::HashMap<String, crate::test262::AllowlistEntry>,
+    ) = if all {
         let root = test262_root.as_ref().ok_or_else(|| {
             CliError::Usage(
                 "--all requires test262 root (--test262-dir, TEST262_ROOT, or asset/test262)"

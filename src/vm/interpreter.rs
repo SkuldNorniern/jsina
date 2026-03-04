@@ -5,7 +5,7 @@ use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::calls::{execute_builtin, pop_args, read_i16, read_u16, read_u8, setup_callee_locals};
+use super::calls::{execute_builtin, pop_args, read_i16, read_u8, read_u16, setup_callee_locals};
 use super::ops::{
     add_values, div_values, gt_values, gte_values, in_check, instanceof_check, is_nullish,
     is_truthy, loose_eq, lt_values, lte_values, mod_values, mul_values, pow_values, strict_eq,
@@ -634,8 +634,11 @@ pub fn interpret_program_with_heap_and_entry(
                     | Value::Map(_)
                     | Value::Set(_)
                     | Value::Date(_) => "object",
-                    Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_)
-                    | Value::BoundBuiltin(_, _, _) | Value::BoundFunction(_, _, _) => "function",
+                    Value::Function(_)
+                    | Value::DynamicFunction(_)
+                    | Value::Builtin(_)
+                    | Value::BoundBuiltin(_, _, _)
+                    | Value::BoundFunction(_, _, _) => "function",
                 };
                 state.stack.push(Value::String(s.to_string()));
             }
@@ -943,7 +946,12 @@ pub fn interpret_program_with_heap_and_entry(
                             return Ok(Completion::Throw(v));
                         }
                     }
-                    Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                    Ok(BuiltinResult::Invoke {
+                        callee,
+                        this_arg,
+                        args,
+                        new_object,
+                    }) => {
                         if let Some(c) = handle_apply_invoke(
                             program,
                             heap,
@@ -972,9 +980,7 @@ pub fn interpret_program_with_heap_and_entry(
                     let arg = state.stack.pop().ok_or_else(underflow)?;
                     let callee = state.stack.pop().ok_or_else(underflow)?;
                     let receiver = state.stack.pop().ok_or_else(underflow)?;
-                    if let (Value::Builtin(bid), Value::Array(arr_id)) =
-                        (&callee, &receiver)
-                    {
+                    if let (Value::Builtin(bid), Value::Array(arr_id)) = (&callee, &receiver) {
                         if *bid == builtins::ARRAY_PUSH_BUILTIN_ID {
                             heap.array_push(*arr_id, arg);
                             state.stack.push(Value::Int(heap.array_len(*arr_id) as i32));
@@ -1012,7 +1018,12 @@ pub fn interpret_program_with_heap_and_entry(
                                     return Ok(Completion::Throw(v));
                                 }
                             }
-                            Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                            Ok(BuiltinResult::Invoke {
+                                callee,
+                                this_arg,
+                                args,
+                                new_object,
+                            }) => {
                                 if let Some(c) = handle_apply_invoke(
                                     program,
                                     heap,
@@ -1145,7 +1156,12 @@ pub fn interpret_program_with_heap_and_entry(
                                     return Ok(Completion::Throw(v));
                                 }
                             }
-                            Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                            Ok(BuiltinResult::Invoke {
+                                callee,
+                                this_arg,
+                                args,
+                                new_object,
+                            }) => {
                                 if let Some(c) = handle_apply_invoke(
                                     program,
                                     heap,
@@ -1174,25 +1190,27 @@ pub fn interpret_program_with_heap_and_entry(
                                 heap,
                                 dynamic_chunks: &mut state.dynamic_chunks,
                             };
-                            match execute_builtin(
-                                builtin_id,
-                                argc + 1,
-                                &mut state.stack,
-                                &mut ctx,
-                            ) {
+                            match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx)
+                            {
                                 Ok(BuiltinResult::Push(v)) => {
                                     state.getprop_cache.invalidate_all();
                                     state.stack.push(v);
                                 }
                                 Ok(BuiltinResult::Throw(v)) => {
-                                    if let Some((hpc, slot, is_fin)) = find_handler(chunk, call_pc) {
+                                    if let Some((hpc, slot, is_fin)) = find_handler(chunk, call_pc)
+                                    {
                                         state.throw_into_handler_slot(slot, v.clone(), is_fin, hpc);
                                         pc = hpc;
                                     } else {
                                         return Ok(Completion::Throw(v));
                                     }
                                 }
-                                Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                                Ok(BuiltinResult::Invoke {
+                                    callee,
+                                    this_arg,
+                                    args,
+                                    new_object,
+                                }) => {
                                     if let Some(c) = handle_apply_invoke(
                                         program,
                                         heap,
@@ -1213,9 +1231,7 @@ pub fn interpret_program_with_heap_and_entry(
                         } else if heap.is_html_dda_object(obj_id) {
                             state.stack.push(Value::Null);
                         } else {
-                            let msg = format!(
-                                "TypeError: callee is not a function (got object)",
-                            );
+                            let msg = format!("TypeError: callee is not a function (got object)",);
                             return Ok(Completion::Throw(Value::String(msg)));
                         }
                     }
@@ -1281,7 +1297,12 @@ pub fn interpret_program_with_heap_and_entry(
                             Ok(BuiltinResult::Throw(v)) => {
                                 return Ok(Completion::Throw(v));
                             }
-                            Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                            Ok(BuiltinResult::Invoke {
+                                callee,
+                                this_arg,
+                                args,
+                                new_object,
+                            }) => {
                                 if let Some(c) = handle_apply_invoke(
                                     program,
                                     heap,
@@ -1368,7 +1389,8 @@ pub fn interpret_program_with_heap_and_entry(
                         }
                     }
                     Value::Object(obj_id_callee) => {
-                        if let Value::Builtin(builtin_id) = heap.get_prop(obj_id_callee, "__call__") {
+                        if let Value::Builtin(builtin_id) = heap.get_prop(obj_id_callee, "__call__")
+                        {
                             state.stack.push(receiver);
                             for a in &args {
                                 state.stack.push(a.clone());
@@ -1377,19 +1399,20 @@ pub fn interpret_program_with_heap_and_entry(
                                 heap,
                                 dynamic_chunks: &mut state.dynamic_chunks,
                             };
-                            match execute_builtin(
-                                builtin_id,
-                                argc + 1,
-                                &mut state.stack,
-                                &mut ctx,
-                            ) {
+                            match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx)
+                            {
                                 Ok(BuiltinResult::Push(_)) => {
                                     state.getprop_cache.invalidate_all();
                                 }
                                 Ok(BuiltinResult::Throw(v)) => {
                                     return Ok(Completion::Throw(v));
                                 }
-                                Ok(BuiltinResult::Invoke { callee, this_arg, args, new_object }) => {
+                                Ok(BuiltinResult::Invoke {
+                                    callee,
+                                    this_arg,
+                                    args,
+                                    new_object,
+                                }) => {
                                     if let Some(c) = handle_apply_invoke(
                                         program,
                                         heap,
@@ -1410,7 +1433,8 @@ pub fn interpret_program_with_heap_and_entry(
                         } else if heap.is_html_dda_object(obj_id_callee) {
                             state.stack.push(Value::Null);
                         } else {
-                            let msg = "TypeError: callee is not a function (got object)".to_string();
+                            let msg =
+                                "TypeError: callee is not a function (got object)".to_string();
                             return Ok(Completion::Throw(Value::String(msg)));
                         }
                     }
@@ -1674,12 +1698,11 @@ fn handle_apply_invoke(
                     .get(*func_idx)
                     .ok_or(VmError::InvalidConstIndex(*func_idx))?;
 
-                if let Some(value) = state.tiering.maybe_execute(
-                    *func_idx,
-                    callee_chunk,
-                    &args,
-                    &program.chunks,
-                ) {
+                if let Some(value) =
+                    state
+                        .tiering
+                        .maybe_execute(*func_idx, callee_chunk, &args, &program.chunks)
+                {
                     state.stack.push(value);
                     return Ok(None);
                 }
@@ -1709,19 +1732,14 @@ fn handle_apply_invoke(
                     a.extend(args.iter().cloned());
                     a
                 };
-                        for v in &call_args {
-                            state.stack.push(v.clone());
-                        }
-                        let mut ctx = builtins::BuiltinContext {
-                            heap,
-                            dynamic_chunks: &mut state.dynamic_chunks,
-                        };
-                        match execute_builtin(
-                            *builtin_id,
-                    call_args.len(),
-                    &mut state.stack,
-                    &mut ctx,
-                ) {
+                for v in &call_args {
+                    state.stack.push(v.clone());
+                }
+                let mut ctx = builtins::BuiltinContext {
+                    heap,
+                    dynamic_chunks: &mut state.dynamic_chunks,
+                };
+                match execute_builtin(*builtin_id, call_args.len(), &mut state.stack, &mut ctx) {
                     Ok(BuiltinResult::Push(v)) => {
                         state.getprop_cache.invalidate_all();
                         state.stack.push(v);
@@ -1758,12 +1776,7 @@ fn handle_apply_invoke(
                         heap,
                         dynamic_chunks: &mut state.dynamic_chunks,
                     };
-                    match execute_builtin(
-                        builtin_id,
-                        args.len() + 1,
-                        &mut state.stack,
-                        &mut ctx,
-                    ) {
+                    match execute_builtin(builtin_id, args.len() + 1, &mut state.stack, &mut ctx) {
                         Ok(BuiltinResult::Push(v)) => {
                             state.getprop_cache.invalidate_all();
                             state.stack.push(v);
@@ -1799,8 +1812,7 @@ fn handle_apply_invoke(
                     state.stack.push(Value::Null);
                     return Ok(None);
                 } else {
-                    let msg =
-                        "TypeError: callee is not a function (got object)".to_string();
+                    let msg = "TypeError: callee is not a function (got object)".to_string();
                     return Ok(Some(Completion::Throw(Value::String(msg))));
                 }
             }

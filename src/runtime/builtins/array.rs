@@ -1,4 +1,4 @@
-use super::{is_truthy, strict_eq, to_number, BuiltinContext, BuiltinError};
+use super::{BuiltinContext, BuiltinError, is_truthy, strict_eq, to_number};
 use crate::runtime::{Heap, Value};
 
 pub fn push(args: &[Value], heap: &mut Heap) -> Value {
@@ -59,11 +59,7 @@ pub fn at(args: &[Value], heap: &mut Heap) -> Value {
     } else {
         idx as i32
     };
-    let resolved = if i < 0 {
-        len as i32 + i
-    } else {
-        i
-    };
+    let resolved = if i < 0 { len as i32 + i } else { i };
     if resolved < 0 || resolved as usize >= len {
         return Value::Undefined;
     }
@@ -83,10 +79,7 @@ mod tests {
         heap.array_push(arr_id, Value::Int(10));
         heap.array_push(arr_id, Value::Int(20));
         heap.array_push(arr_id, Value::Int(30));
-        let args = [
-            Value::Array(arr_id),
-            Value::Int(1),
-        ];
+        let args = [Value::Array(arr_id), Value::Int(1)];
         let result = at(&args, &mut heap);
         assert_eq!(result, Value::Int(20));
     }
@@ -97,10 +90,7 @@ mod tests {
         let arr_id = heap.alloc_array();
         heap.array_push(arr_id, Value::Int(10));
         heap.array_push(arr_id, Value::Int(20));
-        let args = [
-            Value::Array(arr_id),
-            Value::Int(-1),
-        ];
+        let args = [Value::Array(arr_id), Value::Int(-1)];
         let result = at(&args, &mut heap);
         assert_eq!(result, Value::Int(20));
     }
@@ -132,11 +122,7 @@ mod tests {
         heap.array_push(arr_id, Value::Int(20));
         heap.array_push(arr_id, Value::Int(30));
         let result = array_with(
-            &[
-                Value::Array(arr_id),
-                Value::Int(1),
-                Value::Int(99),
-            ],
+            &[Value::Array(arr_id), Value::Int(1), Value::Int(99)],
             &mut heap,
         );
         if let Value::Array(new_id) = result {
@@ -246,11 +232,7 @@ pub fn to_spliced(args: &[Value], heap: &mut Heap) -> Value {
                 0
             } else {
                 let k = n as i32;
-                if k < 0 {
-                    (len + k).max(0)
-                } else {
-                    k.min(len)
-                }
+                if k < 0 { (len + k).max(0) } else { k.min(len) }
             }
         })
         .unwrap_or(0)
@@ -493,11 +475,7 @@ fn last_index_of_impl(args: &[Value], heap: &Heap) -> Value {
                     len
                 } else {
                     let n = n as i32;
-                    if n < 0 {
-                        (len + n).max(0)
-                    } else {
-                        n.min(len)
-                    }
+                    if n < 0 { (len + n).max(0) } else { n.min(len) }
                 }
             })
             .unwrap_or(len.max(0));
@@ -518,11 +496,7 @@ fn last_index_of_impl(args: &[Value], heap: &Heap) -> Value {
                     len
                 } else {
                     let n = n as i32;
-                    if n < 0 {
-                        (len + n).max(0)
-                    } else {
-                        n.min(len)
-                    }
+                    if n < 0 { (len + n).max(0) } else { n.min(len) }
                 }
             })
             .unwrap_or(len.max(0));
@@ -600,7 +574,9 @@ pub fn map(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinErr
     let callback = args.get(1);
     let is_callable = matches!(
         callback,
-        Some(Value::Function(_)) | Some(Value::DynamicFunction(_)) | Some(Value::Builtin(_))
+        Some(Value::Function(_))
+            | Some(Value::DynamicFunction(_))
+            | Some(Value::Builtin(_))
             | Some(Value::BoundFunction(_, _, _))
     );
     if !is_callable {
@@ -624,7 +600,9 @@ fn reduce_impl(args: &[Value], heap: &mut Heap) -> Value {
         _ => return Value::Undefined,
     };
     let initial = args.get(2).cloned();
-    initial.or_else(|| elements.first().cloned()).unwrap_or(Value::Undefined)
+    initial
+        .or_else(|| elements.first().cloned())
+        .unwrap_or(Value::Undefined)
 }
 
 pub fn reduce(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
@@ -882,7 +860,9 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
         .get(1)
         .map(super::to_number)
         .map(|n| {
-            if n.is_nan() { 0 } else {
+            if n.is_nan() {
+                0
+            } else {
                 let i = n as i32;
                 if i < 0 { (len + i).max(0) } else { i.min(len) }
             }
@@ -892,7 +872,9 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
         .get(2)
         .map(super::to_number)
         .map(|n| {
-            if n.is_nan() { 0 } else {
+            if n.is_nan() {
+                0
+            } else {
                 let i = n as i32;
                 if i < 0 { (len + i).max(0) } else { i.min(len) }
             }
@@ -902,7 +884,9 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
         .get(3)
         .map(super::to_number)
         .map(|n| {
-            if n.is_nan() { len } else {
+            if n.is_nan() {
+                len
+            } else {
                 let i = n as i32;
                 if i < 0 { (len + i).max(0) } else { i.min(len) }
             }

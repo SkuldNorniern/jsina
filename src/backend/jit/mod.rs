@@ -207,12 +207,12 @@ mod tests {
         // f(x, y) = x * y + 1
         let chunk = BytecodeChunk {
             code: vec![
-                0x03, 0,    // LoadLocal 0 (x)
+                0x03, 0, // LoadLocal 0 (x)
                 0x03, 1,    // LoadLocal 1 (y)
-                0x12,       // Mul
+                0x12, // Mul
                 0x01, 0,    // PushConst 0 (1)
-                0x10,       // Add
-                0x20,       // Return
+                0x10, // Add
+                0x20, // Return
             ],
             constants: vec![ConstEntry::Int(1)],
             num_locals: 2,

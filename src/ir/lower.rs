@@ -144,16 +144,29 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
             collect_function_exprs_stmt(&f.body, out);
         }
         Statement::If(i) => {
+            collect_function_exprs_expr(&i.condition, out);
             collect_function_exprs_stmt(&i.then_branch, out);
             if let Some(e) = &i.else_branch {
                 collect_function_exprs_stmt(e, out);
             }
         }
-        Statement::While(w) => collect_function_exprs_stmt(&w.body, out),
-        Statement::DoWhile(d) => collect_function_exprs_stmt(&d.body, out),
+        Statement::While(w) => {
+            collect_function_exprs_expr(&w.condition, out);
+            collect_function_exprs_stmt(&w.body, out);
+        }
+        Statement::DoWhile(d) => {
+            collect_function_exprs_expr(&d.condition, out);
+            collect_function_exprs_stmt(&d.body, out);
+        }
         Statement::For(f) => {
             if let Some(i) = &f.init {
                 collect_function_exprs_stmt(i, out);
+            }
+            if let Some(t) = &f.condition {
+                collect_function_exprs_expr(t, out);
+            }
+            if let Some(u) = &f.update {
+                collect_function_exprs_expr(u, out);
             }
             collect_function_exprs_stmt(&f.body, out);
         }
@@ -851,13 +864,7 @@ fn compile_binding_from_slot(
                         let effective_slot = if let Some(ref def) = prop.default_init {
                             let merge_slot = ctx.next_slot;
                             ctx.next_slot += 1;
-                            store_binding_value(
-                                merge_slot,
-                                value_slot,
-                                Some(def),
-                                span,
-                                ctx,
-                            )?;
+                            store_binding_value(merge_slot, value_slot, Some(def), span, ctx)?;
                             merge_slot
                         } else {
                             value_slot
@@ -889,9 +896,11 @@ fn compile_binding_from_slot(
                             span,
                         });
                         let slice_id = b("Array", "slice");
-                        ctx.blocks[ctx.current_block]
-                            .ops
-                            .push(HirOp::CallBuiltin { builtin: slice_id, argc: 2, span });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: slice_id,
+                            argc: 2,
+                            span,
+                        });
                     } else {
                         ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
                             id: source_slot,
@@ -1071,6 +1080,100 @@ fn compile_declarator(
     Ok(())
 }
 
+fn build_param_names_and_patterns(params: &[Param]) -> (Vec<String>, Vec<(String, Binding)>) {
+    let mut param_names = Vec::new();
+    let mut pattern_params = Vec::new();
+    for (i, p) in params.iter().enumerate() {
+        if let Some((synthetic, binding)) = p.as_binding(i) {
+            param_names.push(synthetic.clone());
+            pattern_params.push((synthetic, binding));
+        } else {
+            param_names.push(p.name().to_string());
+        }
+    }
+    (param_names, pattern_params)
+}
+
+fn emit_default_param(
+    param_slot: u32,
+    default_expr: &Expression,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    let span = default_expr.span();
+    let cond_slot = ctx.next_slot;
+    ctx.next_slot += 1;
+    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+        id: param_slot,
+        span,
+    });
+    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+        value: HirConst::Undefined,
+        span,
+    });
+    ctx.blocks[ctx.current_block]
+        .ops
+        .push(HirOp::StrictEq { span });
+    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+        id: cond_slot,
+        span,
+    });
+    let default_block_id = ctx.blocks.len() as HirBlockId;
+    ctx.blocks.push(HirBlock {
+        id: default_block_id,
+        ops: Vec::new(),
+        terminator: HirTerminator::Jump { target: 0 },
+    });
+    let continue_block_id = ctx.blocks.len() as HirBlockId;
+    ctx.blocks.push(HirBlock {
+        id: continue_block_id,
+        ops: Vec::new(),
+        terminator: HirTerminator::Jump { target: 0 },
+    });
+    ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
+        cond: cond_slot,
+        then_block: default_block_id,
+        else_block: continue_block_id,
+    };
+    ctx.current_block = default_block_id as usize;
+    compile_expression(default_expr, ctx)?;
+    ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
+        id: param_slot,
+        span,
+    });
+    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+        target: continue_block_id,
+    };
+    ctx.current_block = continue_block_id as usize;
+    Ok(())
+}
+
+fn emit_param_preamble(
+    params: &[Param],
+    param_names: &[String],
+    pattern_params: &[(String, Binding)],
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    for (idx, param) in params.iter().enumerate() {
+        if let Param::Default(_, default_expr) = param {
+            let param_slot = ctx.locals[&param_names[idx]];
+            emit_default_param(param_slot, default_expr, ctx)?;
+        }
+    }
+    for (synthetic_name, binding) in pattern_params {
+        let source_slot = ctx.locals[synthetic_name];
+        compile_binding_from_slot(
+            binding,
+            source_slot,
+            BindingStoreMode::Declare,
+            "pattern param binding",
+            span,
+            ctx,
+        )?;
+    }
+    Ok(())
+}
+
 fn compile_function(
     f: &FunctionDeclStmt,
     func_index: &HashMap<String, u32>,
@@ -1104,7 +1207,7 @@ fn compile_function(
         captured_names: Vec::new(),
     };
 
-    let param_names: Vec<String> = f.params.iter().map(|p| p.name().to_string()).collect();
+    let (param_names, pattern_params) = build_param_names_and_patterns(&f.params);
     let rest_param_index = f.params.iter().position(|p| p.is_rest()).map(|i| i as u32);
     for name in &param_names {
         ctx.locals.insert(name.clone(), ctx.next_slot);
@@ -1114,60 +1217,7 @@ fn compile_function(
         ctx.locals.insert("arguments".to_string(), ctx.next_slot);
         ctx.next_slot += 1;
     }
-
-    for param in &f.params {
-        if let Param::Default(_, default_expr) = param {
-            let param_slot = ctx
-                .locals
-                .get(param.name())
-                .copied()
-                .expect("param in locals");
-            let cond_slot = ctx.next_slot;
-            ctx.next_slot += 1;
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                id: param_slot,
-                span: default_expr.span(),
-            });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                value: HirConst::Undefined,
-                span: default_expr.span(),
-            });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::StrictEq {
-                span: default_expr.span(),
-            });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                id: cond_slot,
-                span: default_expr.span(),
-            });
-            let default_block_id = ctx.blocks.len() as HirBlockId;
-            ctx.blocks.push(HirBlock {
-                id: default_block_id,
-                ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: 0 },
-            });
-            let continue_block_id = ctx.blocks.len() as HirBlockId;
-            ctx.blocks.push(HirBlock {
-                id: continue_block_id,
-                ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: 0 },
-            });
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
-                cond: cond_slot,
-                then_block: default_block_id,
-                else_block: continue_block_id,
-            };
-            ctx.current_block = default_block_id as usize;
-            compile_expression(default_expr, &mut ctx)?;
-            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                id: param_slot,
-                span: default_expr.span(),
-            });
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
-                target: continue_block_id,
-            };
-            ctx.current_block = continue_block_id as usize;
-        }
-    }
+    emit_param_preamble(&f.params, &param_names, &pattern_params, span, &mut ctx)?;
 
     let _ = compile_statement(&f.body, &mut ctx)?;
 
@@ -1178,7 +1228,7 @@ fn compile_function(
         params: param_names,
         num_locals: ctx.next_slot,
         named_locals: named_locals_from_map(&ctx.locals),
-        captured_names: Vec::new(),
+        captured_names: ctx.captured_names,
         rest_param_index,
         entry_block: 0,
         blocks: ctx.blocks,
@@ -1602,8 +1652,7 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             let body_exits = compile_statement(&d.body, ctx)?;
             loop_stack_pop(ctx);
             if !body_exits {
-                ctx.blocks[ctx.current_block].terminator =
-                    HirTerminator::Jump { target: cond_id };
+                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: cond_id };
             } else {
                 ctx.blocks[ctx.current_block].terminator = terminator_for_exit(ctx);
             }
@@ -2268,7 +2317,7 @@ fn compile_function_expr_to_hir(
         allow_function_captures: true,
         captured_names: Vec::new(),
     };
-    let param_names: Vec<String> = fe.params.iter().map(|p| p.name().to_string()).collect();
+    let (param_names, pattern_params) = build_param_names_and_patterns(&fe.params);
     let rest_param_index = fe.params.iter().position(|p| p.is_rest()).map(|i| i as u32);
     for name in &param_names {
         ctx.locals.insert(name.clone(), ctx.next_slot);
@@ -2278,59 +2327,7 @@ fn compile_function_expr_to_hir(
         ctx.locals.insert("arguments".to_string(), ctx.next_slot);
         ctx.next_slot += 1;
     }
-    for param in &fe.params {
-        if let Param::Default(_, default_expr) = param {
-            let param_slot = ctx
-                .locals
-                .get(param.name())
-                .copied()
-                .expect("param in locals");
-            let cond_slot = ctx.next_slot;
-            ctx.next_slot += 1;
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                id: param_slot,
-                span: default_expr.span(),
-            });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                value: HirConst::Undefined,
-                span: default_expr.span(),
-            });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::StrictEq {
-                span: default_expr.span(),
-            });
-            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                id: cond_slot,
-                span: default_expr.span(),
-            });
-            let default_block_id = ctx.blocks.len() as HirBlockId;
-            ctx.blocks.push(HirBlock {
-                id: default_block_id,
-                ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: 0 },
-            });
-            let continue_block_id = ctx.blocks.len() as HirBlockId;
-            ctx.blocks.push(HirBlock {
-                id: continue_block_id,
-                ops: Vec::new(),
-                terminator: HirTerminator::Jump { target: 0 },
-            });
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Branch {
-                cond: cond_slot,
-                then_block: default_block_id,
-                else_block: continue_block_id,
-            };
-            ctx.current_block = default_block_id as usize;
-            compile_expression(default_expr, &mut ctx)?;
-            ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
-                id: param_slot,
-                span: default_expr.span(),
-            });
-            ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
-                target: continue_block_id,
-            };
-            ctx.current_block = continue_block_id as usize;
-        }
-    }
+    emit_param_preamble(&fe.params, &param_names, &pattern_params, span, &mut ctx)?;
     let _ = compile_statement(&fe.body, &mut ctx)?;
     ctx.blocks[ctx.current_block].terminator = terminator_for_exit(&ctx);
     Ok(HirFunction {
@@ -2366,7 +2363,9 @@ fn compile_new_with_spread(
     ctx: &mut LowerCtx<'_>,
     span: Span,
 ) -> Result<(), LowerError> {
-    ctx.blocks[ctx.current_block].ops.push(HirOp::NewArray { span });
+    ctx.blocks[ctx.current_block]
+        .ops
+        .push(HirOp::NewArray { span });
     ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span });
     ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
         key: "concat".to_string(),
@@ -2379,7 +2378,9 @@ fn compile_new_with_spread(
         }
     }
     let argc = args.len() as u32;
-    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod { argc, span });
+    ctx.blocks[ctx.current_block]
+        .ops
+        .push(HirOp::CallMethod { argc, span });
     let args_array_slot = ctx.next_slot;
     ctx.next_slot += 1;
     ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
@@ -2400,7 +2401,9 @@ fn compile_new_with_spread(
         id: args_array_slot,
         span,
     });
-    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod { argc: 2, span });
+    ctx.blocks[ctx.current_block]
+        .ops
+        .push(HirOp::CallMethod { argc: 2, span });
     Ok(())
 }
 
@@ -2418,7 +2421,9 @@ fn compile_call_with_spread(
         id: callee_slot,
         span,
     });
-    ctx.blocks[ctx.current_block].ops.push(HirOp::NewArray { span });
+    ctx.blocks[ctx.current_block]
+        .ops
+        .push(HirOp::NewArray { span });
     ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span });
     ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
         key: "concat".to_string(),
@@ -2431,7 +2436,9 @@ fn compile_call_with_spread(
         }
     }
     let argc = args.len() as u32;
-    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod { argc, span });
+    ctx.blocks[ctx.current_block]
+        .ops
+        .push(HirOp::CallMethod { argc, span });
     let args_array_slot = ctx.next_slot;
     ctx.next_slot += 1;
     ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal {
@@ -2447,7 +2454,10 @@ fn compile_call_with_spread(
         key: "apply".to_string(),
         span,
     });
-    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal { id: callee_slot, span });
+    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
+        id: callee_slot,
+        span,
+    });
     if let Some(this_expr) = this_arg {
         compile_expression(this_expr, ctx)?;
     } else {
@@ -2460,14 +2470,13 @@ fn compile_call_with_spread(
         id: args_array_slot,
         span,
     });
-    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod { argc: 3, span });
+    ctx.blocks[ctx.current_block]
+        .ops
+        .push(HirOp::CallMethod { argc: 3, span });
     Ok(())
 }
 
-fn compile_logical_assign(
-    e: &LogicalAssignExpr,
-    ctx: &mut LowerCtx<'_>,
-) -> Result<(), LowerError> {
+fn compile_logical_assign(e: &LogicalAssignExpr, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
     let result_slot = ctx.next_slot;
     ctx.next_slot += 1;
 
@@ -2527,10 +2536,14 @@ fn compile_logical_assign(
         span: e.span,
     });
     compile_assign_to_lhs(&e.left, result_slot, e.span, ctx)?;
-    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_block };
+    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+        target: merge_block,
+    };
 
     ctx.current_block = skip_block as usize;
-    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump { target: merge_block };
+    ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+        target: merge_block,
+    };
 
     ctx.current_block = merge_block as usize;
     ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
@@ -2550,26 +2563,27 @@ fn compile_assign_to_lhs(
     match lhs {
         Expression::Identifier(id) => {
             if let Some(&slot) = ctx.locals.get(&id.name) {
-                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                    id: rhs_slot,
-                    span,
-                });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal { id: slot, span });
+                ctx.blocks[ctx.current_block]
+                    .ops
+                    .push(HirOp::LoadLocal { id: rhs_slot, span });
+                ctx.blocks[ctx.current_block]
+                    .ops
+                    .push(HirOp::StoreLocal { id: slot, span });
             } else if let Some(slot) = get_or_alloc_capture_slot(ctx, &id.name) {
-                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                    id: rhs_slot,
-                    span,
-                });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::StoreLocal { id: slot, span });
+                ctx.blocks[ctx.current_block]
+                    .ops
+                    .push(HirOp::LoadLocal { id: rhs_slot, span });
+                ctx.blocks[ctx.current_block]
+                    .ops
+                    .push(HirOp::StoreLocal { id: slot, span });
             } else if GLOBAL_NAMES.contains(&id.name.as_str()) {
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                     value: HirConst::Global("globalThis".to_string()),
                     span,
                 });
-                ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                    id: rhs_slot,
-                    span,
-                });
+                ctx.blocks[ctx.current_block]
+                    .ops
+                    .push(HirOp::LoadLocal { id: rhs_slot, span });
                 ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span });
                 ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
                     key: id.name.clone(),
@@ -2582,13 +2596,10 @@ fn compile_assign_to_lhs(
             compile_expression(&m.object, ctx)?;
             match &m.property {
                 MemberProperty::Identifier(key) => {
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                        id: rhs_slot,
-                        span,
-                    });
                     ctx.blocks[ctx.current_block]
                         .ops
-                        .push(HirOp::Swap { span });
+                        .push(HirOp::LoadLocal { id: rhs_slot, span });
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span });
                     ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
                         key: key.clone(),
                         span,
@@ -2596,10 +2607,9 @@ fn compile_assign_to_lhs(
                 }
                 MemberProperty::Expression(key_expr) => {
                     compile_expression(key_expr, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
-                        id: rhs_slot,
-                        span,
-                    });
+                    ctx.blocks[ctx.current_block]
+                        .ops
+                        .push(HirOp::LoadLocal { id: rhs_slot, span });
                     ctx.blocks[ctx.current_block]
                         .ops
                         .push(HirOp::SetPropDyn { span });
@@ -2612,6 +2622,677 @@ fn compile_assign_to_lhs(
             Some(span),
         )),
     }
+}
+
+fn alloc_slot(ctx: &mut LowerCtx<'_>) -> u32 {
+    let s = ctx.next_slot;
+    ctx.next_slot += 1;
+    s
+}
+
+fn new_block(ctx: &mut LowerCtx<'_>, span: Span) -> HirBlockId {
+    let id = ctx.blocks.len() as HirBlockId;
+    ctx.blocks.push(HirBlock {
+        id,
+        ops: Vec::new(),
+        terminator: HirTerminator::Jump { target: id },
+    });
+    let _ = span;
+    id
+}
+
+fn op(ctx: &mut LowerCtx<'_>, o: HirOp) {
+    ctx.blocks[ctx.current_block].ops.push(o);
+}
+
+fn set_term(ctx: &mut LowerCtx<'_>, t: HirTerminator) {
+    ctx.blocks[ctx.current_block].terminator = t;
+}
+
+fn jump_to(ctx: &mut LowerCtx<'_>, target: HirBlockId) {
+    set_term(ctx, HirTerminator::Jump { target });
+    ctx.current_block = target as usize;
+}
+
+#[derive(Clone, Copy)]
+enum HofKind {
+    ForEach,
+    Map,
+    Filter,
+    Find,
+    FindIndex,
+    FindLast,
+    FindLastIndex,
+    Some,
+    Every,
+    FlatMap,
+}
+
+fn compile_array_hof(
+    kind: HofKind,
+    arr_expr: &Expression,
+    args: &[CallArg],
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    let callback_arg = args.first().ok_or_else(|| {
+        LowerError::Unsupported(
+            "array HOF requires a callback argument".to_string(),
+            Some(span),
+        )
+    })?;
+
+    let arr_slot = alloc_slot(ctx);
+    let fn_slot = alloc_slot(ctx);
+    let len_slot = alloc_slot(ctx);
+    let i_slot = alloc_slot(ctx);
+    let elem_slot = alloc_slot(ctx);
+    let cond_slot = alloc_slot(ctx);
+
+    let result_slot = match kind {
+        HofKind::Map | HofKind::Filter | HofKind::FlatMap => {
+            let s = alloc_slot(ctx);
+            s
+        }
+        _ => u32::MAX,
+    };
+
+    compile_expression(arr_expr, ctx)?;
+    op(ctx, HirOp::StoreLocal { id: arr_slot, span });
+
+    compile_call_arg(callback_arg, ctx, span)?;
+    op(ctx, HirOp::StoreLocal { id: fn_slot, span });
+
+    if matches!(kind, HofKind::Map | HofKind::Filter | HofKind::FlatMap) {
+        op(ctx, HirOp::NewArray { span });
+        op(
+            ctx,
+            HirOp::StoreLocal {
+                id: result_slot,
+                span,
+            },
+        );
+    }
+
+    op(ctx, HirOp::LoadLocal { id: arr_slot, span });
+    op(
+        ctx,
+        HirOp::GetProp {
+            key: "length".to_string(),
+            span,
+        },
+    );
+    op(ctx, HirOp::StoreLocal { id: len_slot, span });
+
+    let is_from_right = matches!(kind, HofKind::FindLast | HofKind::FindLastIndex);
+
+    if is_from_right {
+        op(ctx, HirOp::LoadLocal { id: len_slot, span });
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::Int(1),
+                span,
+            },
+        );
+        op(ctx, HirOp::Sub { span });
+        op(ctx, HirOp::StoreLocal { id: i_slot, span });
+    } else {
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::Int(0),
+                span,
+            },
+        );
+        op(ctx, HirOp::StoreLocal { id: i_slot, span });
+    }
+
+    let header_id = new_block(ctx, span);
+    jump_to(ctx, header_id);
+
+    if is_from_right {
+        op(ctx, HirOp::LoadLocal { id: i_slot, span });
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::Int(0),
+                span,
+            },
+        );
+        op(ctx, HirOp::Gte { span });
+    } else {
+        op(ctx, HirOp::LoadLocal { id: i_slot, span });
+        op(ctx, HirOp::LoadLocal { id: len_slot, span });
+        op(ctx, HirOp::Lt { span });
+    }
+    op(
+        ctx,
+        HirOp::StoreLocal {
+            id: cond_slot,
+            span,
+        },
+    );
+
+    let body_id = new_block(ctx, span);
+    let exit_id = new_block(ctx, span);
+    set_term(
+        ctx,
+        HirTerminator::Branch {
+            cond: cond_slot,
+            then_block: body_id,
+            else_block: exit_id,
+        },
+    );
+    ctx.current_block = body_id as usize;
+
+    op(ctx, HirOp::LoadLocal { id: arr_slot, span });
+    op(ctx, HirOp::LoadLocal { id: i_slot, span });
+    op(ctx, HirOp::GetPropDyn { span });
+    op(
+        ctx,
+        HirOp::StoreLocal {
+            id: elem_slot,
+            span,
+        },
+    );
+
+    op(
+        ctx,
+        HirOp::LoadConst {
+            value: HirConst::Undefined,
+            span,
+        },
+    );
+    op(ctx, HirOp::LoadLocal { id: fn_slot, span });
+    op(
+        ctx,
+        HirOp::LoadLocal {
+            id: elem_slot,
+            span,
+        },
+    );
+    op(ctx, HirOp::LoadLocal { id: i_slot, span });
+    op(ctx, HirOp::LoadLocal { id: arr_slot, span });
+    op(ctx, HirOp::CallMethod { argc: 3, span });
+
+    let increment_id = new_block(ctx, span);
+    let after_increment_id = new_block(ctx, span);
+
+    match kind {
+        HofKind::ForEach => {
+            op(ctx, HirOp::Pop { span });
+            jump_to(ctx, increment_id);
+        }
+        HofKind::Map => {
+            let call_res = alloc_slot(ctx);
+            op(ctx, HirOp::StoreLocal { id: call_res, span });
+            op(
+                ctx,
+                HirOp::LoadLocal {
+                    id: result_slot,
+                    span,
+                },
+            );
+            op(ctx, HirOp::LoadLocal { id: call_res, span });
+            op(
+                ctx,
+                HirOp::CallBuiltin {
+                    builtin: b("Array", "push"),
+                    argc: 2,
+                    span,
+                },
+            );
+            op(ctx, HirOp::Pop { span });
+            jump_to(ctx, increment_id);
+        }
+        HofKind::FlatMap => {
+            let call_res = alloc_slot(ctx);
+            op(ctx, HirOp::StoreLocal { id: call_res, span });
+            op(
+                ctx,
+                HirOp::LoadLocal {
+                    id: result_slot,
+                    span,
+                },
+            );
+            op(ctx, HirOp::LoadLocal { id: call_res, span });
+            op(
+                ctx,
+                HirOp::CallBuiltin {
+                    builtin: b("Array", "concat"),
+                    argc: 2,
+                    span,
+                },
+            );
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: result_slot,
+                    span,
+                },
+            );
+            jump_to(ctx, increment_id);
+        }
+        HofKind::Filter => {
+            let call_res = alloc_slot(ctx);
+            let truthy_slot = alloc_slot(ctx);
+            op(ctx, HirOp::StoreLocal { id: call_res, span });
+            op(ctx, HirOp::LoadLocal { id: call_res, span });
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Bool(false),
+                    span,
+                },
+            );
+            op(ctx, HirOp::StrictNotEq { span });
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: truthy_slot,
+                    span,
+                },
+            );
+            let push_id = new_block(ctx, span);
+            let skip_id = new_block(ctx, span);
+            set_term(
+                ctx,
+                HirTerminator::Branch {
+                    cond: truthy_slot,
+                    then_block: push_id,
+                    else_block: skip_id,
+                },
+            );
+            ctx.current_block = push_id as usize;
+            op(
+                ctx,
+                HirOp::LoadLocal {
+                    id: result_slot,
+                    span,
+                },
+            );
+            op(
+                ctx,
+                HirOp::LoadLocal {
+                    id: elem_slot,
+                    span,
+                },
+            );
+            op(
+                ctx,
+                HirOp::CallBuiltin {
+                    builtin: b("Array", "push"),
+                    argc: 2,
+                    span,
+                },
+            );
+            op(ctx, HirOp::Pop { span });
+            jump_to(ctx, skip_id);
+            jump_to(ctx, increment_id);
+        }
+        HofKind::Find | HofKind::FindLast => {
+            let found_slot = alloc_slot(ctx);
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: found_slot,
+                    span,
+                },
+            );
+            let early_exit_id = new_block(ctx, span);
+            let keep_looking_id = new_block(ctx, span);
+            set_term(
+                ctx,
+                HirTerminator::Branch {
+                    cond: found_slot,
+                    then_block: early_exit_id,
+                    else_block: keep_looking_id,
+                },
+            );
+            ctx.current_block = early_exit_id as usize;
+            op(
+                ctx,
+                HirOp::LoadLocal {
+                    id: elem_slot,
+                    span,
+                },
+            );
+            let return_block = new_block(ctx, span);
+            jump_to(ctx, return_block);
+            ctx.current_block = keep_looking_id as usize;
+            jump_to(ctx, increment_id);
+            ctx.current_block = return_block as usize;
+            jump_to(ctx, exit_id);
+            ctx.current_block = exit_id as usize;
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Undefined,
+                    span,
+                },
+            );
+            return Ok(());
+        }
+        HofKind::FindIndex | HofKind::FindLastIndex => {
+            let found_slot = alloc_slot(ctx);
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: found_slot,
+                    span,
+                },
+            );
+            let early_exit_id = new_block(ctx, span);
+            let keep_looking_id = new_block(ctx, span);
+            set_term(
+                ctx,
+                HirTerminator::Branch {
+                    cond: found_slot,
+                    then_block: early_exit_id,
+                    else_block: keep_looking_id,
+                },
+            );
+            ctx.current_block = early_exit_id as usize;
+            op(ctx, HirOp::LoadLocal { id: i_slot, span });
+            let return_block = new_block(ctx, span);
+            jump_to(ctx, return_block);
+            ctx.current_block = keep_looking_id as usize;
+            jump_to(ctx, increment_id);
+            ctx.current_block = return_block as usize;
+            jump_to(ctx, exit_id);
+            ctx.current_block = exit_id as usize;
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Int(-1),
+                    span,
+                },
+            );
+            return Ok(());
+        }
+        HofKind::Some => {
+            let found_slot = alloc_slot(ctx);
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: found_slot,
+                    span,
+                },
+            );
+            let early_exit_id = new_block(ctx, span);
+            let keep_looking_id = new_block(ctx, span);
+            set_term(
+                ctx,
+                HirTerminator::Branch {
+                    cond: found_slot,
+                    then_block: early_exit_id,
+                    else_block: keep_looking_id,
+                },
+            );
+            ctx.current_block = early_exit_id as usize;
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Bool(true),
+                    span,
+                },
+            );
+            let return_block = new_block(ctx, span);
+            jump_to(ctx, return_block);
+            ctx.current_block = keep_looking_id as usize;
+            jump_to(ctx, increment_id);
+            ctx.current_block = return_block as usize;
+            jump_to(ctx, exit_id);
+            ctx.current_block = exit_id as usize;
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Bool(false),
+                    span,
+                },
+            );
+            return Ok(());
+        }
+        HofKind::Every => {
+            let pass_slot = alloc_slot(ctx);
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: pass_slot,
+                    span,
+                },
+            );
+            let continue_id = new_block(ctx, span);
+            let early_fail_id = new_block(ctx, span);
+            set_term(
+                ctx,
+                HirTerminator::Branch {
+                    cond: pass_slot,
+                    then_block: continue_id,
+                    else_block: early_fail_id,
+                },
+            );
+            ctx.current_block = early_fail_id as usize;
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Bool(false),
+                    span,
+                },
+            );
+            let return_block = new_block(ctx, span);
+            jump_to(ctx, return_block);
+            ctx.current_block = continue_id as usize;
+            jump_to(ctx, increment_id);
+            ctx.current_block = return_block as usize;
+            jump_to(ctx, exit_id);
+            ctx.current_block = exit_id as usize;
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Bool(true),
+                    span,
+                },
+            );
+            return Ok(());
+        }
+    }
+
+    ctx.current_block = increment_id as usize;
+    if is_from_right {
+        op(ctx, HirOp::LoadLocal { id: i_slot, span });
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::Int(1),
+                span,
+            },
+        );
+        op(ctx, HirOp::Sub { span });
+    } else {
+        op(ctx, HirOp::LoadLocal { id: i_slot, span });
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::Int(1),
+                span,
+            },
+        );
+        op(ctx, HirOp::Add { span });
+    }
+    op(ctx, HirOp::StoreLocal { id: i_slot, span });
+    jump_to(ctx, header_id);
+
+    ctx.current_block = after_increment_id as usize;
+    jump_to(ctx, exit_id);
+
+    ctx.current_block = exit_id as usize;
+    match kind {
+        HofKind::ForEach => {
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Undefined,
+                    span,
+                },
+            );
+        }
+        HofKind::Map | HofKind::Filter | HofKind::FlatMap => {
+            op(
+                ctx,
+                HirOp::LoadLocal {
+                    id: result_slot,
+                    span,
+                },
+            );
+        }
+        _ => unreachable!("early-exit HOF variants handled above"),
+    }
+
+    Ok(())
+}
+
+fn compile_array_reduce(
+    arr_expr: &Expression,
+    args: &[CallArg],
+    span: Span,
+    ctx: &mut LowerCtx<'_>,
+) -> Result<(), LowerError> {
+    let callback_arg = args.first().ok_or_else(|| {
+        LowerError::Unsupported(
+            "reduce requires a callback argument".to_string(),
+            Some(span),
+        )
+    })?;
+
+    let arr_slot = alloc_slot(ctx);
+    let fn_slot = alloc_slot(ctx);
+    let len_slot = alloc_slot(ctx);
+    let i_slot = alloc_slot(ctx);
+    let acc_slot = alloc_slot(ctx);
+    let elem_slot = alloc_slot(ctx);
+    let cond_slot = alloc_slot(ctx);
+
+    compile_expression(arr_expr, ctx)?;
+    op(ctx, HirOp::StoreLocal { id: arr_slot, span });
+    compile_call_arg(callback_arg, ctx, span)?;
+    op(ctx, HirOp::StoreLocal { id: fn_slot, span });
+    op(ctx, HirOp::LoadLocal { id: arr_slot, span });
+    op(
+        ctx,
+        HirOp::GetProp {
+            key: "length".to_string(),
+            span,
+        },
+    );
+    op(ctx, HirOp::StoreLocal { id: len_slot, span });
+
+    if let Some(init_arg) = args.get(1) {
+        compile_call_arg(init_arg, ctx, span)?;
+        op(ctx, HirOp::StoreLocal { id: acc_slot, span });
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::Int(0),
+                span,
+            },
+        );
+        op(ctx, HirOp::StoreLocal { id: i_slot, span });
+    } else {
+        op(ctx, HirOp::LoadLocal { id: arr_slot, span });
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::Int(0),
+                span,
+            },
+        );
+        op(ctx, HirOp::GetPropDyn { span });
+        op(ctx, HirOp::StoreLocal { id: acc_slot, span });
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::Int(1),
+                span,
+            },
+        );
+        op(ctx, HirOp::StoreLocal { id: i_slot, span });
+    }
+
+    let header_id = new_block(ctx, span);
+    jump_to(ctx, header_id);
+
+    op(ctx, HirOp::LoadLocal { id: i_slot, span });
+    op(ctx, HirOp::LoadLocal { id: len_slot, span });
+    op(ctx, HirOp::Lt { span });
+    op(
+        ctx,
+        HirOp::StoreLocal {
+            id: cond_slot,
+            span,
+        },
+    );
+
+    let body_id = new_block(ctx, span);
+    let exit_id = new_block(ctx, span);
+    set_term(
+        ctx,
+        HirTerminator::Branch {
+            cond: cond_slot,
+            then_block: body_id,
+            else_block: exit_id,
+        },
+    );
+    ctx.current_block = body_id as usize;
+
+    op(ctx, HirOp::LoadLocal { id: arr_slot, span });
+    op(ctx, HirOp::LoadLocal { id: i_slot, span });
+    op(ctx, HirOp::GetPropDyn { span });
+    op(
+        ctx,
+        HirOp::StoreLocal {
+            id: elem_slot,
+            span,
+        },
+    );
+
+    op(
+        ctx,
+        HirOp::LoadConst {
+            value: HirConst::Undefined,
+            span,
+        },
+    );
+    op(ctx, HirOp::LoadLocal { id: fn_slot, span });
+    op(ctx, HirOp::LoadLocal { id: acc_slot, span });
+    op(
+        ctx,
+        HirOp::LoadLocal {
+            id: elem_slot,
+            span,
+        },
+    );
+    op(ctx, HirOp::LoadLocal { id: i_slot, span });
+    op(ctx, HirOp::LoadLocal { id: arr_slot, span });
+    op(ctx, HirOp::CallMethod { argc: 4, span });
+    op(ctx, HirOp::StoreLocal { id: acc_slot, span });
+
+    op(ctx, HirOp::LoadLocal { id: i_slot, span });
+    op(
+        ctx,
+        HirOp::LoadConst {
+            value: HirConst::Int(1),
+            span,
+        },
+    );
+    op(ctx, HirOp::Add { span });
+    op(ctx, HirOp::StoreLocal { id: i_slot, span });
+    jump_to(ctx, header_id);
+
+    ctx.current_block = exit_id as usize;
+    op(ctx, HirOp::LoadLocal { id: acc_slot, span });
+    Ok(())
 }
 
 fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
@@ -2909,9 +3590,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     BinaryOp::NotEq => ctx.blocks[ctx.current_block]
                         .ops
                         .push(HirOp::NotEq { span: e.span }),
-                    BinaryOp::LogicalAnd
-                    | BinaryOp::LogicalOr
-                    | BinaryOp::NullishCoalescing => {
+                    BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::NullishCoalescing => {
                         unreachable!("logical ops handled in outer match")
                     }
                 }
@@ -3224,8 +3903,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
         Expression::Call(e) => match e.callee.as_ref() {
             Expression::Member(m) => {
                 if let MemberProperty::Expression(key_expr) = &m.property {
-                    let only_spread =
-                        e.args.len() == 1 && matches!(&e.args[0], CallArg::Spread(_));
+                    let only_spread = e.args.len() == 1 && matches!(&e.args[0], CallArg::Spread(_));
                     let has_spread = args_has_spread(&e.args);
                     if has_spread && !only_spread {
                         compile_call_with_spread(
@@ -3237,20 +3915,28 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         )?;
                     } else {
                         compile_expression(&m.object, ctx)?;
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: e.span });
+                        ctx.blocks[ctx.current_block]
+                            .ops
+                            .push(HirOp::Dup { span: e.span });
                         compile_expression(key_expr, ctx)?;
                         ctx.blocks[ctx.current_block]
                             .ops
                             .push(HirOp::GetPropDyn { span: e.span });
                         if only_spread {
                             if let CallArg::Spread(spread_expr) = &e.args[0] {
-                                ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span: e.span });
-                                ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: e.span });
+                                ctx.blocks[ctx.current_block]
+                                    .ops
+                                    .push(HirOp::Swap { span: e.span });
+                                ctx.blocks[ctx.current_block]
+                                    .ops
+                                    .push(HirOp::Dup { span: e.span });
                                 ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
                                     key: "apply".to_string(),
                                     span: e.span,
                                 });
-                                ctx.blocks[ctx.current_block].ops.push(HirOp::Swap { span: e.span });
+                                ctx.blocks[ctx.current_block]
+                                    .ops
+                                    .push(HirOp::Swap { span: e.span });
                                 compile_expression(spread_expr, ctx)?;
                                 ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
                                     argc: 2,
@@ -3268,783 +3954,838 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         }
                     }
                 } else {
-                let (obj_name, prop) = match (&m.object.as_ref(), &m.property) {
-                    (Expression::Identifier(obj), MemberProperty::Identifier(p)) => {
-                        (Some(&obj.name), p.as_str())
-                    }
-                    (_, MemberProperty::Identifier(p)) => (None, p.as_str()),
-                    _ => (None, ""),
-                };
-                if args_has_spread(&e.args) {
-                    compile_call_with_spread(
-                        e.callee.as_ref(),
-                        Some(&m.object),
-                        &e.args,
-                        ctx,
-                        e.span,
-                    )?;
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "console") && prop == "log" {
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Host", "print"),
-                        argc: e.args.len() as u32,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "floor"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "floor"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "abs"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "abs"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "min" {
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "min"),
-                        argc: e.args.len() as u32,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "max" {
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "max"),
-                        argc: e.args.len() as u32,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "pow"
-                    && e.args.len() == 2
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    compile_call_arg(&e.args[1], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "pow"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "ceil"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "ceil"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "round"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "round"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "sqrt"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "sqrt"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "sign"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "sign"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "trunc"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "trunc"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "sumPrecise"
-                {
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "sumPrecise"),
-                        argc: e.args.len() as u32,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
-                    && prop == "random"
-                    && e.args.len() == 0
-                {
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Math", "random"),
-                        argc: 0,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "JSON")
-                    && prop == "parse"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Json", "parse"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "JSON")
-                    && prop == "stringify"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Json", "stringify"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "create"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "create"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "keys"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "keys"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "values"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "values"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "entries"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "entries"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "assign"
-                    && e.args.len() >= 1
-                {
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "assign"),
-                        argc: e.args.len() as u32,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "preventExtensions"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "preventExtensions"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "seal"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "seal"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "setPrototypeOf"
-                    && e.args.len() == 2
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    compile_call_arg(&e.args[1], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "setPrototypeOf"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "propertyIsEnumerable"
-                    && e.args.len() == 2
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    compile_call_arg(&e.args[1], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "propertyIsEnumerable"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "getPrototypeOf"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "getPrototypeOf"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "freeze"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "freeze"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "isExtensible"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "isExtensible"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "isFrozen"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "isFrozen"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "isSealed"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "isSealed"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "hasOwn"
-                    && e.args.len() == 2
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    compile_call_arg(&e.args[1], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "hasOwn"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "is"
-                    && e.args.len() == 2
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    compile_call_arg(&e.args[1], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "is"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
-                    && prop == "fromEntries"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "fromEntries"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
-                    && prop == "isInteger"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Number", "isInteger"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
-                    && prop == "isSafeInteger"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Number", "isSafeInteger"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
-                    && prop == "isFinite"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Number", "isFinite"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
-                    && prop == "isNaN"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Number", "isNaN"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "String")
-                    && prop == "fromCharCode"
-                {
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("String", "fromCharCode"),
-                        argc: e.args.len() as u32,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Array")
-                    && prop == "isArray"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "isArray"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Error")
-                    && prop == "isError"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Error", "isError"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "Date")
-                    && prop == "now"
-                    && e.args.is_empty()
-                {
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Date", "now"),
-                        argc: 0,
-                        span: e.span,
-                    });
-                } else if matches!(obj_name.as_deref(), Some(s) if s == "RegExp")
-                    && prop == "escape"
-                    && e.args.len() == 1
-                {
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("RegExp", "escape"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "push" {
-                    compile_expression(&m.object, ctx)?;
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "push"),
-                        argc: (1 + e.args.len()) as u32,
-                        span: e.span,
-                    });
-                } else if prop == "pop" {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "pop"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "set" && e.args.len() == 2 {
-                    compile_expression(&m.object, ctx)?;
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    compile_call_arg(&e.args[1], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Map", "set"),
-                        argc: 3,
-                        span: e.span,
-                    });
-                } else if prop == "get" && e.args.len() == 1 {
-                    compile_expression(&m.object, ctx)?;
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Map", "get"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if prop == "has" && e.args.len() == 1 {
-                    compile_expression(&m.object, ctx)?;
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Collection", "has"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if prop == "add" && e.args.len() == 1 {
-                    compile_expression(&m.object, ctx)?;
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Set", "add"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if prop == "getTime" && e.args.is_empty() {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Date", "getTime"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "toString" && e.args.is_empty() {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Date", "toString"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "toISOString" && e.args.is_empty() {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Date", "toISOString"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "slice" {
-                    compile_expression(&m.object, ctx)?;
-                    let start = e.args.get(0);
-                    let end = e.args.get(1);
-                    if let Some(s) = start {
-                        compile_call_arg(s, ctx, e.span)?;
+                    let (obj_name, prop) = match (&m.object.as_ref(), &m.property) {
+                        (Expression::Identifier(obj), MemberProperty::Identifier(p)) => {
+                            (Some(&obj.name), p.as_str())
+                        }
+                        (_, MemberProperty::Identifier(p)) => (None, p.as_str()),
+                        _ => (None, ""),
+                    };
+                    if args_has_spread(&e.args) {
+                        compile_call_with_spread(
+                            e.callee.as_ref(),
+                            Some(&m.object),
+                            &e.args,
+                            ctx,
+                            e.span,
+                        )?;
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "console")
+                        && prop == "log"
+                    {
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Host", "print"),
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "floor"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "floor"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "abs"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "abs"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "min"
+                    {
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "min"),
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "max"
+                    {
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "max"),
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "pow"
+                        && e.args.len() == 2
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        compile_call_arg(&e.args[1], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "pow"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "ceil"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "ceil"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "round"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "round"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "sqrt"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "sqrt"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "sign"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "sign"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "trunc"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "trunc"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "sumPrecise"
+                    {
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "sumPrecise"),
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                        && prop == "random"
+                        && e.args.len() == 0
+                    {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Math", "random"),
+                            argc: 0,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "JSON")
+                        && prop == "parse"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Json", "parse"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "JSON")
+                        && prop == "stringify"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Json", "stringify"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "create"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "create"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "keys"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "keys"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "values"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "values"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "entries"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "entries"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "assign"
+                        && e.args.len() >= 1
+                    {
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "assign"),
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "preventExtensions"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "preventExtensions"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "seal"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "seal"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "setPrototypeOf"
+                        && e.args.len() == 2
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        compile_call_arg(&e.args[1], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "setPrototypeOf"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "propertyIsEnumerable"
+                        && e.args.len() == 2
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        compile_call_arg(&e.args[1], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "propertyIsEnumerable"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "getPrototypeOf"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "getPrototypeOf"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "freeze"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "freeze"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "isExtensible"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "isExtensible"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "isFrozen"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "isFrozen"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "isSealed"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "isSealed"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "hasOwn"
+                        && e.args.len() == 2
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        compile_call_arg(&e.args[1], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "hasOwn"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "is"
+                        && e.args.len() == 2
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        compile_call_arg(&e.args[1], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "is"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                        && prop == "fromEntries"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "fromEntries"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                        && prop == "isInteger"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Number", "isInteger"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                        && prop == "isSafeInteger"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Number", "isSafeInteger"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                        && prop == "isFinite"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Number", "isFinite"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                        && prop == "isNaN"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Number", "isNaN"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "String")
+                        && prop == "fromCharCode"
+                    {
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("String", "fromCharCode"),
+                            argc: e.args.len() as u32,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Array")
+                        && prop == "isArray"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "isArray"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Error")
+                        && prop == "isError"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Error", "isError"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Date")
+                        && prop == "now"
+                        && e.args.is_empty()
+                    {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Date", "now"),
+                            argc: 0,
+                            span: e.span,
+                        });
+                    } else if matches!(obj_name.as_deref(), Some(s) if s == "RegExp")
+                        && prop == "escape"
+                        && e.args.len() == 1
+                    {
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("RegExp", "escape"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "push" {
+                        compile_expression(&m.object, ctx)?;
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "push"),
+                            argc: (1 + e.args.len()) as u32,
+                            span: e.span,
+                        });
+                    } else if prop == "pop" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "pop"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "set" && e.args.len() == 2 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        compile_call_arg(&e.args[1], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Map", "set"),
+                            argc: 3,
+                            span: e.span,
+                        });
+                    } else if prop == "get" && e.args.len() == 1 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Map", "get"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "has" && e.args.len() == 1 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Collection", "has"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "add" && e.args.len() == 1 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Set", "add"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "getTime" && e.args.is_empty() {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Date", "getTime"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "toString" && e.args.is_empty() {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Date", "toString"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "toISOString" && e.args.is_empty() {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Date", "toISOString"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "slice" {
+                        compile_expression(&m.object, ctx)?;
+                        let start = e.args.get(0);
+                        let end = e.args.get(1);
+                        if let Some(s) = start {
+                            compile_call_arg(s, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        if let Some(ed) = end {
+                            compile_call_arg(ed, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "slice"),
+                            argc: 3,
+                            span: e.span,
+                        });
+                    } else if prop == "concat" {
+                        compile_expression(&m.object, ctx)?;
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "concat"),
+                            argc: (e.args.len() + 1) as u32,
+                            span: e.span,
+                        });
+                    } else if prop == "indexOf" {
+                        compile_expression(&m.object, ctx)?;
+                        let search = e.args.first();
+                        let from = e.args.get(1);
+                        if let Some(s) = search {
+                            compile_call_arg(s, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        if let Some(f) = from {
+                            compile_call_arg(f, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "indexOf"),
+                            argc: 3,
+                            span: e.span,
+                        });
+                    } else if prop == "includes" {
+                        compile_expression(&m.object, ctx)?;
+                        let search = e.args.first();
+                        let from = e.args.get(1);
+                        if let Some(s) = search {
+                            compile_call_arg(s, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        if let Some(f) = from {
+                            compile_call_arg(f, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "includes"),
+                            argc: 3,
+                            span: e.span,
+                        });
+                    } else if prop == "join" {
+                        compile_expression(&m.object, ctx)?;
+                        let sep = e.args.first();
+                        if let Some(s) = sep {
+                            compile_call_arg(s, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::String(",".to_string()),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "join"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "shift" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "shift"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "unshift" {
+                        compile_expression(&m.object, ctx)?;
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "unshift"),
+                            argc: (1 + e.args.len()) as u32,
+                            span: e.span,
+                        });
+                    } else if prop == "reverse" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "reverse"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "fill" {
+                        compile_expression(&m.object, ctx)?;
+                        let value = e.args.first();
+                        if let Some(v) = value {
+                            compile_call_arg(v, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        let start = e.args.get(1);
+                        if let Some(s) = start {
+                            compile_call_arg(s, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        let end = e.args.get(2);
+                        if let Some(ed) = end {
+                            compile_call_arg(ed, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Array", "fill"),
+                            argc: 4,
+                            span: e.span,
+                        });
+                    } else if prop == "split" {
+                        compile_expression(&m.object, ctx)?;
+                        let sep = e.args.first();
+                        if let Some(s) = sep {
+                            compile_call_arg(s, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("String", "split"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "trim" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("String", "trim"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "toLowerCase" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("String", "toLowerCase"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "toUpperCase" {
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("String", "toUpperCase"),
+                            argc: 1,
+                            span: e.span,
+                        });
+                    } else if prop == "charAt" {
+                        compile_expression(&m.object, ctx)?;
+                        let idx = e.args.first();
+                        if let Some(a) = idx {
+                            compile_call_arg(a, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("String", "charAt"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "repeat" {
+                        compile_expression(&m.object, ctx)?;
+                        let cnt = e.args.first();
+                        if let Some(a) = cnt {
+                            compile_call_arg(a, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Int(0),
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("String", "repeat"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "hasOwnProperty" {
+                        compile_expression(&m.object, ctx)?;
+                        let key = e.args.first();
+                        if let Some(k) = key {
+                            compile_call_arg(k, ctx, e.span)?;
+                        } else {
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                                value: HirConst::Undefined,
+                                span: e.span,
+                            });
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "hasOwnProperty"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if prop == "propertyIsEnumerable" && e.args.len() == 1 {
+                        compile_expression(&m.object, ctx)?;
+                        compile_call_arg(&e.args[0], ctx, e.span)?;
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Object", "propertyIsEnumerable"),
+                            argc: 2,
+                            span: e.span,
+                        });
+                    } else if !e.args.is_empty()
+                        && {
+                            let cb = &e.args[0];
+                            matches!(
+                                cb,
+                                CallArg::Expr(Expression::FunctionExpr(_))
+                                    | CallArg::Expr(Expression::ArrowFunction(_))
+                                    | CallArg::Expr(Expression::Identifier(_))
+                            )
+                        }
+                        && matches!(
+                            prop.as_ref(),
+                            "forEach"
+                                | "map"
+                                | "filter"
+                                | "find"
+                                | "findIndex"
+                                | "findLast"
+                                | "findLastIndex"
+                                | "some"
+                                | "every"
+                                | "flatMap"
+                        )
+                    {
+                        let kind = match prop.as_ref() {
+                            "forEach" => HofKind::ForEach,
+                            "map" => HofKind::Map,
+                            "filter" => HofKind::Filter,
+                            "find" => HofKind::Find,
+                            "findIndex" => HofKind::FindIndex,
+                            "findLast" => HofKind::FindLast,
+                            "findLastIndex" => HofKind::FindLastIndex,
+                            "some" => HofKind::Some,
+                            "every" => HofKind::Every,
+                            "flatMap" => HofKind::FlatMap,
+                            _ => unreachable!(),
+                        };
+                        compile_array_hof(kind, &m.object, &e.args, e.span, ctx)?;
+                    } else if !e.args.is_empty()
+                        && matches!(prop.as_ref(), "reduce" | "reduceRight")
+                        && {
+                            let cb = &e.args[0];
+                            matches!(
+                                cb,
+                                CallArg::Expr(Expression::FunctionExpr(_))
+                                    | CallArg::Expr(Expression::ArrowFunction(_))
+                                    | CallArg::Expr(Expression::Identifier(_))
+                            )
+                        }
+                    {
+                        compile_array_reduce(&m.object, &e.args, e.span, ctx)?;
+                    } else if args_has_spread(&e.args) {
+                        compile_call_with_spread(
+                            e.callee.as_ref(),
+                            Some(&m.object),
+                            &e.args,
+                            ctx,
+                            e.span,
+                        )?;
                     } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Int(0),
+                        compile_expression(&m.object, ctx)?;
+                        ctx.blocks[ctx.current_block]
+                            .ops
+                            .push(HirOp::Dup { span: e.span });
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
+                            key: prop.to_string(),
+                            span: e.span,
+                        });
+                        for arg in &e.args {
+                            compile_call_arg(arg, ctx, e.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
+                            argc: e.args.len() as u32,
                             span: e.span,
                         });
                     }
-                    if let Some(ed) = end {
-                        compile_call_arg(ed, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Undefined,
-                            span: e.span,
-                        });
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "slice"),
-                        argc: 3,
-                        span: e.span,
-                    });
-                } else if prop == "concat" {
-                    compile_expression(&m.object, ctx)?;
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "concat"),
-                        argc: (e.args.len() + 1) as u32,
-                        span: e.span,
-                    });
-                } else if prop == "indexOf" {
-                    compile_expression(&m.object, ctx)?;
-                    let search = e.args.first();
-                    let from = e.args.get(1);
-                    if let Some(s) = search {
-                        compile_call_arg(s, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Undefined,
-                            span: e.span,
-                        });
-                    }
-                    if let Some(f) = from {
-                        compile_call_arg(f, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Int(0),
-                            span: e.span,
-                        });
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "indexOf"),
-                        argc: 3,
-                        span: e.span,
-                    });
-                } else if prop == "includes" {
-                    compile_expression(&m.object, ctx)?;
-                    let search = e.args.first();
-                    let from = e.args.get(1);
-                    if let Some(s) = search {
-                        compile_call_arg(s, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Undefined,
-                            span: e.span,
-                        });
-                    }
-                    if let Some(f) = from {
-                        compile_call_arg(f, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Int(0),
-                            span: e.span,
-                        });
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "includes"),
-                        argc: 3,
-                        span: e.span,
-                    });
-                } else if prop == "join" {
-                    compile_expression(&m.object, ctx)?;
-                    let sep = e.args.first();
-                    if let Some(s) = sep {
-                        compile_call_arg(s, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::String(",".to_string()),
-                            span: e.span,
-                        });
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "join"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if prop == "shift" {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "shift"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "unshift" {
-                    compile_expression(&m.object, ctx)?;
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "unshift"),
-                        argc: (1 + e.args.len()) as u32,
-                        span: e.span,
-                    });
-                } else if prop == "reverse" {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "reverse"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "fill" {
-                    compile_expression(&m.object, ctx)?;
-                    let value = e.args.first();
-                    if let Some(v) = value {
-                        compile_call_arg(v, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Undefined,
-                            span: e.span,
-                        });
-                    }
-                    let start = e.args.get(1);
-                    if let Some(s) = start {
-                        compile_call_arg(s, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Undefined,
-                            span: e.span,
-                        });
-                    }
-                    let end = e.args.get(2);
-                    if let Some(ed) = end {
-                        compile_call_arg(ed, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Undefined,
-                            span: e.span,
-                        });
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Array", "fill"),
-                        argc: 4,
-                        span: e.span,
-                    });
-                } else if prop == "split" {
-                    compile_expression(&m.object, ctx)?;
-                    let sep = e.args.first();
-                    if let Some(s) = sep {
-                        compile_call_arg(s, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Undefined,
-                            span: e.span,
-                        });
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("String", "split"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if prop == "trim" {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("String", "trim"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "toLowerCase" {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("String", "toLowerCase"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "toUpperCase" {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("String", "toUpperCase"),
-                        argc: 1,
-                        span: e.span,
-                    });
-                } else if prop == "charAt" {
-                    compile_expression(&m.object, ctx)?;
-                    let idx = e.args.first();
-                    if let Some(a) = idx {
-                        compile_call_arg(a, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Int(0),
-                            span: e.span,
-                        });
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("String", "charAt"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if prop == "repeat" {
-                    compile_expression(&m.object, ctx)?;
-                    let cnt = e.args.first();
-                    if let Some(a) = cnt {
-                        compile_call_arg(a, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Int(0),
-                            span: e.span,
-                        });
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("String", "repeat"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if prop == "hasOwnProperty" {
-                    compile_expression(&m.object, ctx)?;
-                    let key = e.args.first();
-                    if let Some(k) = key {
-                        compile_call_arg(k, ctx, e.span)?;
-                    } else {
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::Undefined,
-                            span: e.span,
-                        });
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "hasOwnProperty"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if prop == "propertyIsEnumerable" && e.args.len() == 1 {
-                    compile_expression(&m.object, ctx)?;
-                    compile_call_arg(&e.args[0], ctx, e.span)?;
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                        builtin: b("Object", "propertyIsEnumerable"),
-                        argc: 2,
-                        span: e.span,
-                    });
-                } else if args_has_spread(&e.args) {
-                    compile_call_with_spread(
-                        e.callee.as_ref(),
-                        Some(&m.object),
-                        &e.args,
-                        ctx,
-                        e.span,
-                    )?;
-                } else {
-                    compile_expression(&m.object, ctx)?;
-                    ctx.blocks[ctx.current_block]
-                        .ops
-                        .push(HirOp::Dup { span: e.span });
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
-                        key: prop.to_string(),
-                        span: e.span,
-                    });
-                    for arg in &e.args {
-                        compile_call_arg(arg, ctx, e.span)?;
-                    }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::CallMethod {
-                        argc: e.args.len() as u32,
-                        span: e.span,
-                    });
-                }
                 }
             }
             Expression::FunctionExpr(fe) => {
@@ -4074,7 +4815,10 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         span: e.span,
                     });
                     let idx = *ctx.func_expr_map.get(&af.id).ok_or_else(|| {
-                        LowerError::Unsupported("arrow function not in map".to_string(), Some(af.span))
+                        LowerError::Unsupported(
+                            "arrow function not in map".to_string(),
+                            Some(af.span),
+                        )
                     })?;
                     ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                         value: HirConst::Function(idx),
@@ -4400,12 +5144,13 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 }
             }
             _ => {
-                let only_spread =
-                    e.args.len() == 1 && matches!(&e.args[0], CallArg::Spread(_));
+                let only_spread = e.args.len() == 1 && matches!(&e.args[0], CallArg::Spread(_));
                 if only_spread {
                     if let CallArg::Spread(spread_expr) = &e.args[0] {
                         compile_expression(e.callee.as_ref(), ctx)?;
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::Dup { span: e.span });
+                        ctx.blocks[ctx.current_block]
+                            .ops
+                            .push(HirOp::Dup { span: e.span });
                         ctx.blocks[ctx.current_block].ops.push(HirOp::GetProp {
                             key: "apply".to_string(),
                             span: e.span,
@@ -4439,8 +5184,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
             }
         },
         Expression::New(n) => {
-            let only_spread =
-                n.args.len() == 1 && matches!(&n.args[0], CallArg::Spread(_));
+            let only_spread = n.args.len() == 1 && matches!(&n.args[0], CallArg::Spread(_));
             let has_spread = args_has_spread(&n.args);
             if has_spread && !only_spread {
                 compile_new_with_spread(n.callee.as_ref(), &n.args, ctx, n.span)?;
@@ -4466,194 +5210,194 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     });
                 }
             } else {
-            match n.callee.as_ref() {
-            Expression::Identifier(id) if id.name == "Error" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("Type", "Error"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "Map" && n.args.is_empty() => {
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("Map", "create"),
-                    argc: 0,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "Set" && n.args.is_empty() => {
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("Set", "create"),
-                    argc: 0,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "Date" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("Date", "create"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "Error" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("Type", "Error"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "ReferenceError" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("Error", "ReferenceError"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "TypeError" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("Error", "TypeError"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "RangeError" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("Error", "RangeError"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "SyntaxError" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("Error", "SyntaxError"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "Symbol" => {
-                return Err(LowerError::Unsupported(
-                    "Symbol is not a constructor".to_string(),
-                    Some(n.span),
-                ));
-            }
-            Expression::Identifier(id) if id.name == "Int32Array" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("TypedArray", "Int32Array"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "Uint8Array" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("TypedArray", "Uint8Array"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "Uint8ClampedArray" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("TypedArray", "Uint8ClampedArray"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "ArrayBuffer" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("TypedArray", "ArrayBuffer"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "DataView" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("TypedArray", "DataView"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) if id.name == "RegExp" => {
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                    builtin: b("RegExp", "create"),
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
-            }
-            Expression::Identifier(id) => {
-                if let Some(&idx) = get_func_index(ctx)
-                    .get(&id.name)
-                    .or_else(|| ctx.func_index.get(&id.name))
-                {
-                    for arg in &n.args {
-                        compile_call_arg(arg, ctx, n.span)?;
+                match n.callee.as_ref() {
+                    Expression::Identifier(id) if id.name == "Error" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Type", "Error"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
                     }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::New {
-                        func_index: idx,
-                        argc: n.args.len() as u32,
-                        span: n.span,
-                    });
-                } else {
-                    compile_expression(&Expression::Identifier(id.clone()), ctx)?;
-                    for arg in &n.args {
-                        compile_call_arg(arg, ctx, n.span)?;
+                    Expression::Identifier(id) if id.name == "Map" && n.args.is_empty() => {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Map", "create"),
+                            argc: 0,
+                            span: n.span,
+                        });
                     }
-                    ctx.blocks[ctx.current_block].ops.push(HirOp::NewMethod {
-                        argc: n.args.len() as u32,
-                        span: n.span,
-                    });
+                    Expression::Identifier(id) if id.name == "Set" && n.args.is_empty() => {
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Set", "create"),
+                            argc: 0,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "Date" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Date", "create"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "Error" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Type", "Error"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "ReferenceError" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Error", "ReferenceError"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "TypeError" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Error", "TypeError"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "RangeError" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Error", "RangeError"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "SyntaxError" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("Error", "SyntaxError"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "Symbol" => {
+                        return Err(LowerError::Unsupported(
+                            "Symbol is not a constructor".to_string(),
+                            Some(n.span),
+                        ));
+                    }
+                    Expression::Identifier(id) if id.name == "Int32Array" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("TypedArray", "Int32Array"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "Uint8Array" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("TypedArray", "Uint8Array"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "Uint8ClampedArray" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("TypedArray", "Uint8ClampedArray"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "ArrayBuffer" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("TypedArray", "ArrayBuffer"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "DataView" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("TypedArray", "DataView"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) if id.name == "RegExp" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
+                            builtin: b("RegExp", "create"),
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
+                    Expression::Identifier(id) => {
+                        if let Some(&idx) = get_func_index(ctx)
+                            .get(&id.name)
+                            .or_else(|| ctx.func_index.get(&id.name))
+                        {
+                            for arg in &n.args {
+                                compile_call_arg(arg, ctx, n.span)?;
+                            }
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::New {
+                                func_index: idx,
+                                argc: n.args.len() as u32,
+                                span: n.span,
+                            });
+                        } else {
+                            compile_expression(&Expression::Identifier(id.clone()), ctx)?;
+                            for arg in &n.args {
+                                compile_call_arg(arg, ctx, n.span)?;
+                            }
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::NewMethod {
+                                argc: n.args.len() as u32,
+                                span: n.span,
+                            });
+                        }
+                    }
+                    _ => {
+                        compile_expression(n.callee.as_ref(), ctx)?;
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
+                        ctx.blocks[ctx.current_block].ops.push(HirOp::NewMethod {
+                            argc: n.args.len() as u32,
+                            span: n.span,
+                        });
+                    }
                 }
-            }
-            _ => {
-                compile_expression(n.callee.as_ref(), ctx)?;
-                for arg in &n.args {
-                    compile_call_arg(arg, ctx, n.span)?;
-                }
-                ctx.blocks[ctx.current_block].ops.push(HirOp::NewMethod {
-                    argc: n.args.len() as u32,
-                    span: n.span,
-                });
             }
         }
-            }
-        },
         Expression::ObjectLiteral(e) => {
             let proto_prop = e.properties.iter().find_map(|property| {
                 let ObjectPropertyOrSpread::Property(p) = property else {
@@ -4690,47 +5434,48 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             .ops
                             .push(HirOp::Pop { span: e.span });
                     }
-                    ObjectPropertyOrSpread::Property(property) => {
-                        match &property.key {
-                            ObjectPropertyKey::Static(key) => {
-                                if key == "__proto__" {
-                                    continue;
-                                }
-                                ctx.blocks[ctx.current_block]
-                                    .ops
-                                    .push(HirOp::Dup { span: e.span });
-                                compile_expression(&property.value, ctx)?;
-                                ctx.blocks[ctx.current_block]
-                                    .ops
-                                    .push(HirOp::Swap { span: e.span });
-                                ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
-                                    key: key.clone(),
-                                    span: e.span,
-                                });
-                                ctx.blocks[ctx.current_block]
-                                    .ops
-                                    .push(HirOp::Pop { span: e.span });
+                    ObjectPropertyOrSpread::Property(property) => match &property.key {
+                        ObjectPropertyKey::Static(key) => {
+                            if key == "__proto__" {
+                                continue;
                             }
-                            ObjectPropertyKey::Computed(key_expr) => {
-                                ctx.blocks[ctx.current_block]
-                                    .ops
-                                    .push(HirOp::Dup { span: e.span });
-                                compile_expression(key_expr, ctx)?;
-                                compile_expression(&property.value, ctx)?;
-                                ctx.blocks[ctx.current_block]
-                                    .ops
-                                    .push(HirOp::SetPropDyn { span: e.span });
-                                ctx.blocks[ctx.current_block]
-                                    .ops
-                                    .push(HirOp::Pop { span: e.span });
-                            }
+                            ctx.blocks[ctx.current_block]
+                                .ops
+                                .push(HirOp::Dup { span: e.span });
+                            compile_expression(&property.value, ctx)?;
+                            ctx.blocks[ctx.current_block]
+                                .ops
+                                .push(HirOp::Swap { span: e.span });
+                            ctx.blocks[ctx.current_block].ops.push(HirOp::SetProp {
+                                key: key.clone(),
+                                span: e.span,
+                            });
+                            ctx.blocks[ctx.current_block]
+                                .ops
+                                .push(HirOp::Pop { span: e.span });
                         }
-                    }
+                        ObjectPropertyKey::Computed(key_expr) => {
+                            ctx.blocks[ctx.current_block]
+                                .ops
+                                .push(HirOp::Dup { span: e.span });
+                            compile_expression(key_expr, ctx)?;
+                            compile_expression(&property.value, ctx)?;
+                            ctx.blocks[ctx.current_block]
+                                .ops
+                                .push(HirOp::SetPropDyn { span: e.span });
+                            ctx.blocks[ctx.current_block]
+                                .ops
+                                .push(HirOp::Pop { span: e.span });
+                        }
+                    },
                 }
             }
         }
         Expression::ArrayLiteral(e) => {
-            let has_spread = e.elements.iter().any(|x| matches!(x, ArrayElement::Spread(_)));
+            let has_spread = e
+                .elements
+                .iter()
+                .any(|x| matches!(x, ArrayElement::Spread(_)));
             if has_spread {
                 ctx.blocks[ctx.current_block]
                     .ops
@@ -4821,8 +5566,9 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     then_block: nullish_block_id,
                     else_block: prop_block_id,
                 };
-                ctx.blocks[nullish_block_id as usize].terminator =
-                    HirTerminator::Jump { target: merge_block_id };
+                ctx.blocks[nullish_block_id as usize].terminator = HirTerminator::Jump {
+                    target: merge_block_id,
+                };
                 ctx.current_block = prop_block_id as usize;
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadLocal {
                     id: obj_slot,
@@ -4842,8 +5588,9 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             .push(HirOp::GetPropDyn { span: e.span });
                     }
                 }
-                ctx.blocks[ctx.current_block].terminator =
-                    HirTerminator::Jump { target: merge_block_id };
+                ctx.blocks[ctx.current_block].terminator = HirTerminator::Jump {
+                    target: merge_block_id,
+                };
                 ctx.current_block = merge_block_id as usize;
             } else {
                 match &e.property {
@@ -5036,10 +5783,9 @@ mod tests {
 
     #[test]
     fn lower_array_at() {
-        let result = crate::driver::Driver::run(
-            "function main() { let a = [10, 20, 30]; return a.at(1); }",
-        )
-        .expect("run");
+        let result =
+            crate::driver::Driver::run("function main() { let a = [10, 20, 30]; return a.at(1); }")
+                .expect("run");
         assert_eq!(result, 20, "Array.prototype.at(1)");
     }
 
@@ -5054,15 +5800,13 @@ mod tests {
 
     #[test]
     fn lower_call_with_spread() {
-        let result = crate::driver::Driver::run(
-            "function main() { return Math.max(...[1, 2, 3]); }",
-        )
-        .expect("run");
+        let result =
+            crate::driver::Driver::run("function main() { return Math.max(...[1, 2, 3]); }")
+                .expect("run");
         assert_eq!(result, 3, "Math.max(...[1,2,3]) => 3");
-        let result2 = crate::driver::Driver::run(
-            "function main() { return Math.max(0, ...[1, 2, 3]); }",
-        )
-        .expect("run");
+        let result2 =
+            crate::driver::Driver::run("function main() { return Math.max(0, ...[1, 2, 3]); }")
+                .expect("run");
         assert_eq!(result2, 3, "Math.max(0, ...[1,2,3]) => 3");
     }
 
@@ -5454,7 +6198,10 @@ mod tests {
             "function main() { try { throw 1; } catch { return 42; } return 0; }",
         )
         .expect("run");
-        assert_eq!(result, 42, "try/catch without param should catch and return");
+        assert_eq!(
+            result, 42,
+            "try/catch without param should catch and return"
+        );
     }
 
     #[test]
@@ -5973,8 +6720,8 @@ if (result !== true) { throw new Test262Error("fail"); }
             }
             pc += 1;
         }
-        let decode_builtin_id =
-            crate::runtime::builtins::resolve("Global", "decodeURIComponent").expect("decodeURIComponent");
+        let decode_builtin_id = crate::runtime::builtins::resolve("Global", "decodeURIComponent")
+            .expect("decodeURIComponent");
         let mut found_decode_call = false;
         for (call_pc, builtin_id) in &call_builtin_pcs {
             if *builtin_id == decode_builtin_id {

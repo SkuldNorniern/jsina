@@ -123,7 +123,9 @@ fn value_to_prop_key_impl(v: &Value, heap: Option<&crate::runtime::Heap>) -> Str
         Value::Object(_) | Value::Array(_) | Value::Map(_) | Value::Set(_) | Value::Date(_) => {
             "[object Object]".to_string()
         }
-        Value::Function(_) | Value::DynamicFunction(_) | Value::Builtin(_)
+        Value::Function(_)
+        | Value::DynamicFunction(_)
+        | Value::Builtin(_)
         | Value::BoundBuiltin(_, _, _)
         | Value::BoundFunction(_, _, _) => "function".to_string(),
     }
@@ -340,18 +342,22 @@ pub(crate) fn in_check(key: &Value, obj: &Value, heap: &Heap) -> Result<bool, St
             let has_proto = matches!(key_str.as_str(), "call" | "apply" | "bind");
             Ok(has_own || has_proto)
         }
-        Value::DynamicFunction(_) => {
-            Ok(matches!(key_str.as_str(), "call" | "apply" | "bind"))
-        }
+        Value::DynamicFunction(_) => Ok(matches!(key_str.as_str(), "call" | "apply" | "bind")),
         Value::Builtin(id) => {
             let deletable = key_str == "length" || key_str == "name";
-            let has = matches!(key_str.as_str(), "length" | "name" | "call" | "bind" | "apply");
+            let has = matches!(
+                key_str.as_str(),
+                "length" | "name" | "call" | "bind" | "apply"
+            );
             Ok(has && (!deletable || !heap.builtin_prop_deleted(*id, &key_str)))
         }
         Value::BoundBuiltin(_, _, _) | Value::BoundFunction(_, _, _) => {
             Ok(matches!(key_str.as_str(), "call" | "apply" | "bind"))
         }
-        Value::Date(_) => Ok(key_str == "length" || key_str == "getTime" || key_str == "valueOf" || key_str == "toString"),
+        Value::Date(_) => Ok(key_str == "length"
+            || key_str == "getTime"
+            || key_str == "valueOf"
+            || key_str == "toString"),
         _ => Err(format!(
             "TypeError: Cannot use 'in' operator to search for '{}' in {}",
             key_str,

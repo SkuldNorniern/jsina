@@ -7,8 +7,8 @@ use crate::runtime::Value;
 use super::binary_lower::bytecode_to_lamina_binary;
 use super::error::BackendError;
 use super::eval::{
-    evaluate_cached, execute_int_loop, is_self_contained_int_loop, supports_eval_subset,
-    values_to_i64_args, EvalCacheKey,
+    EvalCacheKey, evaluate_cached, execute_int_loop, is_self_contained_int_loop,
+    supports_eval_subset, values_to_i64_args,
 };
 use super::loop_lower::{branch_loop_native, bytecode_to_lamina_loop, extract_branch_loop_limit};
 use super::lower::bytecode_to_lamina_trivial;
@@ -103,8 +103,10 @@ impl JitSession {
                 let eval_args = values_to_i64_args(args)?;
                 let mut stack_cache = std::mem::take(&mut self.eval_stack_cache);
                 stack_cache.clear();
-                let mut invoke = |ci: usize, a: &[i64]| self.try_invoke_native_only(ci, a, program_chunks);
-                let mut invoke_opt = Some(&mut invoke as &mut dyn FnMut(usize, &[i64]) -> Option<i64>);
+                let mut invoke =
+                    |ci: usize, a: &[i64]| self.try_invoke_native_only(ci, a, program_chunks);
+                let mut invoke_opt =
+                    Some(&mut invoke as &mut dyn FnMut(usize, &[i64]) -> Option<i64>);
                 let mut result_cache = self.eval_result_cache.borrow_mut();
                 let result = evaluate_cached(
                     chunk_index,
@@ -162,7 +164,11 @@ impl JitSession {
             if let Some(module) = bytecode_to_lamina_unary(chunk) {
                 if let Ok(compiled) = CompiledChunkUnary::from_module(&module) {
                     self.cache[chunk_index] = CacheEntry::NativeCompiledUnary(compiled);
-                    return Ok(self.try_invoke_compiled_for_call(chunk_index, args, program_chunks));
+                    return Ok(self.try_invoke_compiled_for_call(
+                        chunk_index,
+                        args,
+                        program_chunks,
+                    ));
                 }
             }
         }
@@ -171,7 +177,11 @@ impl JitSession {
             if let Some(module) = bytecode_to_lamina_binary(chunk) {
                 if let Ok(compiled) = CompiledChunkBinary::from_module(&module) {
                     self.cache[chunk_index] = CacheEntry::NativeCompiledBinary(compiled);
-                    return Ok(self.try_invoke_compiled_for_call(chunk_index, args, program_chunks));
+                    return Ok(self.try_invoke_compiled_for_call(
+                        chunk_index,
+                        args,
+                        program_chunks,
+                    ));
                 }
             }
         }
@@ -210,7 +220,12 @@ impl JitSession {
                 let argc = code[pc + 2] as usize;
                 if let Some(callee_chunk) = program_chunks.get(callee) {
                     let placeholder_args: Vec<Value> = (0..argc).map(|_| Value::Int(0)).collect();
-                    let _ = self.try_compile_for_call(callee, callee_chunk, &placeholder_args, program_chunks);
+                    let _ = self.try_compile_for_call(
+                        callee,
+                        callee_chunk,
+                        &placeholder_args,
+                        program_chunks,
+                    );
                 }
                 pc += 3;
             } else {

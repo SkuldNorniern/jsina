@@ -279,17 +279,40 @@ pub enum Param {
     Ident(String),
     Default(String, Box<Expression>),
     Rest(String),
+    ObjectPattern(Vec<ObjectPatternProp>),
+    ArrayPattern(Vec<ArrayPatternElem>),
 }
 
 impl Param {
     pub fn name(&self) -> &str {
         match self {
             Param::Ident(n) | Param::Default(n, _) | Param::Rest(n) => n,
+            Param::ObjectPattern(_) | Param::ArrayPattern(_) => "",
         }
     }
 
     pub fn is_rest(&self) -> bool {
         matches!(self, Param::Rest(_))
+    }
+
+    pub fn as_binding(&self, index: usize) -> Option<(String, crate::frontend::ast::Binding)> {
+        match self {
+            Param::ObjectPattern(props) => {
+                let synthetic = format!("__param_{}__", index);
+                Some((
+                    synthetic,
+                    crate::frontend::ast::Binding::ObjectPattern(props.clone()),
+                ))
+            }
+            Param::ArrayPattern(elems) => {
+                let synthetic = format!("__param_{}__", index);
+                Some((
+                    synthetic,
+                    crate::frontend::ast::Binding::ArrayPattern(elems.clone()),
+                ))
+            }
+            _ => None,
+        }
     }
 }
 

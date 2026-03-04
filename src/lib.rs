@@ -1,11 +1,11 @@
 pub mod backend;
 pub mod cli;
-pub mod serve;
 pub mod diagnostics;
 pub mod driver;
 pub mod frontend;
 pub mod host;
 pub mod ir;
 pub mod runtime;
+pub mod serve;
 pub mod test262;
 pub mod vm;
