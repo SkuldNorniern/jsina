@@ -11,6 +11,12 @@ const OP_SWAP: u8 = Opcode::Swap as u8;
 const OP_ADD: u8 = Opcode::Add as u8;
 const OP_SUB: u8 = Opcode::Sub as u8;
 const OP_MUL: u8 = Opcode::Mul as u8;
+const OP_DIV: u8 = Opcode::Div as u8;
+const OP_MOD: u8 = Opcode::Mod as u8;
+const OP_POW: u8 = Opcode::Pow as u8;
+const OP_PUSH_CONST_16: u8 = Opcode::PushConst16 as u8;
+const OP_JUMP: u8 = Opcode::Jump as u8;
+const OP_JUMP_IF_FALSE: u8 = Opcode::JumpIfFalse as u8;
 const OP_LT: u8 = Opcode::Lt as u8;
 const OP_LTE: u8 = Opcode::Lte as u8;
 const OP_GT: u8 = Opcode::Gt as u8;
@@ -84,17 +90,36 @@ pub fn bytecode_to_lamina_trivial(chunk: &BytecodeChunk) -> Option<lamina::ir::M
     }
 
     let mut pc = 0usize;
+    let mut step_count: usize = 0;
     let mut stack: Vec<EvalValue> = Vec::with_capacity(8);
     let mut locals: Vec<Option<EvalValue>> = vec![None; chunk.num_locals as usize];
+    const MAX_STEPS: usize = 4_096;
 
     while pc < code.len() {
-        let op = *code.get(pc)?;
+        step_count += 1;
+        if step_count > MAX_STEPS {
+            return None;
+        }
+        // SAFETY: Loop condition guarantees pc < code.len().
+        let op = unsafe { *code.get_unchecked(pc) };
         pc += 1;
 
         match op {
             OP_PUSH_CONST => {
                 let idx = *code.get(pc)? as usize;
                 pc += 1;
+                let value = match constants.get(idx)? {
+                    ConstEntry::Int(n) => EvalValue::Int(*n),
+                    _ => return None,
+                };
+                stack.push(value);
+            }
+            OP_PUSH_CONST_16 => {
+                if pc + 2 > code.len() {
+                    return None;
+                }
+                let idx = u16::from_le_bytes([code[pc], code[pc + 1]]) as usize;
+                pc += 2;
                 let value = match constants.get(idx)? {
                     ConstEntry::Int(n) => EvalValue::Int(*n),
                     _ => return None,
@@ -148,6 +173,56 @@ pub fn bytecode_to_lamina_trivial(chunk: &BytecodeChunk) -> Option<lamina::ir::M
                     return None;
                 };
                 stack.push(EvalValue::Int(lhs.saturating_mul(rhs)));
+            }
+            OP_DIV => {
+                let (lhs, rhs) = pop2(&mut stack)?;
+                let (EvalValue::Int(lhs), EvalValue::Int(rhs)) = (lhs, rhs) else {
+                    return None;
+                };
+                if rhs == 0 {
+                    return None;
+                }
+                stack.push(EvalValue::Int(lhs / rhs));
+            }
+            OP_MOD => {
+                let (lhs, rhs) = pop2(&mut stack)?;
+                let (EvalValue::Int(lhs), EvalValue::Int(rhs)) = (lhs, rhs) else {
+                    return None;
+                };
+                if rhs == 0 {
+                    return None;
+                }
+                stack.push(EvalValue::Int(lhs % rhs));
+            }
+            OP_POW => {
+                let (lhs, rhs) = pop2(&mut stack)?;
+                let (EvalValue::Int(lhs), EvalValue::Int(rhs)) = (lhs, rhs) else {
+                    return None;
+                };
+                if rhs < 0 {
+                    return None;
+                }
+                let exp = rhs as u32;
+                stack.push(EvalValue::Int(lhs.saturating_pow(exp)));
+            }
+            OP_JUMP => {
+                if pc + 2 > code.len() {
+                    return None;
+                }
+                let offset = i16::from_le_bytes([code[pc], code[pc + 1]]) as isize;
+                pc += 2;
+                pc = (pc as isize + offset) as usize;
+            }
+            OP_JUMP_IF_FALSE => {
+                if pc + 2 > code.len() {
+                    return None;
+                }
+                let offset = i16::from_le_bytes([code[pc], code[pc + 1]]) as isize;
+                pc += 2;
+                let val = stack.pop()?;
+                if !val.is_truthy() {
+                    pc = (pc as isize + offset) as usize;
+                }
             }
             OP_LT => {
                 let (lhs, rhs) = pop2(&mut stack)?;
