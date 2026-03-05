@@ -973,7 +973,7 @@ impl Parser {
         ) {
             ArrowBody::Block(Box::new(self.parse_block()?))
         } else {
-            ArrowBody::Expression(Box::new(self.parse_expression()?))
+            ArrowBody::Expression(Box::new(self.parse_expression_no_comma()?))
         };
         let end_span = match &body {
             ArrowBody::Block(s) => s.span(),

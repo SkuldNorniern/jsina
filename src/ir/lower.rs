@@ -5381,23 +5381,6 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if prop == "push" {
-                        compile_expression(&m.object, ctx)?;
-                        for arg in &e.args {
-                            compile_call_arg(arg, ctx, e.span)?;
-                        }
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                            builtin: b("Array", "push"),
-                            argc: (1 + e.args.len()) as u32,
-                            span: e.span,
-                        });
-                    } else if prop == "pop" {
-                        compile_expression(&m.object, ctx)?;
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
-                            builtin: b("Array", "pop"),
-                            argc: 1,
-                            span: e.span,
-                        });
                     } else if prop == "set" && e.args.len() == 2 {
                         compile_expression(&m.object, ctx)?;
                         compile_call_arg(&e.args[0], ctx, e.span)?;
@@ -6748,6 +6731,27 @@ mod tests {
         } else {
             panic!("expected Return");
         }
+    }
+
+    #[test]
+    fn lower_reduce_arrow_expression_body() {
+        let result = crate::driver::Driver::run(
+            "function main(){ return [1,2,3].reduce((a,x)=>a+x, 0); }",
+        )
+        .expect("run");
+        assert_eq!(result, 6, "arrow expression body must not parse comma as part of body");
+    }
+
+    #[test]
+    fn lower_method_this_binding_custom_push() {
+        let result = crate::driver::Driver::run(
+            "function main(){ var s = { items: [] }; s.push = function(val){ return this.items.push(val); }; return s.push(1); }",
+        )
+        .expect("run");
+        assert_eq!(
+            result, 1,
+            "s.push(1) must call custom function with this=s, which pushes to this.items and returns length"
+        );
     }
 
     #[test]

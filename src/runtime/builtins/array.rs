@@ -914,20 +914,76 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
 pub fn array_from(args: &[Value], heap: &mut Heap) -> Value {
     let source = args.get(1);
     let arr_id = heap.alloc_array();
-    if let Some(Value::Array(src_id)) = source {
-        let elems: Vec<Value> = heap
-            .array_elements(*src_id)
-            .map(|e| e.to_vec())
-            .unwrap_or_default();
-        for v in elems {
-            heap.array_push(arr_id, v);
-        }
-    } else if let Some(Value::String(s)) = source {
-        for c in s.chars() {
-            heap.array_push(arr_id, Value::String(c.to_string()));
+    if let Some(src) = source {
+        match src {
+            Value::Array(src_id) => {
+                let elems: Vec<Value> = heap
+                    .array_elements(*src_id)
+                    .map(|e| e.to_vec())
+                    .unwrap_or_default();
+                for v in elems {
+                    heap.array_push(arr_id, v);
+                }
+            }
+            Value::String(s) => {
+                for c in s.chars() {
+                    heap.array_push(arr_id, Value::String(c.to_string()));
+                }
+            }
+            Value::Object(obj_id) => {
+                let len_val = heap.get_prop(*obj_id, "length");
+                let len = super::to_number(&len_val);
+                if len.fract() == 0.0 && len >= 0.0 && len <= 10_000_000.0 {
+                    let n = len as usize;
+                    for i in 0..n {
+                        let key = i.to_string();
+                        let v = heap.get_prop(*obj_id, &key);
+                        heap.array_push(arr_id, v);
+                    }
+                }
+            }
+            _ => {}
         }
     }
     Value::Array(arr_id)
+}
+
+#[cfg(test)]
+mod array_from_tests {
+    use super::*;
+    use crate::runtime::Heap;
+
+    #[test]
+    fn array_from_object_with_length() {
+        let mut heap = Heap::new();
+        let obj_id = heap.alloc_object();
+        heap.set_prop(obj_id, "length", Value::Int(3));
+        let args = [Value::Undefined, Value::Object(obj_id)];
+        let result = array_from(&args, &mut heap);
+        if let Value::Array(arr_id) = result {
+            assert_eq!(heap.array_len(arr_id), 3);
+        } else {
+            panic!("expected Array");
+        }
+    }
+
+    #[test]
+    fn array_from_array() {
+        let mut heap = Heap::new();
+        let src_id = heap.alloc_array();
+        heap.array_push(src_id, Value::Int(1));
+        heap.array_push(src_id, Value::Int(2));
+        let args = [Value::Undefined, Value::Array(src_id)];
+        let result = array_from(&args, &mut heap);
+        if let Value::Array(arr_id) = result {
+            let elems = heap.array_elements(arr_id).unwrap();
+            assert_eq!(elems.len(), 2);
+            assert_eq!(elems[0], Value::Int(1));
+            assert_eq!(elems[1], Value::Int(2));
+        } else {
+            panic!("expected Array");
+        }
+    }
 }
 
 pub fn array_of(args: &[Value], heap: &mut Heap) -> Value {
