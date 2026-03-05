@@ -1,4 +1,5 @@
 use crate::runtime::builtins;
+use crate::runtime::builtins::regex_engine;
 use crate::runtime::{Heap, Value};
 
 fn reg_exp_test_id() -> u8 {
@@ -39,16 +40,16 @@ pub fn exec(args: &[Value], heap: &mut Heap) -> Value {
         Some(v) => v.to_string(),
         None => return Value::Null,
     };
-    let start = match s.find(pattern.as_str()) {
-        Some(i) => i,
+    let flags = match heap.get_prop(obj_id, "__regexp_flags") {
+        Value::String(f) => f.clone(),
+        _ => String::new(),
+    };
+    let (start, full_match_str) = match regex_engine::regex_find(pattern.as_str(), &flags, &s) {
+        Some((i, m)) => (i, m.to_string()),
         None => return Value::Null,
     };
-    let full_match = s
-        .get(start..start + pattern.len())
-        .unwrap_or("")
-        .to_string();
     let arr_id = heap.alloc_array();
-    heap.array_push(arr_id, Value::String(full_match));
+    heap.array_push(arr_id, Value::String(full_match_str));
     heap.set_array_prop(arr_id, "index", Value::Int(start as i32));
     heap.set_array_prop(arr_id, "input", Value::String(s));
     Value::Array(arr_id)
@@ -68,7 +69,11 @@ pub fn test(args: &[Value], heap: &mut Heap) -> Value {
         Some(v) => v.to_string(),
         None => String::new(),
     };
-    let found = s.contains(pattern.as_str());
+    let flags = match heap.get_prop(obj_id, "__regexp_flags") {
+        Value::String(f) => f.clone(),
+        _ => String::new(),
+    };
+    let found = regex_engine::regex_is_match(pattern.as_str(), &flags, &s);
     Value::Bool(found)
 }
 
@@ -165,6 +170,10 @@ pub fn symbol_replace(args: &[Value], heap: &mut Heap) -> Value {
         Value::String(s) => s.clone(),
         _ => return args.get(1).cloned().unwrap_or(Value::Undefined),
     };
+    let flags = match heap.get_prop(obj_id, "__regexp_flags") {
+        Value::String(f) => f.clone(),
+        _ => String::new(),
+    };
     let s = match args.get(1) {
         Some(Value::String(x)) => x.clone(),
         Some(v) => v.to_string(),
@@ -175,7 +184,12 @@ pub fn symbol_replace(args: &[Value], heap: &mut Heap) -> Value {
         Some(v) => v.to_string(),
         None => String::new(),
     };
-    Value::String(s.replace(pattern.as_str(), repl.as_str()))
+    let result = if flags.contains('g') {
+        regex_engine::regex_replace_all(pattern.as_str(), &flags, &s, &repl)
+    } else {
+        regex_engine::regex_replace_first(pattern.as_str(), &flags, &s, &repl)
+    };
+    Value::String(result)
 }
 
 pub fn symbol_split(args: &[Value], heap: &mut Heap) -> Value {
@@ -196,7 +210,11 @@ pub fn symbol_split(args: &[Value], heap: &mut Heap) -> Value {
         .get(2)
         .map(|v| super::to_number(v) as i32)
         .unwrap_or(i32::MAX);
-    let parts: Vec<&str> = s.split(pattern.as_str()).collect();
+    let flags = match heap.get_prop(obj_id, "__regexp_flags") {
+        Value::String(f) => f.clone(),
+        _ => String::new(),
+    };
+    let parts: Vec<String> = regex_engine::regex_split(pattern.as_str(), &flags, &s);
     let take = if limit >= 0 {
         parts.len().min(limit as usize)
     } else {
@@ -204,7 +222,7 @@ pub fn symbol_split(args: &[Value], heap: &mut Heap) -> Value {
     };
     let arr_id = heap.alloc_array();
     for p in parts.into_iter().take(take) {
-        heap.array_push(arr_id, Value::String(p.to_string()));
+        heap.array_push(arr_id, Value::String(p));
     }
     Value::Array(arr_id)
 }
