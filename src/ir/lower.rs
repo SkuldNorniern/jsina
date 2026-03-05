@@ -6250,17 +6250,23 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             span: n.span,
                         });
                     }
-                    Expression::Identifier(id) if id.name == "Map" && n.args.is_empty() => {
+                    Expression::Identifier(id) if id.name == "Map" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: b("Map", "create"),
-                            argc: 0,
+                            argc: n.args.len() as u32,
                             span: n.span,
                         });
                     }
-                    Expression::Identifier(id) if id.name == "Set" && n.args.is_empty() => {
+                    Expression::Identifier(id) if id.name == "Set" => {
+                        for arg in &n.args {
+                            compile_call_arg(arg, ctx, n.span)?;
+                        }
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: b("Set", "create"),
-                            argc: 0,
+                            argc: n.args.len() as u32,
                             span: n.span,
                         });
                     }
