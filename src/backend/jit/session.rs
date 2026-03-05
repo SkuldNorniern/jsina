@@ -153,16 +153,15 @@ impl JitSession {
             return Ok(self.try_invoke_compiled_for_call(chunk_index, args, program_chunks));
         }
 
-        if let Some(module) = bytecode_to_lamina_loop(chunk) {
-            if let Ok(compiled) = CompiledChunk::from_module(&module) {
+        if let Some(module) = bytecode_to_lamina_loop(chunk)
+            && let Ok(compiled) = CompiledChunk::from_module(&module) {
                 self.cache[chunk_index] = CacheEntry::NativeCompiled(compiled);
                 return Ok(self.try_invoke_compiled_for_call(chunk_index, args, program_chunks));
             }
-        }
 
-        if args.len() == 1 {
-            if let Some(module) = bytecode_to_lamina_unary(chunk) {
-                if let Ok(compiled) = CompiledChunkUnary::from_module(&module) {
+        if args.len() == 1
+            && let Some(module) = bytecode_to_lamina_unary(chunk)
+                && let Ok(compiled) = CompiledChunkUnary::from_module(&module) {
                     self.cache[chunk_index] = CacheEntry::NativeCompiledUnary(compiled);
                     return Ok(self.try_invoke_compiled_for_call(
                         chunk_index,
@@ -170,12 +169,10 @@ impl JitSession {
                         program_chunks,
                     ));
                 }
-            }
-        }
 
-        if args.len() == 2 {
-            if let Some(module) = bytecode_to_lamina_binary(chunk) {
-                if let Ok(compiled) = CompiledChunkBinary::from_module(&module) {
+        if args.len() == 2
+            && let Some(module) = bytecode_to_lamina_binary(chunk)
+                && let Ok(compiled) = CompiledChunkBinary::from_module(&module) {
                     self.cache[chunk_index] = CacheEntry::NativeCompiledBinary(compiled);
                     return Ok(self.try_invoke_compiled_for_call(
                         chunk_index,
@@ -183,8 +180,6 @@ impl JitSession {
                         program_chunks,
                     ));
                 }
-            }
-        }
 
         if let Some(limit) = extract_branch_loop_limit(chunk) {
             self.cache[chunk_index] = CacheEntry::NativeBranchLoop(limit);

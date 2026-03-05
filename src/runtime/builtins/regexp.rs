@@ -2,7 +2,7 @@ use crate::runtime::builtins;
 use crate::runtime::builtins::regex_engine;
 use crate::runtime::{Heap, Value};
 
-use super::{error, BuiltinContext, BuiltinError};
+use super::{BuiltinContext, BuiltinError, error};
 
 const LEGACY_PAREN_1_KEY: &str = "__legacy_regexp_paren1";
 const LEGACY_PAREN_2_KEY: &str = "__legacy_regexp_paren2";
@@ -24,7 +24,7 @@ fn reg_exp_test_id() -> u8 {
 }
 
 pub fn create(args: &[Value], heap: &mut Heap) -> Value {
-    let pattern = match args.get(0) {
+    let pattern = match args.first() {
         Some(Value::String(s)) => s.clone(),
         Some(v) => v.to_string(),
         None => String::new(),

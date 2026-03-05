@@ -1,4 +1,4 @@
-use super::{regex_engine, to_number, to_prop_key, BuiltinContext, BuiltinError};
+use super::{BuiltinContext, BuiltinError, regex_engine, to_number, to_prop_key};
 use crate::runtime::{Heap, Value};
 
 fn html_escape(s: &str) -> String {
@@ -16,7 +16,7 @@ fn html_escape(s: &str) -> String {
 }
 
 fn string_html_receiver(args: &[Value]) -> String {
-    args.first().map(|v| to_prop_key(v)).unwrap_or_default()
+    args.first().map(to_prop_key).unwrap_or_default()
 }
 
 pub fn string(args: &[Value], _heap: &mut Heap) -> Value {
@@ -64,7 +64,7 @@ pub fn to_upper_case(args: &[Value], _heap: &mut Heap) -> Value {
 pub fn starts_with(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
     let search = args.get(1).map(|v| v.to_string()).unwrap_or_default();
-    let pos = args.get(2).map(|v| super::to_number(v)).unwrap_or(0.0);
+    let pos = args.get(2).map(super::to_number).unwrap_or(0.0);
     let pos = if pos.is_nan() || pos < 0.0 {
         0
     } else {
@@ -77,7 +77,7 @@ pub fn ends_with(args: &[Value], _heap: &mut Heap) -> Value {
     let s = string_html_receiver(args);
     let search = args.get(1).map(|v| v.to_string()).unwrap_or_default();
     let len = s.len() as f64;
-    let end = args.get(2).map(|v| super::to_number(v)).unwrap_or(len);
+    let end = args.get(2).map(super::to_number).unwrap_or(len);
     let end = if end.is_nan() || end < 0.0 {
         len
     } else {

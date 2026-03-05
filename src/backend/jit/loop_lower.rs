@@ -61,11 +61,10 @@ pub fn extract_branch_loop_limit(chunk: &crate::ir::bytecode::BytecodeChunk) -> 
                     pc += 1;
                     if let crate::ir::bytecode::ConstEntry::Int(n) = constants.get(idx as usize)? {
                         let v = *n;
-                        if v >= 10_000 && v <= 10_000_000 {
-                            if best_limit.map_or(true, |b| v > b) {
+                        if (10_000..=10_000_000).contains(&v)
+                            && best_limit.is_none_or(|b| v > b) {
                                 best_limit = Some(v);
                             }
-                        }
                     }
                 }
             }
@@ -75,11 +74,10 @@ pub fn extract_branch_loop_limit(chunk: &crate::ir::bytecode::BytecodeChunk) -> 
                     pc += 2;
                     if let crate::ir::bytecode::ConstEntry::Int(n) = constants.get(idx)? {
                         let v = *n;
-                        if v >= 10_000 && v <= 10_000_000 {
-                            if best_limit.map_or(true, |b| v > b) {
+                        if (10_000..=10_000_000).contains(&v)
+                            && best_limit.is_none_or(|b| v > b) {
                                 best_limit = Some(v);
                             }
-                        }
                     }
                 }
             }
@@ -143,9 +141,9 @@ fn extract_sum_loop_limit(chunk: &crate::ir::bytecode::BytecodeChunk) -> Option<
                     pc += 1;
                     if let crate::ir::bytecode::ConstEntry::Int(n) = constants.get(*idx as usize)? {
                         let v = *n;
-                        if v >= 1000 && v <= 100_000_000_i64 {
+                        if (1000..=100_000_000_i64).contains(&v) {
                             let u = v as u32;
-                            if best_limit.map_or(true, |b| v as u32 > b) {
+                            if best_limit.is_none_or(|b| v as u32 > b) {
                                 best_limit = Some(u);
                             }
                         }
@@ -158,9 +156,9 @@ fn extract_sum_loop_limit(chunk: &crate::ir::bytecode::BytecodeChunk) -> Option<
                     pc += 2;
                     if let crate::ir::bytecode::ConstEntry::Int(n) = constants.get(idx)? {
                         let v = *n;
-                        if v >= 1000 && v <= 100_000_000_i64 {
+                        if (1000..=100_000_000_i64).contains(&v) {
                             let u = v as u32;
-                            if best_limit.map_or(true, |b| v as u32 > b) {
+                            if best_limit.is_none_or(|b| v as u32 > b) {
                                 best_limit = Some(u);
                             }
                         }

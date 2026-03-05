@@ -105,7 +105,7 @@ pub(crate) fn pop_args(stack: &mut Vec<Value>, argc: usize) -> Result<Vec<Value>
     let start = stack
         .len()
         .checked_sub(argc)
-        .ok_or_else(|| VmError::StackUnderflow {
+        .ok_or(VmError::StackUnderflow {
             chunk_index: 0,
             pc: 0,
             opcode: 0,
@@ -154,14 +154,13 @@ pub(crate) fn setup_callee_locals(
                 .find_map(|(name, slot)| (name == "arguments").then_some(*slot))
         })
         .map(|s| s as usize);
-    if let Some(arguments_slot) = arguments_slot {
-        if arguments_slot < locals.len() {
+    if let Some(arguments_slot) = arguments_slot
+        && arguments_slot < locals.len() {
             let arguments_array_id = heap.alloc_array();
             if !args.is_empty() {
                 heap.array_push_values(arguments_array_id, args);
             }
             locals[arguments_slot] = Value::Array(arguments_array_id);
         }
-    }
     locals
 }

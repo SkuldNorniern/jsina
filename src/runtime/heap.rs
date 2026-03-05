@@ -1339,17 +1339,15 @@ impl Heap {
                 if idx < elements.len() {
                     return elements[idx].clone();
                 }
-                if let Some(props) = self.array_props.get(arr_id) {
-                    if let Some(v) = props.get(key) {
+                if let Some(props) = self.array_props.get(arr_id)
+                    && let Some(v) = props.get(key) {
                         return v.clone();
                     }
-                }
             }
-            if let Some(props) = self.array_props.get(arr_id) {
-                if let Some(v) = props.get(key) {
+            if let Some(props) = self.array_props.get(arr_id)
+                && let Some(v) = props.get(key) {
                     return v.clone();
                 }
-            }
         }
         if let Some(proto_id) = self.array_prototype_id {
             return self.get_prop(proto_id, key);
@@ -1376,11 +1374,10 @@ impl Heap {
             return;
         }
         if let Ok(idx) = key.parse::<usize>() {
-            if let Some(elements) = self.arrays.get_mut(arr_id) {
-                if idx < elements.len() {
+            if let Some(elements) = self.arrays.get_mut(arr_id)
+                && idx < elements.len() {
                     elements[idx] = Value::Undefined;
                 }
-            }
         } else if let Some(props) = self.array_props.get_mut(arr_id) {
             props.remove(key);
         }
@@ -1389,12 +1386,11 @@ impl Heap {
     pub fn set_array_prop(&mut self, arr_id: usize, key: &str, value: Value) {
         if let Some(elements) = self.arrays.get_mut(arr_id) {
             if key == "length" {
-                if let Value::Int(n) = value {
-                    if n >= 0 {
+                if let Value::Int(n) = value
+                    && n >= 0 {
                         let n = n as usize;
                         elements.truncate(n.min(MAX_ARRAY_LENGTH));
                     }
-                }
                 return;
             }
             if let Ok(idx) = key.parse::<usize>() {
@@ -1517,16 +1513,14 @@ impl Heap {
             if key == "length" {
                 return true;
             }
-            if let Ok(idx) = key.parse::<usize>() {
-                if idx < elements.len() {
+            if let Ok(idx) = key.parse::<usize>()
+                && idx < elements.len() {
                     return true;
                 }
-            }
-            if let Some(props) = self.array_props.get(arr_id) {
-                if props.contains_key(key) {
+            if let Some(props) = self.array_props.get(arr_id)
+                && props.contains_key(key) {
                     return true;
                 }
-            }
         }
         if let Some(proto_id) = self.array_prototype_id {
             return self.object_has_property(proto_id, key);
@@ -1564,20 +1558,14 @@ impl Heap {
                         self.get_prop(*id, "constructor")
                     {
                         if let crate::runtime::Value::String(s) = self.get_prop(ctor_id, "name") {
-                            if !s.is_empty() {
-                                s
-                            } else {
-                                String::new()
-                            }
+                            if !s.is_empty() { s } else { String::new() }
                         } else {
                             String::new()
                         }
+                    } else if self.is_error_object(*id) {
+                        "Error".to_string()
                     } else {
-                        if self.is_error_object(*id) {
-                            "Error".to_string()
-                        } else {
-                            String::new()
-                        }
+                        String::new()
                     }
                 } else {
                     name.clone()
@@ -1602,7 +1590,8 @@ impl Heap {
                     }
                 } else {
                     let ctor = self.get_prop(*id, "constructor");
-                    let fallback = if let crate::runtime::Value::Object(ctor_id) = ctor {
+                    
+                    if let crate::runtime::Value::Object(ctor_id) = ctor {
                         if let crate::runtime::Value::String(s) = self.get_prop(ctor_id, "name") {
                             if !s.is_empty() {
                                 format!("[object {}]", s)
@@ -1614,8 +1603,7 @@ impl Heap {
                         }
                     } else {
                         "[object Object]".to_string()
-                    };
-                    fallback
+                    }
                 }
             }
             crate::runtime::Value::Undefined => "thrown undefined".to_string(),

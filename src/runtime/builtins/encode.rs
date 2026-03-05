@@ -1,5 +1,5 @@
 //! encodeURI, encodeURIComponent, decodeURI, decodeURIComponent - percent-encode/decode URI.
-use super::{to_prop_key, BuiltinError};
+use super::{BuiltinError, to_prop_key};
 use crate::runtime::Value;
 
 const DECODE_URI_RESERVED: &[u8] = b";,/?:@&=+$#";
@@ -81,12 +81,12 @@ fn encode_uri(s: &str) -> String {
 }
 
 pub fn encode_uri_builtin(args: &[Value], _heap: &mut crate::runtime::Heap) -> Value {
-    let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
+    let s = args.first().map(to_prop_key).unwrap_or_default();
     Value::String(encode_uri(&s))
 }
 
 pub fn encode_uri_component_builtin(args: &[Value], _heap: &mut crate::runtime::Heap) -> Value {
-    let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
+    let s = args.first().map(to_prop_key).unwrap_or_default();
     Value::String(encode_uri_component(&s))
 }
 
@@ -131,7 +131,7 @@ pub fn decode_uri_builtin(
     args: &[Value],
     ctx: &mut super::BuiltinContext,
 ) -> Result<Value, BuiltinError> {
-    let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
+    let s = args.first().map(to_prop_key).unwrap_or_default();
     decode_uri_impl(&s, false).map(Value::String).map_err(|_| {
         BuiltinError::Throw(super::error::uri_error(
             &[Value::String("URI malformed".to_string())],
@@ -144,7 +144,7 @@ pub fn decode_uri_component_builtin(
     args: &[Value],
     ctx: &mut super::BuiltinContext,
 ) -> Result<Value, BuiltinError> {
-    let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
+    let s = args.first().map(to_prop_key).unwrap_or_default();
     decode_uri_impl(&s, true).map(Value::String).map_err(|_| {
         BuiltinError::Throw(super::error::uri_error(
             &[Value::String("URI malformed".to_string())],

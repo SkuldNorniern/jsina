@@ -38,11 +38,7 @@ fn matches_escape(c: char, next: char, case_insensitive: bool) -> bool {
 }
 
 fn matches_dot(c: char, dot_all: bool) -> bool {
-    if c == '\n' {
-        dot_all
-    } else {
-        true
-    }
+    if c == '\n' { dot_all } else { true }
 }
 
 fn is_quantifier(c: u8) -> bool {
@@ -108,11 +104,7 @@ fn in_char_class(c: u8, ranges: &[(u8, u8)], negated: bool) -> bool {
             break;
         }
     }
-    if negated {
-        !found
-    } else {
-        found
-    }
+    if negated { !found } else { found }
 }
 
 fn char_in_class(c: char, ranges: &[(u8, u8)], negated: bool) -> bool {
@@ -442,7 +434,7 @@ fn try_match_at(
                 return None;
             }
             if flags.multiline && ti != 0 {
-                let prev = text[..ti].chars().rev().next();
+                let prev = text[..ti].chars().next_back();
                 if prev != Some('\n') {
                     return None;
                 }
@@ -657,13 +649,11 @@ fn match_full(pattern: &[u8], text: &str, flags: &Flags) -> Option<(usize, usize
         if byte_idx > text.len() {
             break;
         }
-        if end_anchor && byte_idx != 0 {
-            if let Some(end) = try_match_disjunction(pattern, 0, text, byte_idx, flags) {
-                if end == text.len() {
+        if end_anchor && byte_idx != 0
+            && let Some(end) = try_match_disjunction(pattern, 0, text, byte_idx, flags)
+                && end == text.len() {
                     return Some((byte_idx, end));
                 }
-            }
-        }
         if let Some(end) = try_match_disjunction(pattern, 0, text, byte_idx, flags) {
             return Some((byte_idx, end));
         }

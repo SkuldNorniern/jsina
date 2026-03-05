@@ -20,11 +20,10 @@ fn add_from_entries_array(heap: &mut Heap, map_id: usize, arr_id: usize) {
 
 pub fn create(args: &[Value], heap: &mut Heap) -> Value {
     let id = heap.alloc_map();
-    if let Some(iterable) = args.first() {
-        if let Value::Array(arr_id) = iterable {
+    if let Some(iterable) = args.first()
+        && let Value::Array(arr_id) = iterable {
             add_from_entries_array(heap, id, *arr_id);
         }
-    }
     Value::Map(id)
 }
 

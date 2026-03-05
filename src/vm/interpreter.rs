@@ -5,13 +5,13 @@ use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::calls::{execute_builtin, pop_args, read_i16, read_u16, read_u8, setup_callee_locals};
+use super::calls::{execute_builtin, pop_args, read_i16, read_u8, read_u16, setup_callee_locals};
 use super::ops::{
     add_values, div_values, gt_values, gte_values, in_check, instanceof_check, is_nullish,
     is_truthy, loose_eq, lt_values, lte_values, mod_values, mul_values, pow_values, strict_eq,
     sub_values, value_to_prop_key, value_to_prop_key_with_heap,
 };
-use super::props::{resolve_get_prop, GetPropCache};
+use super::props::{GetPropCache, resolve_get_prop};
 use super::tiering::{JitTiering, JitTieringStats};
 use super::types::{BuiltinResult, Completion, Program, VmError};
 
@@ -52,11 +52,10 @@ impl<'a> Drop for RunState<'a> {
 impl<'a> RunState<'a> {
     #[inline(always)]
     fn set_local_at(&mut self, stack_base: usize, num_locals: usize, slot: usize, v: Value) {
-        if slot < num_locals {
-            if let Some(ptr) = self.stack.get_mut(stack_base + slot) {
+        if slot < num_locals
+            && let Some(ptr) = self.stack.get_mut(stack_base + slot) {
                 *ptr = v;
             }
-        }
     }
 
     fn throw_into_handler_slot(&mut self, slot: usize, v: Value, is_fin: bool, hpc: usize) {
@@ -236,14 +235,14 @@ const CYCLE_THRESHOLD: usize = 3;
 
 #[inline(always)]
 fn hash_execution_state(chunk_index: usize, pc: usize, stack_len: usize, frames_len: usize) -> u64 {
-    let h = (chunk_index as u64)
+    
+    (chunk_index as u64)
         .wrapping_mul(31)
         .wrapping_add(pc as u64)
         .wrapping_mul(31)
         .wrapping_add(stack_len as u64)
         .wrapping_mul(31)
-        .wrapping_add(frames_len as u64);
-    h
+        .wrapping_add(frames_len as u64)
 }
 
 pub fn interpret_program_with_heap_and_entry(
@@ -262,7 +261,7 @@ pub fn interpret_program_with_heap_and_entry(
         .ok_or(VmError::InvalidConstIndex(entry))?;
     let num_locals = entry_chunk.num_locals as usize;
     let mut stack = Vec::with_capacity(512);
-    stack.extend(std::iter::repeat(Value::Undefined).take(num_locals));
+    stack.extend(std::iter::repeat_n(Value::Undefined, num_locals));
     // Top-level entry functions (like `main`) may reference user-defined globals
     // (e.g. class declarations stored in globalThis by __init__) via capture slots
     // that are never filled by the normal DynamicFunction mechanism because the
@@ -329,11 +328,10 @@ pub fn interpret_program_with_heap_and_entry(
 
         loop_counter = loop_counter.wrapping_add(1);
         if (loop_counter & CHECK_INTERVAL_MASK) == 0 {
-            if let Some(c) = cancel {
-                if c.load(Ordering::Relaxed) {
+            if let Some(c) = cancel
+                && c.load(Ordering::Relaxed) {
                     return Err(VmError::Cancelled);
                 }
-            }
             if enable_infinite_loop_detection {
                 let h = hash_execution_state(chunk_index, pc, stack_len, frames_len);
                 cycle_buffer[cycle_idx] = h;
@@ -520,11 +518,10 @@ pub fn interpret_program_with_heap_and_entry(
                 let slot = read_u8(code, pc) as usize;
                 pc += 1;
                 let val = state.stack.pop().ok_or_else(underflow)?;
-                if slot < num_locals {
-                    if let Some(ptr) = state.stack.get_mut(stack_base + slot) {
+                if slot < num_locals
+                    && let Some(ptr) = state.stack.get_mut(stack_base + slot) {
                         *ptr = val;
                     }
-                }
             }
             0x05 => {
                 state.stack.push(state.frames[frame_idx].this_value.clone());
@@ -764,11 +761,10 @@ pub fn interpret_program_with_heap_and_entry(
                 let val = state.stack.pop().unwrap_or(Value::Undefined);
                 let popped = state.frames.pop();
                 let callee_stack_base = popped.as_ref().map(|f| f.stack_base).unwrap_or(0);
-                if let Some(ref f) = popped {
-                    if f.is_dynamic {
+                if let Some(ref f) = popped
+                    && f.is_dynamic {
                         state.chunks_stack.pop();
                     }
-                }
                 let result = if let Some(ref f) = popped {
                     if let Some(gen_id) = f.generator_id {
                         // Generator function body completed: return {value, done: true}
@@ -1042,14 +1038,13 @@ pub fn interpret_program_with_heap_and_entry(
                     let arg = state.stack.pop().ok_or_else(underflow)?;
                     let callee = state.stack.pop().ok_or_else(underflow)?;
                     let receiver = state.stack.pop().ok_or_else(underflow)?;
-                    if let (Value::Builtin(bid), Value::Array(arr_id)) = (&callee, &receiver) {
-                        if *bid == builtins::ARRAY_PUSH_BUILTIN_ID {
+                    if let (Value::Builtin(bid), Value::Array(arr_id)) = (&callee, &receiver)
+                        && *bid == builtins::ARRAY_PUSH_BUILTIN_ID {
                             heap.array_push(*arr_id, arg);
                             state.stack.push(Value::Int(heap.array_len(*arr_id) as i32));
                             state.frames[frame_idx].pc = pc;
                             continue;
                         }
-                    }
                     state.stack.push(receiver);
                     state.stack.push(callee);
                     state.stack.push(arg);
@@ -1310,8 +1305,17 @@ pub fn interpret_program_with_heap_and_entry(
                         } else if heap.is_html_dda_object(obj_id) {
                             state.stack.push(Value::Null);
                         } else {
-                            let msg = format!("TypeError: callee is not a function (got object)",);
-                            return Ok(Completion::Throw(Value::String(msg)));
+                            let msg = "TypeError: callee is not a function (got object)".to_string();
+                            if let Some(completion) = propagate_call_throw(
+                                program,
+                                &mut state,
+                                &chunk,
+                                call_pc,
+                                Value::String(msg),
+                            )? {
+                                return Ok(completion);
+                            }
+                            continue;
                         }
                     }
                     _ => {
@@ -1319,7 +1323,16 @@ pub fn interpret_program_with_heap_and_entry(
                             "TypeError: callee is not a function (got {})",
                             callee.type_name_for_error(),
                         );
-                        return Ok(Completion::Throw(Value::String(msg)));
+                        if let Some(completion) = propagate_call_throw(
+                            program,
+                            &mut state,
+                            &chunk,
+                            call_pc,
+                            Value::String(msg),
+                        )? {
+                            return Ok(completion);
+                        }
+                        continue;
                     }
                 }
             }
@@ -1574,7 +1587,16 @@ pub fn interpret_program_with_heap_and_entry(
                         } else {
                             let msg =
                                 "TypeError: callee is not a function (got object)".to_string();
-                            return Ok(Completion::Throw(Value::String(msg)));
+                            if let Some(completion) = propagate_call_throw(
+                                program,
+                                &mut state,
+                                &chunk,
+                                trace_pc,
+                                Value::String(msg),
+                            )? {
+                                return Ok(completion);
+                            }
+                            continue;
                         }
                     }
                     _ => {
@@ -1582,7 +1604,16 @@ pub fn interpret_program_with_heap_and_entry(
                             "TypeError: callee is not a function (got {})",
                             callee.type_name_for_error(),
                         );
-                        return Ok(Completion::Throw(Value::String(msg)));
+                        if let Some(completion) = propagate_call_throw(
+                            program,
+                            &mut state,
+                            &chunk,
+                            trace_pc,
+                            Value::String(msg),
+                        )? {
+                            return Ok(completion);
+                        }
+                        continue;
                     }
                 }
             }

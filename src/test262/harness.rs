@@ -77,11 +77,10 @@ fn load_harness_from_dir(root: &Path) -> Option<String> {
 }
 
 fn load_harness(root: Option<&Path>) -> String {
-    if let Some(r) = root {
-        if let Some(h) = load_harness_from_dir(r) {
+    if let Some(r) = root
+        && let Some(h) = load_harness_from_dir(r) {
             return h;
         }
-    }
     MINIMAL_HARNESS.to_string()
 }
 
@@ -323,11 +322,10 @@ fn run_one(
     match Driver::ast(wrapped) {
         Err(e) => {
             let msg = e.to_string();
-            if let Some(neg) = negative {
-                if error_matches_negative(&msg, neg) {
+            if let Some(neg) = negative
+                && error_matches_negative(&msg, neg) {
                     return RunOutcome::Pass;
                 }
-            }
             RunOutcome::Fail(msg)
         }
         Ok(_) => {

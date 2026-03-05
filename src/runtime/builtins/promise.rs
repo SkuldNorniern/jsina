@@ -74,11 +74,10 @@ pub fn resolve_fn(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Bui
         _ => return Ok(Value::Undefined),
     };
     let value = args.get(1).cloned().unwrap_or(Value::Undefined);
-    if let Some(p) = ctx.heap.get_promise_mut(promise_id) {
-        if matches!(p.state, PromiseState::Pending) {
+    if let Some(p) = ctx.heap.get_promise_mut(promise_id)
+        && matches!(p.state, PromiseState::Pending) {
             p.state = PromiseState::Fulfilled(value);
         }
-    }
     Ok(Value::Undefined)
 }
 
@@ -89,11 +88,10 @@ pub fn reject_fn(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Buil
         _ => return Ok(Value::Undefined),
     };
     let reason = args.get(1).cloned().unwrap_or(Value::Undefined);
-    if let Some(p) = ctx.heap.get_promise_mut(promise_id) {
-        if matches!(p.state, PromiseState::Pending) {
+    if let Some(p) = ctx.heap.get_promise_mut(promise_id)
+        && matches!(p.state, PromiseState::Pending) {
             p.state = PromiseState::Rejected(reason);
         }
-    }
     Ok(Value::Undefined)
 }
 

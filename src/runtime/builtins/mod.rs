@@ -68,7 +68,7 @@ pub(crate) fn to_number(v: &Value) -> f64 {
         }
         Value::Null => 0.0,
         Value::Undefined => f64::NAN,
-        Value::String(s) => s.parse().unwrap_or_else(|_| f64::NAN),
+        Value::String(s) => s.parse().unwrap_or(f64::NAN),
         Value::Symbol(_)
         | Value::BigInt(_)
         | Value::Object(_)
@@ -1499,7 +1499,7 @@ pub fn by_category(cat: &str) -> impl Iterator<Item = (u8, &'static BuiltinDef)>
         .iter()
         .enumerate()
         .filter(move |(_, b)| b.category == cat)
-        .filter_map(|(i, b)| (i <= u8::MAX as usize).then(|| (i as u8, b)))
+        .filter_map(|(i, b)| (i <= u8::MAX as usize).then_some((i as u8, b)))
 }
 
 pub const ARRAY_PUSH_BUILTIN_ID: u8 = 1;

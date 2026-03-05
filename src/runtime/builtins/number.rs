@@ -7,7 +7,7 @@ pub fn number(args: &[Value], _heap: &mut Heap) -> Value {
 }
 
 pub fn parse_int(args: &[Value], _heap: &mut Heap) -> Value {
-    let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
+    let s = args.first().map(to_prop_key).unwrap_or_default();
     let radix = args.get(1).map(|v| to_number(v) as i32).unwrap_or(10);
     let s = s.trim_start();
     let (s, sign) = if s.starts_with('-') {
@@ -52,7 +52,7 @@ pub fn is_finite(args: &[Value], _heap: &mut Heap) -> Value {
 }
 
 pub fn parse_float(args: &[Value], _heap: &mut Heap) -> Value {
-    let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
+    let s = args.first().map(to_prop_key).unwrap_or_default();
     let s = s.trim_start();
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
@@ -91,12 +91,12 @@ pub fn is_integer(args: &[Value], _heap: &mut Heap) -> Value {
 pub fn is_safe_integer(args: &[Value], _heap: &mut Heap) -> Value {
     let n = args.first().map(to_number).unwrap_or(f64::NAN);
     let ok =
-        n.is_finite() && n.fract() == 0.0 && n >= -9007199254740991.0 && n <= 9007199254740991.0;
+        n.is_finite() && n.fract() == 0.0 && (-9007199254740991.0..=9007199254740991.0).contains(&n);
     Value::Bool(ok)
 }
 
 pub fn primitive_to_string(args: &[Value], _heap: &mut Heap) -> Value {
-    let s = args.first().map(|v| to_prop_key(v)).unwrap_or_default();
+    let s = args.first().map(to_prop_key).unwrap_or_default();
     Value::String(s)
 }
 

@@ -42,7 +42,7 @@ pub fn from_entries(args: &[Value], heap: &mut Heap) -> Value {
                         if let Value::Array(pair_id) = e {
                             let pair = heap.array_elements(*pair_id).map(|v| v.to_vec());
                             let pair = pair.unwrap_or_default();
-                            let key = pair.get(0).cloned().unwrap_or(Value::Undefined);
+                            let key = pair.first().cloned().unwrap_or(Value::Undefined);
                             let val = pair.get(1).cloned().unwrap_or(Value::Undefined);
                             Some((key, val))
                         } else {
@@ -309,7 +309,7 @@ pub fn has_own(args: &[Value], heap: &mut Heap) -> Value {
 
 pub fn is_same_value(args: &[Value], _heap: &mut Heap) -> Value {
     let args = if args.len() >= 3 { &args[1..] } else { args };
-    let a = args.get(0).unwrap_or(&Value::Undefined);
+    let a = args.first().unwrap_or(&Value::Undefined);
     let b = args.get(1).unwrap_or(&Value::Undefined);
     Value::Bool(same_value(a, b))
 }
@@ -410,13 +410,12 @@ pub fn get_own_property_descriptor(args: &[Value], heap: &mut Heap) -> Value {
         .unwrap_or_default();
     match target {
         Value::Object(id) => {
-            if is_regexp_constructor_object(*id, heap) && heap.object_has_own_property(*id, &key) {
-                if let Some((getter_id, setter_id)) = regexp_legacy_accessor_ids(&key) {
+            if is_regexp_constructor_object(*id, heap) && heap.object_has_own_property(*id, &key)
+                && let Some((getter_id, setter_id)) = regexp_legacy_accessor_ids(&key) {
                     let getter = Value::Builtin(getter_id);
                     let setter = setter_id.map(Value::Builtin).unwrap_or(Value::Undefined);
                     return create_accessor_descriptor(getter, setter, false, true, heap);
                 }
-            }
             if !heap.object_has_own_property(*id, &key) {
                 return Value::Undefined;
             }

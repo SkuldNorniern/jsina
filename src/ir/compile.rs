@@ -118,7 +118,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
     let mut code = Vec::new();
     let mut const_idx = 0;
 
-    for (_block_idx, block) in func.blocks.iter().enumerate() {
+    for block in func.blocks.iter() {
         for op in &block.ops {
             match op {
                 HirOp::LoadConst { .. } => {
@@ -219,7 +219,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 }
                 HirOp::CallBuiltin { builtin, argc, .. } => {
                     code.push(Opcode::CallBuiltin as u8);
-                    code.push(*builtin as u8);
+                    code.push(*builtin );
                     code.push((*argc).min(255) as u8);
                 }
                 HirOp::CallMethod { argc, .. } => {

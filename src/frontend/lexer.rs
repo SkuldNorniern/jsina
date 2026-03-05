@@ -134,7 +134,7 @@ impl Lexer<'_> {
                 raw_for_span.push(ch);
                 self.advance();
             } else if ch == '_' {
-                let peek_ok = self.peek().map_or(false, |n| is_valid(n));
+                let peek_ok = self.peek().is_some_and(&is_valid);
                 if !peek_ok {
                     raw_for_span.push(ch);
                     self.advance();
@@ -240,20 +240,18 @@ impl Lexer<'_> {
                     }
                 }
             }
-        } else {
-            if self
-                .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
-                    c.is_ascii_digit()
-                })
-                .is_some()
-            {
-                let span = Span::from_text(start_pos, &raw_for_span);
-                return Token::new(
-                    TokenType::Error("invalid numeric separator".to_string()),
-                    raw_for_span.clone(),
-                    span,
-                );
-            }
+        } else if self
+            .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
+                c.is_ascii_digit()
+            })
+            .is_some()
+        {
+            let span = Span::from_text(start_pos, &raw_for_span);
+            return Token::new(
+                TokenType::Error("invalid numeric separator".to_string()),
+                raw_for_span.clone(),
+                span,
+            );
         }
 
         if matches!(self.current_char, Some('n') | Some('N')) {

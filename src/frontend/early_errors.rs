@@ -2,22 +2,20 @@ use crate::diagnostics::{Diagnostic, ErrorCode, Span};
 use crate::frontend::ast::*;
 
 fn is_use_strict(stmt: &Statement) -> bool {
-    if let Statement::Expression(e) = stmt {
-        if let Expression::Literal(lit) = &*e.expression {
-            if let LiteralValue::String(s) = &lit.value {
+    if let Statement::Expression(e) = stmt
+        && let Expression::Literal(lit) = &*e.expression
+            && let LiteralValue::String(s) = &lit.value {
                 return s == "use strict";
             }
-        }
-    }
     false
 }
 
 fn script_is_strict(script: &Script) -> bool {
-    script.body.first().map_or(false, is_use_strict)
+    script.body.first().is_some_and(is_use_strict)
 }
 
 fn block_is_strict(body: &[Statement]) -> bool {
-    body.first().map_or(false, is_use_strict)
+    body.first().is_some_and(is_use_strict)
 }
 
 #[derive(Debug)]

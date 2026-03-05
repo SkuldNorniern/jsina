@@ -18,7 +18,7 @@ pub fn symbol_for(args: &[Value], heap: &mut Heap) -> Value {
     let key = args
         .get(1)
         .or_else(|| args.first())
-        .map(|v| super::to_prop_key(v))
+        .map(super::to_prop_key)
         .unwrap_or_default();
     let id = heap.symbol_for(&key);
     Value::Symbol(id)

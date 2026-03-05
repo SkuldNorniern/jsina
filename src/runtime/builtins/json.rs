@@ -1,4 +1,4 @@
-use super::{error, BuiltinContext, BuiltinError};
+use super::{BuiltinContext, BuiltinError, error};
 use crate::runtime::Value;
 
 pub fn parse(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {

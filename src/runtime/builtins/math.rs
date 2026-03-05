@@ -44,7 +44,7 @@ pub fn max(args: &[Value], _heap: &mut Heap) -> Value {
 }
 
 pub fn pow(args: &[Value], _heap: &mut Heap) -> Value {
-    let base = args.get(0).map(to_number).unwrap_or(f64::NAN);
+    let base = args.first().map(to_number).unwrap_or(f64::NAN);
     let exp = args.get(1).map(to_number).unwrap_or(f64::NAN);
     number_to_value(base.powf(exp))
 }

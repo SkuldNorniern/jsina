@@ -2,17 +2,17 @@
 //! Uses eval internally. Last argument is body, preceding are param names.
 //! Returns Value::DynamicFunction so the created function can be invoked in the caller's context.
 
-use super::{to_prop_key, BuiltinContext, BuiltinError};
-use crate::frontend::{check_early_errors, Parser};
+use super::{BuiltinContext, BuiltinError, to_prop_key};
+use crate::frontend::{Parser, check_early_errors};
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::runtime::Value;
-use crate::vm::{interpret_program_with_heap, Completion, Program};
+use crate::vm::{Completion, Program, interpret_program_with_heap};
 
 pub fn function_constructor(
     args: &[Value],
     ctx: &mut BuiltinContext,
 ) -> Result<Value, BuiltinError> {
-    let actual: &[Value] = if !args.is_empty() && args.last().map_or(false, |v| v.is_object()) {
+    let actual: &[Value] = if !args.is_empty() && args.last().is_some_and(|v| v.is_object()) {
         &args[..args.len() - 1]
     } else {
         args
@@ -55,13 +55,12 @@ pub fn function_constructor(
             &program, ctx.heap, false, None, false, false, None,
         ) {
             Ok(Completion::Return(v)) => {
-                if let Value::Function(inner_idx) = v {
-                    if let Some(inner_chunk) = program.chunks.get(inner_idx) {
+                if let Value::Function(inner_idx) = v
+                    && let Some(inner_chunk) = program.chunks.get(inner_idx) {
                         ctx.heap.dynamic_chunks.push(inner_chunk.clone());
                         ctx.heap.dynamic_captures.push(Vec::new());
                         return Ok(Value::DynamicFunction(ctx.heap.dynamic_chunks.len() - 1));
                     }
-                }
                 Ok(v)
             }
             Ok(Completion::Throw(v)) => Err(BuiltinError::Throw(v)),
@@ -124,13 +123,12 @@ pub fn function_constructor(
     };
     match interpret_program_with_heap(&program, ctx.heap, false, None, false, false, None) {
         Ok(Completion::Return(v)) => {
-            if let Value::Function(inner_idx) = v {
-                if let Some(inner_chunk) = program.chunks.get(inner_idx) {
+            if let Value::Function(inner_idx) = v
+                && let Some(inner_chunk) = program.chunks.get(inner_idx) {
                     ctx.heap.dynamic_chunks.push(inner_chunk.clone());
                     ctx.heap.dynamic_captures.push(Vec::new());
                     return Ok(Value::DynamicFunction(ctx.heap.dynamic_chunks.len() - 1));
                 }
-            }
             Ok(v)
         }
         Ok(Completion::Throw(v)) => Err(BuiltinError::Throw(v)),

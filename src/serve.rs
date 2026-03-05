@@ -103,7 +103,7 @@ fn handle_client(mut stream: TcpStream, root: &Path) {
         content_type,
         body_bytes.len()
     );
-    if let Ok(_) = stream.write_all(response.as_bytes()) {
+    if stream.write_all(response.as_bytes()).is_ok() {
         let _ = stream.write_all(body_bytes);
     }
 }
@@ -121,11 +121,6 @@ pub fn serve(dir: &str, port: Option<u16>) -> Result<(), std::io::Error> {
     let listener = TcpListener::bind(&addr)?;
     eprintln!("jsina serve: http://{}", addr);
     eprintln!("serving from: {}", root.display());
-    for stream in listener.incoming() {
-        match stream {
-            Ok(s) => handle_client(s, root),
-            Err(_) => {}
-        }
-    }
+    for s in listener.incoming().flatten() { handle_client(s, root) }
     Ok(())
 }

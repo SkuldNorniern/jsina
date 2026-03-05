@@ -470,7 +470,7 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
     } else {
         Vec::new()
     };
-    let num_declared = func_decls.len() as u32;
+    let _num_declared = func_decls.len() as u32;
     let n_init_fes = init_func_exprs.len() as u32;
     // Layout:
     //   [0]                       = __init__  (when top_level_init_stmts exist)
@@ -2657,13 +2657,11 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
     // Install prototype methods and static members.
     for member in &ce.body.members {
         // Skip constructor – already compiled above.
-        if !member.is_static {
-            if let ClassMemberKey::Ident(name) = &member.key {
-                if name == "constructor" {
+        if !member.is_static
+            && let ClassMemberKey::Ident(name) = &member.key
+                && name == "constructor" {
                     continue;
                 }
-            }
-        }
 
         match &member.kind {
             ClassMemberKind::Method(fe) => {
@@ -3137,7 +3135,7 @@ fn compile_arrow_inline(af: &ArrowFunctionExpr, ctx: &mut LowerCtx<'_>) -> Resul
     compile_function_expr(&as_fe, ctx)
 }
 
-fn compile_call_arg(arg: &CallArg, ctx: &mut LowerCtx<'_>, span: Span) -> Result<(), LowerError> {
+fn compile_call_arg(arg: &CallArg, ctx: &mut LowerCtx<'_>, _span: Span) -> Result<(), LowerError> {
     match arg {
         CallArg::Expr(expr) => compile_expression(expr, ctx),
         CallArg::Spread(expr) => {
@@ -3586,8 +3584,8 @@ fn compile_array_hof(
 
     let result_slot = match kind {
         HofKind::Map | HofKind::Filter | HofKind::FlatMap => {
-            let s = alloc_slot(ctx);
-            s
+            
+            alloc_slot(ctx)
         }
         _ => u32::MAX,
     };
@@ -4556,8 +4554,8 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
         Expression::Unary(e) => match e.op {
             UnaryOp::Plus => compile_expression(&e.argument, ctx)?,
             UnaryOp::Minus => {
-                if let Expression::Literal(lit) = e.argument.as_ref() {
-                    if let LiteralValue::BigInt(s) = &lit.value {
+                if let Expression::Literal(lit) = e.argument.as_ref()
+                    && let LiteralValue::BigInt(s) = &lit.value {
                         let negated = if s.starts_with('-') {
                             s[1..].to_string()
                         } else {
@@ -4569,7 +4567,6 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         });
                         return Ok(());
                     }
-                }
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                     value: HirConst::Int(0),
                     span: e.span,
@@ -5002,7 +4999,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             ctx,
                             e.span,
                         )?;
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "console")
+                    } else if matches!(obj_name, Some(s) if s == "console")
                         && prop == "log"
                     {
                         for arg in &e.args {
@@ -5013,7 +5010,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "floor"
                         && e.args.len() == 1
                     {
@@ -5023,7 +5020,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "abs"
                         && e.args.len() == 1
                     {
@@ -5033,7 +5030,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "min"
+                    } else if matches!(obj_name, Some(s) if s == "Math") && prop == "min"
                     {
                         for arg in &e.args {
                             compile_call_arg(arg, ctx, e.span)?;
@@ -5043,7 +5040,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math") && prop == "max"
+                    } else if matches!(obj_name, Some(s) if s == "Math") && prop == "max"
                     {
                         for arg in &e.args {
                             compile_call_arg(arg, ctx, e.span)?;
@@ -5053,7 +5050,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "pow"
                         && e.args.len() == 2
                     {
@@ -5064,7 +5061,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 2,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "ceil"
                         && e.args.len() == 1
                     {
@@ -5074,7 +5071,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "round"
                         && e.args.len() == 1
                     {
@@ -5084,7 +5081,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "sqrt"
                         && e.args.len() == 1
                     {
@@ -5094,7 +5091,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "sign"
                         && e.args.len() == 1
                     {
@@ -5104,7 +5101,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "trunc"
                         && e.args.len() == 1
                     {
@@ -5114,7 +5111,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "sumPrecise"
                     {
                         for arg in &e.args {
@@ -5125,16 +5122,16 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Math")
+                    } else if matches!(obj_name, Some(s) if s == "Math")
                         && prop == "random"
-                        && e.args.len() == 0
+                        && e.args.is_empty()
                     {
                         ctx.blocks[ctx.current_block].ops.push(HirOp::CallBuiltin {
                             builtin: b("Math", "random"),
                             argc: 0,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "JSON")
+                    } else if matches!(obj_name, Some(s) if s == "JSON")
                         && prop == "parse"
                         && e.args.len() == 1
                     {
@@ -5144,7 +5141,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "JSON")
+                    } else if matches!(obj_name, Some(s) if s == "JSON")
                         && prop == "stringify"
                         && e.args.len() == 1
                     {
@@ -5154,7 +5151,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "create"
                         && e.args.len() == 1
                     {
@@ -5164,7 +5161,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "keys"
                         && e.args.len() == 1
                     {
@@ -5174,7 +5171,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "values"
                         && e.args.len() == 1
                     {
@@ -5184,7 +5181,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "entries"
                         && e.args.len() == 1
                     {
@@ -5194,9 +5191,9 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "assign"
-                        && e.args.len() >= 1
+                        && !e.args.is_empty()
                     {
                         for arg in &e.args {
                             compile_call_arg(arg, ctx, e.span)?;
@@ -5206,7 +5203,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "preventExtensions"
                         && e.args.len() == 1
                     {
@@ -5216,7 +5213,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "seal"
                         && e.args.len() == 1
                     {
@@ -5226,7 +5223,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "setPrototypeOf"
                         && e.args.len() == 2
                     {
@@ -5237,7 +5234,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 2,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "propertyIsEnumerable"
                         && e.args.len() == 2
                     {
@@ -5248,7 +5245,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 2,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "getPrototypeOf"
                         && e.args.len() == 1
                     {
@@ -5258,7 +5255,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "freeze"
                         && e.args.len() == 1
                     {
@@ -5268,7 +5265,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "isExtensible"
                         && e.args.len() == 1
                     {
@@ -5278,7 +5275,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "isFrozen"
                         && e.args.len() == 1
                     {
@@ -5288,7 +5285,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "isSealed"
                         && e.args.len() == 1
                     {
@@ -5298,7 +5295,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "hasOwn"
                         && e.args.len() == 2
                     {
@@ -5309,7 +5306,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 2,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "is"
                         && e.args.len() == 2
                     {
@@ -5320,7 +5317,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 2,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "fromEntries"
                         && e.args.len() == 1
                     {
@@ -5330,7 +5327,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Object")
+                    } else if matches!(obj_name, Some(s) if s == "Object")
                         && prop == "getOwnPropertyNames"
                         && e.args.len() == 1
                     {
@@ -5340,7 +5337,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                    } else if matches!(obj_name, Some(s) if s == "Number")
                         && prop == "isInteger"
                         && e.args.len() == 1
                     {
@@ -5350,7 +5347,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                    } else if matches!(obj_name, Some(s) if s == "Number")
                         && prop == "isSafeInteger"
                         && e.args.len() == 1
                     {
@@ -5360,7 +5357,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                    } else if matches!(obj_name, Some(s) if s == "Number")
                         && prop == "isFinite"
                         && e.args.len() == 1
                     {
@@ -5370,7 +5367,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Number")
+                    } else if matches!(obj_name, Some(s) if s == "Number")
                         && prop == "isNaN"
                         && e.args.len() == 1
                     {
@@ -5380,7 +5377,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "String")
+                    } else if matches!(obj_name, Some(s) if s == "String")
                         && prop == "fromCharCode"
                     {
                         for arg in &e.args {
@@ -5391,7 +5388,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Array")
+                    } else if matches!(obj_name, Some(s) if s == "Array")
                         && prop == "isArray"
                         && e.args.len() == 1
                     {
@@ -5401,7 +5398,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Error")
+                    } else if matches!(obj_name, Some(s) if s == "Error")
                         && prop == "isError"
                         && e.args.len() == 1
                     {
@@ -5411,7 +5408,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "Date")
+                    } else if matches!(obj_name, Some(s) if s == "Date")
                         && prop == "now"
                         && e.args.is_empty()
                     {
@@ -5420,7 +5417,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 0,
                             span: e.span,
                         });
-                    } else if matches!(obj_name.as_deref(), Some(s) if s == "RegExp")
+                    } else if matches!(obj_name, Some(s) if s == "RegExp")
                         && prop == "escape"
                         && e.args.len() == 1
                     {
@@ -5486,7 +5483,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         });
                     } else if prop == "slice" {
                         compile_expression(&m.object, ctx)?;
-                        let start = e.args.get(0);
+                        let start = e.args.first();
                         let end = e.args.get(1);
                         if let Some(s) = start {
                             compile_call_arg(s, ctx, e.span)?;
@@ -5747,7 +5744,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             )
                         }
                         && matches!(
-                            prop.as_ref(),
+                            prop,
                             "forEach"
                                 | "map"
                                 | "filter"
@@ -5760,7 +5757,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                                 | "flatMap"
                         )
                     {
-                        let kind = match prop.as_ref() {
+                        let kind = match prop {
                             "forEach" => HofKind::ForEach,
                             "map" => HofKind::Map,
                             "filter" => HofKind::Filter,
@@ -5775,7 +5772,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                         };
                         compile_array_hof(kind, &m.object, &e.args, e.span, ctx)?;
                     } else if !e.args.is_empty()
-                        && matches!(prop.as_ref(), "reduce" | "reduceRight")
+                        && matches!(prop, "reduce" | "reduceRight")
                         && {
                             let cb = &e.args[0];
                             matches!(

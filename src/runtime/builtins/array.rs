@@ -1,4 +1,4 @@
-use super::{is_truthy, strict_eq, to_number, BuiltinContext, BuiltinError};
+use super::{BuiltinContext, BuiltinError, is_truthy, strict_eq, to_number};
 use crate::runtime::{Heap, Value};
 
 pub fn push(args: &[Value], heap: &mut Heap) -> Value {
@@ -187,7 +187,7 @@ pub fn to_reversed(args: &[Value], heap: &mut Heap) -> Value {
         .array_elements(receiver)
         .map(|e| e.to_vec())
         .unwrap_or_default();
-    let mut reversed: Vec<Value> = elements.iter().cloned().collect();
+    let mut reversed: Vec<Value> = elements.to_vec();
     reversed.reverse();
     let new_id = heap.alloc_array();
     for v in reversed {
@@ -205,8 +205,8 @@ pub fn to_sorted(args: &[Value], heap: &mut Heap) -> Value {
         .array_elements(receiver)
         .map(|e| e.to_vec())
         .unwrap_or_default();
-    let mut sorted: Vec<Value> = elements.iter().cloned().collect();
-    sorted.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+    let mut sorted: Vec<Value> = elements.to_vec();
+    sorted.sort_by_key(|a| a.to_string());
     let new_id = heap.alloc_array();
     for v in sorted {
         heap.array_push(new_id, v);
@@ -232,11 +232,7 @@ pub fn to_spliced(args: &[Value], heap: &mut Heap) -> Value {
                 0
             } else {
                 let k = n as i32;
-                if k < 0 {
-                    (len + k).max(0)
-                } else {
-                    k.min(len)
-                }
+                if k < 0 { (len + k).max(0) } else { k.min(len) }
             }
         })
         .unwrap_or(0)
@@ -295,7 +291,7 @@ pub fn array_with(args: &[Value], heap: &mut Heap) -> Value {
     } else {
         relative_index.min(len)
     } as usize;
-    let mut new_elements: Vec<Value> = elements.iter().cloned().collect();
+    let mut new_elements: Vec<Value> = elements.to_vec();
     if actual_index < new_elements.len() {
         new_elements[actual_index] = value;
     } else {
@@ -323,11 +319,7 @@ pub fn slice(args: &[Value], heap: &mut Heap) -> Value {
         let start = start_val
             .map(|v| {
                 let n = to_number(v) as i32;
-                if n < 0 {
-                    (len + n).max(0)
-                } else {
-                    n.min(len)
-                }
+                if n < 0 { (len + n).max(0) } else { n.min(len) }
             })
             .unwrap_or(0) as usize;
         let end = end_val
@@ -337,11 +329,7 @@ pub fn slice(args: &[Value], heap: &mut Heap) -> Value {
                     len
                 } else {
                     let n = n as i32;
-                    if n < 0 {
-                        (len + n).max(0)
-                    } else {
-                        n.min(len)
-                    }
+                    if n < 0 { (len + n).max(0) } else { n.min(len) }
                 }
             })
             .unwrap_or(len) as usize;
@@ -365,7 +353,7 @@ pub fn slice(args: &[Value], heap: &mut Heap) -> Value {
             })
             .unwrap_or(len);
         let start = start.max(0).min(len) as usize;
-        let end = end.max(0).min(len as i32) as usize;
+        let end = end.max(0).min(len) as usize;
         let end = end.max(start);
         let new_id = heap.alloc_array();
         for i in start..end {
@@ -425,7 +413,7 @@ fn index_of_impl(args: &[Value], heap: &Heap) -> Value {
         let search_str = search.to_string();
         let from = from_val
             .map(|v| {
-                let n = to_number(&v) as i32;
+                let n = to_number(v) as i32;
                 if n < 0 {
                     ((s.len() as i32) + n).max(0) as usize
                 } else {
@@ -487,11 +475,7 @@ fn last_index_of_impl(args: &[Value], heap: &Heap) -> Value {
                     len
                 } else {
                     let n = n as i32;
-                    if n < 0 {
-                        (len + n).max(0)
-                    } else {
-                        n.min(len)
-                    }
+                    if n < 0 { (len + n).max(0) } else { n.min(len) }
                 }
             })
             .unwrap_or(len.max(0));
@@ -512,11 +496,7 @@ fn last_index_of_impl(args: &[Value], heap: &Heap) -> Value {
                     len
                 } else {
                     let n = n as i32;
-                    if n < 0 {
-                        (len + n).max(0)
-                    } else {
-                        n.min(len)
-                    }
+                    if n < 0 { (len + n).max(0) } else { n.min(len) }
                 }
             })
             .unwrap_or(len.max(0));
@@ -651,15 +631,15 @@ pub fn reduce_right(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, B
     reduce(args, ctx)
 }
 
-pub fn some(args: &[Value], _heap: &mut Heap) -> Value {
+pub fn some(_args: &[Value], _heap: &mut Heap) -> Value {
     Value::Bool(false)
 }
 
-pub fn every(args: &[Value], _heap: &mut Heap) -> Value {
+pub fn every(_args: &[Value], _heap: &mut Heap) -> Value {
     Value::Bool(true)
 }
 
-pub fn for_each(args: &[Value], _heap: &mut Heap) -> Value {
+pub fn for_each(_args: &[Value], _heap: &mut Heap) -> Value {
     Value::Undefined
 }
 
@@ -690,7 +670,7 @@ pub fn splice(args: &[Value], heap: &mut Heap) -> Value {
         _ => return Value::Undefined,
     };
     let elements = heap.array_elements(receiver).map(|e| e.to_vec());
-    let mut elements: Vec<Value> = elements.unwrap_or_default();
+    let elements: Vec<Value> = elements.unwrap_or_default();
     let len = elements.len() as i32;
     let start = args
         .get(1)
@@ -718,7 +698,7 @@ pub fn splice(args: &[Value], heap: &mut Heap) -> Value {
         })
         .unwrap_or((len - start as i32).max(0))
         .max(0) as usize;
-    let add_count = args.len().saturating_sub(3);
+    let _add_count = args.len().saturating_sub(3);
     let removed_id = heap.alloc_array();
     for i in start..(start + delete_count).min(elements.len()) {
         if let Some(v) = elements.get(i) {
@@ -743,7 +723,7 @@ pub fn sort(args: &[Value], heap: &mut Heap) -> Value {
     };
     let elements = heap.array_elements(receiver).map(|e| e.to_vec());
     let mut elements: Vec<Value> = elements.unwrap_or_default();
-    elements.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+    elements.sort_by_key(|a| a.to_string());
     heap.array_splice(receiver, elements);
     Value::Array(receiver)
 }
@@ -888,11 +868,7 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
                 0
             } else {
                 let i = n as i32;
-                if i < 0 {
-                    (len + i).max(0)
-                } else {
-                    i.min(len)
-                }
+                if i < 0 { (len + i).max(0) } else { i.min(len) }
             }
         })
         .unwrap_or(0) as usize;
@@ -904,11 +880,7 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
                 0
             } else {
                 let i = n as i32;
-                if i < 0 {
-                    (len + i).max(0)
-                } else {
-                    i.min(len)
-                }
+                if i < 0 { (len + i).max(0) } else { i.min(len) }
             }
         })
         .unwrap_or(0) as usize;
@@ -920,11 +892,7 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
                 len
             } else {
                 let i = n as i32;
-                if i < 0 {
-                    (len + i).max(0)
-                } else {
-                    i.min(len)
-                }
+                if i < 0 { (len + i).max(0) } else { i.min(len) }
             }
         })
         .unwrap_or(len) as usize;
@@ -933,11 +901,10 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
         .saturating_sub(start)
         .min(len_usize.saturating_sub(target));
     for i in 0..count {
-        if let Some(v) = elements.get(start + i) {
-            if target + i < elements.len() {
+        if let Some(v) = elements.get(start + i)
+            && target + i < elements.len() {
                 elements[target + i] = v.clone();
             }
-        }
     }
     heap.array_splice(receiver, elements);
     Value::Array(receiver)
@@ -965,7 +932,7 @@ pub fn array_from(args: &[Value], heap: &mut Heap) -> Value {
             Value::Object(obj_id) => {
                 let len_val = heap.get_prop(*obj_id, "length");
                 let len = super::to_number(&len_val);
-                if len.fract() == 0.0 && len >= 0.0 && len <= 10_000_000.0 {
+                if len.fract() == 0.0 && (0.0..=10_000_000.0).contains(&len) {
                     let n = len as usize;
                     for i in 0..n {
                         let key = i.to_string();
@@ -1033,7 +1000,7 @@ pub fn array_create(args: &[Value], heap: &mut Heap) -> Value {
     }
     if args.len() == 2 {
         let n = to_number(&args[1]);
-        if n.fract() == 0.0 && n >= 0.0 && n <= 10_000_000.0 {
+        if n.fract() == 0.0 && (0.0..=10_000_000.0).contains(&n) {
             let len = n as usize;
             for _ in 0..len {
                 heap.array_push(arr_id, Value::Undefined);

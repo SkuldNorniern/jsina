@@ -505,11 +505,10 @@ pub fn evaluate_cached(
 
     let chunk = program_chunks.get(chunk_index)?;
     let mut recursive_call = |ci: usize, a: &[i64]| {
-        if let Some(invoke) = invoke_compiled.as_deref_mut() {
-            if let Some(r) = invoke(ci, a) {
+        if let Some(invoke) = invoke_compiled.as_deref_mut()
+            && let Some(r) = invoke(ci, a) {
                 return Some(r);
             }
-        }
         evaluate_cached(
             ci,
             a,

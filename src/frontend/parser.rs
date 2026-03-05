@@ -68,7 +68,7 @@ fn process_string_escapes(raw: &str) -> String {
             Some('f') => result.push('\x0C'),
             Some('v') => result.push('\x0B'),
             Some('0') => {
-                if chars.peek().map_or(false, |c| c.is_ascii_digit()) {
+                if chars.peek().is_some_and(|c| c.is_ascii_digit()) {
                     result.push('\\');
                     result.push('0');
                 } else {
@@ -1092,7 +1092,7 @@ impl Parser {
                     Some('f') => text_buf.push('\x0C'),
                     Some('v') => text_buf.push('\x0B'),
                     Some('0') => {
-                        if chars.peek().map_or(false, |c| c.is_ascii_digit()) {
+                        if chars.peek().is_some_and(|c| c.is_ascii_digit()) {
                             text_buf.push('\\');
                             text_buf.push('0');
                         } else {
@@ -3106,7 +3106,7 @@ impl Parser {
                     self.current().map(|t| &t.token_type),
                     Some(TokenType::LeftParen)
                 ) {
-                    if let Some((arrow_expr, span)) =
+                    if let Some((arrow_expr, _span)) =
                         self.try_parse_async_arrow_function(start_span)?
                     {
                         return Ok(arrow_expr);
@@ -3121,7 +3121,7 @@ impl Parser {
                     Some(TokenType::Identifier)
                 ) {
                     let name_tok = self.expect(TokenType::Identifier)?;
-                    let arrow_tok = self.expect(TokenType::Arrow)?;
+                    let _arrow_tok = self.expect(TokenType::Arrow)?;
                     let body = if matches!(
                         self.current().map(|t| &t.token_type),
                         Some(TokenType::LeftBrace)
