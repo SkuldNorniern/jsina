@@ -1,4 +1,5 @@
 use super::{Heap, Value};
+use std::collections::HashSet;
 
 #[derive(Debug)]
 pub struct JsonParseError {
@@ -336,7 +337,16 @@ fn escape_string(s: &str) -> String {
     out
 }
 
-pub fn json_stringify(v: &Value, heap: &Heap) -> Option<String> {
+#[derive(Debug)]
+pub struct JsonStringifyError {
+    pub circular: bool,
+}
+
+fn json_stringify_impl(
+    v: &Value,
+    heap: &Heap,
+    seen: &mut HashSet<usize>,
+) -> Result<Option<String>, JsonStringifyError> {
     match v {
         Value::Undefined
         | Value::Symbol(_)
@@ -347,39 +357,59 @@ pub fn json_stringify(v: &Value, heap: &Heap) -> Option<String> {
         | Value::BoundBuiltin(_, _, _)
         | Value::BoundFunction(_, _, _)
         | Value::Generator(_)
-        | Value::Promise(_) => None,
-        Value::Null => Some("null".to_string()),
-        Value::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
-        Value::Int(n) => Some(n.to_string()),
+        | Value::Promise(_) => Ok(None),
+        Value::Null => Ok(Some("null".to_string())),
+        Value::Bool(b) => Ok(Some(if *b { "true" } else { "false" }.to_string())),
+        Value::Int(n) => Ok(Some(n.to_string())),
         Value::Number(n) => {
             if n.is_finite() {
-                Some(n.to_string())
+                Ok(Some(n.to_string()))
             } else {
-                Some("null".to_string())
+                Ok(Some("null".to_string()))
             }
         }
-        Value::String(s) => Some(escape_string(s)),
-        Value::Map(_) | Value::Set(_) | Value::Date(_) => None,
+        Value::String(s) => Ok(Some(escape_string(s))),
+        Value::Map(_) | Value::Set(_) | Value::Date(_) => Ok(None),
         Value::Object(id) => {
+            if !seen.insert(*id) {
+                return Err(JsonStringifyError { circular: true });
+            }
             let keys = heap.object_keys(*id);
             let mut parts: Vec<String> = Vec::new();
             for key in keys {
                 let val = heap.get_prop(*id, &key);
-                if let Some(s) = json_stringify(&val, heap) {
+                if let Ok(Some(s)) = json_stringify_impl(&val, heap, seen) {
                     parts.push(format!("{}:{}", escape_string(&key), s));
                 }
             }
-            Some(format!("{{{}}}", parts.join(",")))
+            seen.remove(id);
+            Ok(Some(format!("{{{}}}", parts.join(","))))
         }
         Value::Array(id) => {
+            if !seen.insert(*id) {
+                return Err(JsonStringifyError { circular: true });
+            }
             let elements = heap.array_elements(*id).unwrap_or(&[]);
-            let parts: Vec<String> = elements
-                .iter()
-                .map(|v| json_stringify(v, heap).unwrap_or_else(|| "null".to_string()))
-                .collect();
-            Some(format!("[{}]", parts.join(",")))
+            let mut parts: Vec<String> = Vec::new();
+            for v in elements {
+                match json_stringify_impl(v, heap, seen) {
+                    Ok(Some(s)) => parts.push(s),
+                    Ok(None) => parts.push("null".to_string()),
+                    Err(e) => {
+                        seen.remove(id);
+                        return Err(e);
+                    }
+                }
+            }
+            seen.remove(id);
+            Ok(Some(format!("[{}]", parts.join(","))))
         }
     }
+}
+
+pub fn json_stringify(v: &Value, heap: &Heap) -> Result<Option<String>, JsonStringifyError> {
+    let mut seen = HashSet::new();
+    json_stringify_impl(v, heap, &mut seen)
 }
 
 #[cfg(test)]
@@ -405,7 +435,9 @@ mod tests {
     #[test]
     fn json_stringify_roundtrip() {
         let heap = Heap::new();
-        let s = json_stringify(&Value::Int(42), &heap).expect("stringify");
+        let s = json_stringify(&Value::Int(42), &heap)
+            .expect("stringify err")
+            .expect("some");
         assert_eq!(s, "42");
     }
 }
