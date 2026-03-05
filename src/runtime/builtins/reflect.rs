@@ -182,21 +182,19 @@ pub fn reflect_construct(args: &[Value], ctx: &mut BuiltinContext) -> Result<Val
             args: construct_args,
             new_object: Some(new_object),
         }),
-        Value::Builtin(builtin_id) => {
-            match super::dispatch(*builtin_id, &construct_args, ctx) {
-                Ok(result) => {
-                    let use_result = matches!(result, Value::Object(_) | Value::Date(_));
-                    Ok(if use_result { result } else { new_obj_value })
-                }
-                Err(BuiltinError::Throw(v)) => Err(BuiltinError::Throw(v)),
-                Err(BuiltinError::Invoke { .. }) => Err(BuiltinError::Throw(Value::String(
-                    "Reflect.construct: nested construct".to_string(),
-                ))),
-                Err(BuiltinError::ResumeGenerator { .. }) => Err(BuiltinError::Throw(Value::String(
-                    "Reflect.construct: cannot construct generator".to_string(),
-                ))),
+        Value::Builtin(builtin_id) => match super::dispatch(*builtin_id, &construct_args, ctx) {
+            Ok(result) => {
+                let use_result = matches!(result, Value::Object(_) | Value::Date(_));
+                Ok(if use_result { result } else { new_obj_value })
             }
-        }
+            Err(BuiltinError::Throw(v)) => Err(BuiltinError::Throw(v)),
+            Err(BuiltinError::Invoke { .. }) => Err(BuiltinError::Throw(Value::String(
+                "Reflect.construct: nested construct".to_string(),
+            ))),
+            Err(BuiltinError::ResumeGenerator { .. }) => Err(BuiltinError::Throw(Value::String(
+                "Reflect.construct: cannot construct generator".to_string(),
+            ))),
+        },
         _ => Err(BuiltinError::Throw(error::type_error(
             &[Value::String(
                 "Reflect.construct: target is not a constructor".to_string(),

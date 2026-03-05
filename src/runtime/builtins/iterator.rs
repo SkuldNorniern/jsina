@@ -7,7 +7,8 @@ pub fn get_iterator(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, B
         Value::Generator(_) => Ok(val),
         Value::Array(arr_id) => {
             let iter_obj = ctx.heap.alloc_object();
-            ctx.heap.set_prop(iter_obj, "__iter_arr", Value::Array(arr_id));
+            ctx.heap
+                .set_prop(iter_obj, "__iter_arr", Value::Array(arr_id));
             ctx.heap.set_prop(iter_obj, "__iter_idx", Value::Int(0));
             // SAFETY: "Iterator"/"arrayNext" is always registered in BUILTINS
             let next_id = super::resolve("Iterator", "arrayNext").unwrap();
@@ -46,7 +47,7 @@ pub fn array_next(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Bui
         _ => {
             return Err(BuiltinError::Throw(Value::String(
                 "TypeError: bad array iterator".to_string(),
-            )))
+            )));
         }
     };
 
@@ -58,7 +59,7 @@ pub fn array_next(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Bui
         _ => {
             return Err(BuiltinError::Throw(Value::String(
                 "TypeError: bad array iterator state".to_string(),
-            )))
+            )));
         }
     };
     let idx = match idx_val {
@@ -88,7 +89,7 @@ pub fn string_next(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Bu
         _ => {
             return Err(BuiltinError::Throw(Value::String(
                 "TypeError: bad string iterator".to_string(),
-            )))
+            )));
         }
     };
 
@@ -100,7 +101,7 @@ pub fn string_next(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Bu
         _ => {
             return Err(BuiltinError::Throw(Value::String(
                 "TypeError: bad string iterator state".to_string(),
-            )))
+            )));
         }
     };
     let idx = match idx_val {

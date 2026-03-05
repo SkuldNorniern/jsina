@@ -78,14 +78,21 @@ fn process_string_escapes(raw: &str) -> String {
             Some('x') => {
                 let h1 = chars.next();
                 let h2 = chars.next();
-                if let (Some(a), Some(b)) = (h1.and_then(|c| c.to_digit(16)), h2.and_then(|c| c.to_digit(16))) {
+                if let (Some(a), Some(b)) = (
+                    h1.and_then(|c| c.to_digit(16)),
+                    h2.and_then(|c| c.to_digit(16)),
+                ) {
                     let code_point = (a << 4) | b;
                     // SAFETY: code_point is <= 0xFF so always valid
                     result.push(char::from_u32(code_point).unwrap());
                 } else {
                     result.push('x');
-                    if let Some(a) = h1 { result.push(a); }
-                    if let Some(b) = h2 { result.push(b); }
+                    if let Some(a) = h1 {
+                        result.push(a);
+                    }
+                    if let Some(b) = h2 {
+                        result.push(b);
+                    }
                 }
             }
             Some('u') => {
@@ -93,7 +100,9 @@ fn process_string_escapes(raw: &str) -> String {
                     chars.next();
                     let mut hex = String::new();
                     for c in chars.by_ref() {
-                        if c == '}' { break; }
+                        if c == '}' {
+                            break;
+                        }
                         hex.push(c);
                     }
                     if let Ok(code_point) = u32::from_str_radix(&hex, 16) {
@@ -130,7 +139,9 @@ fn process_string_escapes(raw: &str) -> String {
                 }
             }
             Some('\n') => {}
-            Some('\r') => { chars.next_if_eq(&'\n'); }
+            Some('\r') => {
+                chars.next_if_eq(&'\n');
+            }
             Some(c) => result.push(c),
         }
     }
@@ -685,19 +696,19 @@ impl Parser {
             if self.optional(TokenType::Semicolon) {
                 continue;
             }
-            let member_span_start = self
-                .current()
-                .map(|t| t.span)
-                .unwrap_or(start_span);
+            let member_span_start = self.current().map(|t| t.span).unwrap_or(start_span);
 
             let is_static = matches!(
                 self.current().map(|t| &t.token_type),
                 Some(TokenType::Identifier)
             ) && self.current().map(|t| t.lexeme.as_str()) == Some("static")
-              && !matches!(
-                self.peek(),
-                Some(TokenType::LeftParen) | Some(TokenType::Semicolon) | Some(TokenType::RightBrace) | None
-            );
+                && !matches!(
+                    self.peek(),
+                    Some(TokenType::LeftParen)
+                        | Some(TokenType::Semicolon)
+                        | Some(TokenType::RightBrace)
+                        | None
+                );
             if is_static {
                 self.advance();
             }
@@ -706,12 +717,12 @@ impl Parser {
                 self.current().map(|t| &t.token_type),
                 Some(TokenType::Identifier)
             ) && self.current().map(|t| t.lexeme.as_str()) == Some("get")
-              && !matches!(self.peek(), Some(TokenType::LeftParen));
+                && !matches!(self.peek(), Some(TokenType::LeftParen));
             let is_set = matches!(
                 self.current().map(|t| &t.token_type),
                 Some(TokenType::Identifier)
             ) && self.current().map(|t| t.lexeme.as_str()) == Some("set")
-              && !matches!(self.peek(), Some(TokenType::LeftParen));
+                && !matches!(self.peek(), Some(TokenType::LeftParen));
 
             if is_get || is_set {
                 self.advance();
@@ -730,7 +741,10 @@ impl Parser {
                 ClassMemberKey::Ident(name)
             };
 
-            if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftParen)) {
+            if matches!(
+                self.current().map(|t| &t.token_type),
+                Some(TokenType::LeftParen)
+            ) {
                 self.expect(TokenType::LeftParen)?;
                 let params = self.parse_params()?;
                 self.expect(TokenType::RightParen)?;
@@ -754,8 +768,16 @@ impl Parser {
                     ClassMemberKind::Method(fe)
                 };
                 let member_span = member_span_start.merge(fe_span);
-                members.push(ClassMember { span: member_span, key, kind, is_static });
-            } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Assign)) {
+                members.push(ClassMember {
+                    span: member_span,
+                    key,
+                    kind,
+                    is_static,
+                });
+            } else if matches!(
+                self.current().map(|t| &t.token_type),
+                Some(TokenType::Assign)
+            ) {
                 self.advance();
                 let init = self.parse_expression()?;
                 self.optional(TokenType::Semicolon);
@@ -776,18 +798,19 @@ impl Parser {
                 });
             }
         }
-        let end_span = self
-            .expect(TokenType::RightBrace)?
-            .span;
+        let end_span = self.expect(TokenType::RightBrace)?.span;
         let body_span = start_span.merge(end_span);
-        Ok(ClassBody { span: body_span, members })
+        Ok(ClassBody {
+            span: body_span,
+            members,
+        })
     }
 
     fn parse_property_key_name(&mut self) -> Result<String, ParseError> {
         match self.current().map(|t| t.token_type.clone()) {
-            Some(TokenType::Identifier)
-            | Some(TokenType::String)
-            | Some(TokenType::Number) => Ok(self.advance_take().lexeme),
+            Some(TokenType::Identifier) | Some(TokenType::String) | Some(TokenType::Number) => {
+                Ok(self.advance_take().lexeme)
+            }
             Some(ref tt) if is_keyword_token(tt) => Ok(self.advance_take().lexeme),
             _ => Err(ParseError {
                 code: ErrorCode::ParseUnexpectedToken,
@@ -832,7 +855,13 @@ impl Parser {
     fn parse_class_expr(&mut self) -> Result<crate::frontend::ast::ClassExprData, ParseError> {
         let (name, superclass, body, span) = self.parse_class_inner(false)?;
         let id = self.next_id();
-        Ok(crate::frontend::ast::ClassExprData { id, span, name, superclass, body })
+        Ok(crate::frontend::ast::ClassExprData {
+            id,
+            span,
+            name,
+            superclass,
+            body,
+        })
     }
 
     fn parse_class_decl(&mut self) -> Result<Statement, ParseError> {
@@ -1073,14 +1102,21 @@ impl Parser {
                     Some('x') => {
                         let h1 = chars.next();
                         let h2 = chars.next();
-                        if let (Some(a), Some(b)) = (h1.and_then(|c| c.to_digit(16)), h2.and_then(|c| c.to_digit(16))) {
+                        if let (Some(a), Some(b)) = (
+                            h1.and_then(|c| c.to_digit(16)),
+                            h2.and_then(|c| c.to_digit(16)),
+                        ) {
                             let cp = (a << 4) | b;
                             // SAFETY: cp is <= 0xFF, always a valid Unicode scalar
                             text_buf.push(char::from_u32(cp).unwrap());
                         } else {
                             text_buf.push('x');
-                            if let Some(a) = h1 { text_buf.push(a); }
-                            if let Some(b) = h2 { text_buf.push(b); }
+                            if let Some(a) = h1 {
+                                text_buf.push(a);
+                            }
+                            if let Some(b) = h2 {
+                                text_buf.push(b);
+                            }
                         }
                     }
                     Some('u') => {
@@ -1088,7 +1124,9 @@ impl Parser {
                             chars.next();
                             let mut hex = String::new();
                             for c in chars.by_ref() {
-                                if c == '}' { break; }
+                                if c == '}' {
+                                    break;
+                                }
                                 hex.push(c);
                             }
                             if let Ok(cp) = u32::from_str_radix(&hex, 16) {
@@ -1125,7 +1163,9 @@ impl Parser {
                         }
                     }
                     Some('\n') => {}
-                    Some('\r') => { chars.next_if_eq(&'\n'); }
+                    Some('\r') => {
+                        chars.next_if_eq(&'\n');
+                    }
                     Some(c) => text_buf.push(c),
                 }
             } else if ch == '$' && chars.peek() == Some(&'{') {
@@ -1973,7 +2013,13 @@ impl Parser {
                     };
                     (target, false, default_init)
                 } else {
-                    if !matches!(key_tok.token_type, TokenType::Identifier | TokenType::Yield | TokenType::Async | TokenType::Await) {
+                    if !matches!(
+                        key_tok.token_type,
+                        TokenType::Identifier
+                            | TokenType::Yield
+                            | TokenType::Async
+                            | TokenType::Await
+                    ) {
                         return Err(ParseError {
                             code: ErrorCode::ParseUnexpectedToken,
                             message: "object binding shorthand must be an identifier".to_string(),
@@ -2044,7 +2090,10 @@ impl Parser {
                 }
                 let binding = if matches!(
                     self.current().map(|t| &t.token_type),
-                    Some(TokenType::Identifier) | Some(TokenType::Yield) | Some(TokenType::Async) | Some(TokenType::Await)
+                    Some(TokenType::Identifier)
+                        | Some(TokenType::Yield)
+                        | Some(TokenType::Async)
+                        | Some(TokenType::Await)
                 ) {
                     let (name, _) = self.expect_binding_identifier()?;
                     Some(name)
@@ -2988,15 +3037,23 @@ impl Parser {
                 } else {
                     self.advance();
                     let next_tt = self.current().map(|t| &t.token_type);
-                    let (argument, delegate, span) =
-                        if matches!(next_tt, Some(TokenType::Semicolon) | Some(TokenType::RightBrace) | Some(TokenType::RightParen) | Some(TokenType::RightBracket) | Some(TokenType::Comma) | Some(TokenType::Eof) | None) {
-                            (None, false, start_span)
-                        } else {
-                            let delegate = self.optional(TokenType::Multiply);
-                            let arg = self.parse_expression_prec(1)?;
-                            let span = start_span.merge(arg.span());
-                            (Some(Box::new(arg)), delegate, span)
-                        };
+                    let (argument, delegate, span) = if matches!(
+                        next_tt,
+                        Some(TokenType::Semicolon)
+                            | Some(TokenType::RightBrace)
+                            | Some(TokenType::RightParen)
+                            | Some(TokenType::RightBracket)
+                            | Some(TokenType::Comma)
+                            | Some(TokenType::Eof)
+                            | None
+                    ) {
+                        (None, false, start_span)
+                    } else {
+                        let delegate = self.optional(TokenType::Multiply);
+                        let arg = self.parse_expression_prec(1)?;
+                        let span = start_span.merge(arg.span());
+                        (Some(Box::new(arg)), delegate, span)
+                    };
                     (
                         Expression::Yield(crate::frontend::ast::YieldExpr {
                             id: self.next_id(),
@@ -3038,12 +3095,20 @@ impl Parser {
             TokenType::Async => {
                 let start_span = token.span;
                 self.advance();
-                if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Function)) {
+                if matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::Function)
+                ) {
                     let fe = self.parse_function_expr_with_async(true)?;
                     let sp = fe.span;
                     (Expression::FunctionExpr(fe), sp)
-                } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftParen)) {
-                    if let Some((arrow_expr, span)) = self.try_parse_async_arrow_function(start_span)? {
+                } else if matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::LeftParen)
+                ) {
+                    if let Some((arrow_expr, span)) =
+                        self.try_parse_async_arrow_function(start_span)?
+                    {
                         return Ok(arrow_expr);
                     }
                     return Err(ParseError {
@@ -3051,31 +3116,45 @@ impl Parser {
                         message: "expected arrow function after async".to_string(),
                         span: Some(start_span),
                     });
-                } else if matches!(self.current().map(|t| &t.token_type), Some(TokenType::Identifier)) {
+                } else if matches!(
+                    self.current().map(|t| &t.token_type),
+                    Some(TokenType::Identifier)
+                ) {
                     let name_tok = self.expect(TokenType::Identifier)?;
                     let arrow_tok = self.expect(TokenType::Arrow)?;
-                    let body = if matches!(self.current().map(|t| &t.token_type), Some(TokenType::LeftBrace)) {
+                    let body = if matches!(
+                        self.current().map(|t| &t.token_type),
+                        Some(TokenType::LeftBrace)
+                    ) {
                         crate::frontend::ast::ArrowBody::Block(Box::new(self.parse_block()?))
                     } else {
-                        crate::frontend::ast::ArrowBody::Expression(Box::new(self.parse_expression_prec(1)?))
+                        crate::frontend::ast::ArrowBody::Expression(Box::new(
+                            self.parse_expression_prec(1)?,
+                        ))
                     };
                     let span = start_span.merge(match &body {
                         crate::frontend::ast::ArrowBody::Expression(e) => e.span(),
                         crate::frontend::ast::ArrowBody::Block(s) => s.span(),
                     });
-                    (Expression::ArrowFunction(crate::frontend::ast::ArrowFunctionExpr {
-                        id: self.next_id(),
+                    (
+                        Expression::ArrowFunction(crate::frontend::ast::ArrowFunctionExpr {
+                            id: self.next_id(),
+                            span,
+                            params: vec![crate::frontend::ast::Param::Ident(name_tok.lexeme)],
+                            body,
+                        }),
                         span,
-                        params: vec![crate::frontend::ast::Param::Ident(name_tok.lexeme)],
-                        body,
-                    }), span)
+                    )
                 } else {
                     let span = start_span;
-                    (Expression::Identifier(IdentifierExpr {
-                        id: self.next_id(),
+                    (
+                        Expression::Identifier(IdentifierExpr {
+                            id: self.next_id(),
+                            span,
+                            name: "async".to_string(),
+                        }),
                         span,
-                        name: "async".to_string(),
-                    }), span)
+                    )
                 }
             }
             TokenType::LeftParen => {

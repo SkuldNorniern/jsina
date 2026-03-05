@@ -931,7 +931,13 @@ pub fn interpret_program_with_heap_and_entry(
                 let args = pop_args(&mut state.stack, argc)?;
 
                 if callee.is_generator {
-                    let gen_id = create_generator_state_static(heap, callee, func_idx, &args, Value::Undefined);
+                    let gen_id = create_generator_state_static(
+                        heap,
+                        callee,
+                        func_idx,
+                        &args,
+                        Value::Undefined,
+                    );
                     state.stack.push(Value::Generator(gen_id));
                     state.frames[frame_idx].pc = pc;
                     continue;
@@ -972,9 +978,7 @@ pub fn interpret_program_with_heap_and_entry(
                 let argc = read_u8(code, pc + 1) as usize;
                 pc += 2;
                 let call_pc = trace_pc;
-                let mut ctx = builtins::BuiltinContext {
-                    heap,
-                };
+                let mut ctx = builtins::BuiltinContext { heap };
                 match execute_builtin(builtin_id, argc, &mut state.stack, &mut ctx) {
                     Ok(BuiltinResult::Push(v)) => {
                         state.getprop_cache.invalidate_all();
@@ -1048,9 +1052,7 @@ pub fn interpret_program_with_heap_and_entry(
                         for a in &args {
                             state.stack.push(a.clone());
                         }
-                        let mut ctx = builtins::BuiltinContext {
-                            heap,
-                        };
+                        let mut ctx = builtins::BuiltinContext { heap };
                         match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx) {
                             Ok(BuiltinResult::Push(v)) => {
                                 state.getprop_cache.invalidate_all();
@@ -1086,7 +1088,9 @@ pub fn interpret_program_with_heap_and_entry(
                                 }
                             }
                             Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
-                                if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                if let Err(()) =
+                                    resume_generator(heap, &mut state, gen_id, sent_value)
+                                {
                                     state.stack.push(Value::Undefined);
                                 }
                             }
@@ -1191,9 +1195,7 @@ pub fn interpret_program_with_heap_and_entry(
                         for v in &call_args {
                             state.stack.push(v.clone());
                         }
-                        let mut ctx = builtins::BuiltinContext {
-                            heap,
-                        };
+                        let mut ctx = builtins::BuiltinContext { heap };
                         match execute_builtin(
                             builtin_id,
                             call_args.len(),
@@ -1234,7 +1236,9 @@ pub fn interpret_program_with_heap_and_entry(
                                 }
                             }
                             Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
-                                if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                if let Err(()) =
+                                    resume_generator(heap, &mut state, gen_id, sent_value)
+                                {
                                     state.stack.push(Value::Undefined);
                                 }
                             }
@@ -1247,9 +1251,7 @@ pub fn interpret_program_with_heap_and_entry(
                             for a in &args {
                                 state.stack.push(a.clone());
                             }
-                            let mut ctx = builtins::BuiltinContext {
-                                heap,
-                            };
+                            let mut ctx = builtins::BuiltinContext { heap };
                             match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx)
                             {
                                 Ok(BuiltinResult::Push(v)) => {
@@ -1287,7 +1289,9 @@ pub fn interpret_program_with_heap_and_entry(
                                     }
                                 }
                                 Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
-                                    if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                    if let Err(()) =
+                                        resume_generator(heap, &mut state, gen_id, sent_value)
+                                    {
                                         state.stack.push(Value::Undefined);
                                     }
                                 }
@@ -1375,9 +1379,7 @@ pub fn interpret_program_with_heap_and_entry(
                         for a in &args {
                             state.stack.push(a.clone());
                         }
-                        let mut ctx = builtins::BuiltinContext {
-                            heap,
-                        };
+                        let mut ctx = builtins::BuiltinContext { heap };
                         match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx) {
                             Ok(BuiltinResult::Push(v)) => {
                                 state.getprop_cache.invalidate_all();
@@ -1408,7 +1410,9 @@ pub fn interpret_program_with_heap_and_entry(
                                 }
                             }
                             Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
-                                if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                if let Err(()) =
+                                    resume_generator(heap, &mut state, gen_id, sent_value)
+                                {
                                     state.stack.push(Value::Undefined);
                                 }
                             }
@@ -1444,7 +1448,7 @@ pub fn interpret_program_with_heap_and_entry(
                             rethrow_after_finally: false,
                             new_object: Some(obj_id),
                             generator_id: None,
-                    is_async: false,
+                            is_async: false,
                         });
                     }
                     Value::Function(func_idx) => {
@@ -1465,7 +1469,7 @@ pub fn interpret_program_with_heap_and_entry(
                             rethrow_after_finally: false,
                             new_object: Some(obj_id),
                             generator_id: None,
-                    is_async: false,
+                            is_async: false,
                         });
                     }
                     Value::BoundFunction(target, _bound_this, bound_args) => {
@@ -1493,9 +1497,7 @@ pub fn interpret_program_with_heap_and_entry(
                             for a in &args {
                                 state.stack.push(a.clone());
                             }
-                            let mut ctx = builtins::BuiltinContext {
-                                heap,
-                            };
+                            let mut ctx = builtins::BuiltinContext { heap };
                             match execute_builtin(builtin_id, argc + 1, &mut state.stack, &mut ctx)
                             {
                                 Ok(BuiltinResult::Push(_)) => {
@@ -1526,7 +1528,9 @@ pub fn interpret_program_with_heap_and_entry(
                                     }
                                 }
                                 Ok(BuiltinResult::ResumeGenerator { gen_id, sent_value }) => {
-                                    if let Err(()) = resume_generator(heap, &mut state, gen_id, sent_value) {
+                                    if let Err(()) =
+                                        resume_generator(heap, &mut state, gen_id, sent_value)
+                                    {
                                         state.stack.push(Value::Undefined);
                                     }
                                 }
@@ -1706,9 +1710,13 @@ pub fn interpret_program_with_heap_and_entry(
                         gs.status = crate::runtime::GeneratorStatus::Suspended;
                     }
                     state.frames.truncate(frame_idx);
-                    state
-                        .stack
-                        .truncate(state.frames.last().map(|f| f.stack_base + f.num_locals).unwrap_or(0));
+                    state.stack.truncate(
+                        state
+                            .frames
+                            .last()
+                            .map(|f| f.stack_base + f.num_locals)
+                            .unwrap_or(0),
+                    );
                     state.stack.push(Value::Generator(gen_id));
                     continue;
                 }
@@ -1848,9 +1856,7 @@ fn handle_apply_invoke(
                 for a in &args {
                     state.stack.push(a.clone());
                 }
-                let mut ctx = builtins::BuiltinContext {
-                    heap,
-                };
+                let mut ctx = builtins::BuiltinContext { heap };
                 match execute_builtin(*builtin_id, args.len() + 1, &mut state.stack, &mut ctx) {
                     Ok(BuiltinResult::Push(v)) => {
                         state.getprop_cache.invalidate_all();
@@ -1889,7 +1895,14 @@ fn handle_apply_invoke(
                     .ok_or(VmError::InvalidConstIndex(*heap_idx))?
                     .clone();
                 if callee_chunk.is_generator {
-                    let gen_id = create_generator_state(heap, &callee_chunk, *heap_idx, true, &args, this_arg.clone());
+                    let gen_id = create_generator_state(
+                        heap,
+                        &callee_chunk,
+                        *heap_idx,
+                        true,
+                        &args,
+                        this_arg.clone(),
+                    );
                     state.stack.push(Value::Generator(gen_id));
                     return Ok(None);
                 }
@@ -1928,7 +1941,13 @@ fn handle_apply_invoke(
                     .ok_or(VmError::InvalidConstIndex(*func_idx))?;
 
                 if callee_chunk.is_generator {
-                    let gen_id = create_generator_state_static(heap, callee_chunk, *func_idx, &args, this_arg.clone());
+                    let gen_id = create_generator_state_static(
+                        heap,
+                        callee_chunk,
+                        *func_idx,
+                        &args,
+                        this_arg.clone(),
+                    );
                     state.stack.push(Value::Generator(gen_id));
                     return Ok(None);
                 }
@@ -1973,9 +1992,7 @@ fn handle_apply_invoke(
                 for v in &call_args {
                     state.stack.push(v.clone());
                 }
-                let mut ctx = builtins::BuiltinContext {
-                    heap,
-                };
+                let mut ctx = builtins::BuiltinContext { heap };
                 match execute_builtin(*builtin_id, call_args.len(), &mut state.stack, &mut ctx) {
                     Ok(BuiltinResult::Push(v)) => {
                         state.getprop_cache.invalidate_all();
@@ -2013,9 +2030,7 @@ fn handle_apply_invoke(
                     for a in &args {
                         state.stack.push(a.clone());
                     }
-                    let mut ctx = builtins::BuiltinContext {
-                        heap,
-                    };
+                    let mut ctx = builtins::BuiltinContext { heap };
                     match execute_builtin(builtin_id, args.len() + 1, &mut state.stack, &mut ctx) {
                         Ok(BuiltinResult::Push(v)) => {
                             state.getprop_cache.invalidate_all();
@@ -2141,7 +2156,8 @@ fn resume_generator(
             heap.set_prop(done_obj, "done", Value::Bool(true));
             return Ok(Some(Value::Object(done_obj)));
         }
-        crate::runtime::GeneratorStatus::NotStarted | crate::runtime::GeneratorStatus::Suspended => {
+        crate::runtime::GeneratorStatus::NotStarted
+        | crate::runtime::GeneratorStatus::Suspended => {
             let stack_base = state.stack.len();
             state.stack.extend(gs.locals.iter().cloned());
             state.stack.extend(gs.operand_stack.iter().cloned());
@@ -2441,5 +2457,4 @@ mod tests {
             err
         );
     }
-
 }

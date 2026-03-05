@@ -114,40 +114,36 @@ pub fn promise_then(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, B
         .unwrap_or(PromiseState::Pending);
 
     match state {
-        PromiseState::Fulfilled(val) => {
-            match on_fulfilled {
-                Value::Function(_) | Value::DynamicFunction(_) | Value::BoundFunction(_, _, _) => {
-                    let new_promise_id = ctx.heap.alloc_promise(PromiseState::Pending);
-                    Err(BuiltinError::Invoke {
-                        callee: on_fulfilled,
-                        this_arg: Value::Undefined,
-                        args: vec![val, Value::Int(new_promise_id as i32)],
-                        new_object: None,
-                    })
-                }
-                _ => {
-                    let new_id = ctx.heap.alloc_promise(PromiseState::Fulfilled(val));
-                    Ok(Value::Promise(new_id))
-                }
+        PromiseState::Fulfilled(val) => match on_fulfilled {
+            Value::Function(_) | Value::DynamicFunction(_) | Value::BoundFunction(_, _, _) => {
+                let new_promise_id = ctx.heap.alloc_promise(PromiseState::Pending);
+                Err(BuiltinError::Invoke {
+                    callee: on_fulfilled,
+                    this_arg: Value::Undefined,
+                    args: vec![val, Value::Int(new_promise_id as i32)],
+                    new_object: None,
+                })
             }
-        }
-        PromiseState::Rejected(err) => {
-            match on_rejected {
-                Value::Function(_) | Value::DynamicFunction(_) | Value::BoundFunction(_, _, _) => {
-                    let new_promise_id = ctx.heap.alloc_promise(PromiseState::Pending);
-                    Err(BuiltinError::Invoke {
-                        callee: on_rejected,
-                        this_arg: Value::Undefined,
-                        args: vec![err, Value::Int(new_promise_id as i32)],
-                        new_object: None,
-                    })
-                }
-                _ => {
-                    let new_id = ctx.heap.alloc_promise(PromiseState::Rejected(err));
-                    Ok(Value::Promise(new_id))
-                }
+            _ => {
+                let new_id = ctx.heap.alloc_promise(PromiseState::Fulfilled(val));
+                Ok(Value::Promise(new_id))
             }
-        }
+        },
+        PromiseState::Rejected(err) => match on_rejected {
+            Value::Function(_) | Value::DynamicFunction(_) | Value::BoundFunction(_, _, _) => {
+                let new_promise_id = ctx.heap.alloc_promise(PromiseState::Pending);
+                Err(BuiltinError::Invoke {
+                    callee: on_rejected,
+                    this_arg: Value::Undefined,
+                    args: vec![err, Value::Int(new_promise_id as i32)],
+                    new_object: None,
+                })
+            }
+            _ => {
+                let new_id = ctx.heap.alloc_promise(PromiseState::Rejected(err));
+                Ok(Value::Promise(new_id))
+            }
+        },
         PromiseState::Pending => {
             let new_id = ctx.heap.alloc_promise(PromiseState::Pending);
             if let Some(p) = ctx.heap.get_promise_mut(promise_id) {
@@ -228,9 +224,9 @@ pub fn promise_finally(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value
         }
         _ => {
             let new_id = match state {
-                PromiseState::Fulfilled(_) => {
-                    ctx.heap.alloc_promise(PromiseState::Fulfilled(original_val))
-                }
+                PromiseState::Fulfilled(_) => ctx
+                    .heap
+                    .alloc_promise(PromiseState::Fulfilled(original_val)),
                 PromiseState::Rejected(_) => {
                     ctx.heap.alloc_promise(PromiseState::Rejected(original_val))
                 }

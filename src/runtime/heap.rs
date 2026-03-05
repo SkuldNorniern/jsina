@@ -777,8 +777,16 @@ impl Heap {
         let promise_id = self.alloc_object();
         let promise_proto_id = self.alloc_object();
         self.set_prop(promise_id, "prototype", Value::Object(promise_proto_id));
-        self.set_prop(promise_id, "resolve", Value::Builtin(b("Promise", "resolve_static")));
-        self.set_prop(promise_id, "reject", Value::Builtin(b("Promise", "reject_static")));
+        self.set_prop(
+            promise_id,
+            "resolve",
+            Value::Builtin(b("Promise", "resolve_static")),
+        );
+        self.set_prop(
+            promise_id,
+            "reject",
+            Value::Builtin(b("Promise", "reject_static")),
+        );
         self.set_prop(promise_id, "all", Value::Builtin(b("Promise", "all")));
         self.set_prop(global_id, "Promise", Value::Object(promise_id));
         self.set_prop(global_id, "isNaN", Value::Builtin(b("Global", "isNaN")));

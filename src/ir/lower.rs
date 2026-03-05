@@ -346,9 +346,10 @@ fn collect_class_body_fes(
     span: Span,
     out: &mut Vec<(NodeId, FunctionExprData)>,
 ) {
-    let has_explicit_ctor = body.members.iter().any(|m| {
-        matches!(&m.key, ClassMemberKey::Ident(n) if n == "constructor") && !m.is_static
-    });
+    let has_explicit_ctor = body
+        .members
+        .iter()
+        .any(|m| matches!(&m.key, ClassMemberKey::Ident(n) if n == "constructor") && !m.is_static);
     if !has_explicit_ctor {
         // Synthetic default constructor uses a deterministic NodeId derived from the class id.
         // Bit 30 is set to distinguish from real AST NodeIds (which are assigned sequentially).
@@ -367,7 +368,10 @@ fn collect_class_body_fes(
             } else {
                 None
             },
-            body: ClassBody { span, members: vec![] },
+            body: ClassBody {
+                span,
+                members: vec![],
+            },
         };
         let default_ctor = make_default_ctor(&synthetic_ce, span);
         out.push((default_ctor.id, default_ctor));
@@ -493,15 +497,13 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
             body: top_level_init_stmts.iter().map(|s| (*s).clone()).collect(),
         };
         // Decl names shifted by decl_offset in init context.
-        let func_index_init: HashMap<String, u32> =
-            func_index.iter().map(|(k, v)| (k.clone(), v + decl_offset)).collect();
+        let func_index_init: HashMap<String, u32> = func_index
+            .iter()
+            .map(|(k, v)| (k.clone(), v + decl_offset))
+            .collect();
         // __init__ uses functions: None — FEs resolve via func_expr_map.
-        let (init_hir, _unused) = compile_init_block(
-            &init_body,
-            &func_index_init,
-            &func_expr_map,
-            decl_offset,
-        )?;
+        let (init_hir, _unused) =
+            compile_init_block(&init_body, &func_index_init, &func_expr_map, decl_offset)?;
         functions.push(init_hir);
         // Compile each init FE separately and append at indices 1..1+n_init_fes.
         for (_, fe) in &init_func_exprs {
@@ -1849,15 +1851,30 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
                 s
             });
             op(ctx, HirOp::Dup { span: c.span });
-            op(ctx, HirOp::StoreLocal { id: slot, span: c.span });
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: slot,
+                    span: c.span,
+                },
+            );
 
             // Also publish to globalThis so other functions can access the class by name.
             // SetProp needs [value, obj] with obj (globalThis) on top.
-            op(ctx, HirOp::LoadConst {
-                value: HirConst::Global("globalThis".to_string()),
-                span: c.span,
-            });
-            op(ctx, HirOp::SetProp { key: c.name.clone(), span: c.span });
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Global("globalThis".to_string()),
+                    span: c.span,
+                },
+            );
+            op(
+                ctx,
+                HirOp::SetProp {
+                    key: c.name.clone(),
+                    span: c.span,
+                },
+            );
             op(ctx, HirOp::Pop { span: c.span });
             return Ok(false);
         }
@@ -2403,7 +2420,13 @@ fn load_super(ctx: &mut LowerCtx<'_>, span: Span) {
     } else if let Some(slot) = get_or_alloc_capture_slot(ctx, "__super__") {
         op(ctx, HirOp::LoadLocal { id: slot, span });
     } else {
-        op(ctx, HirOp::LoadConst { value: HirConst::Undefined, span });
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::Undefined,
+                span,
+            },
+        );
     }
 }
 
@@ -2417,19 +2440,61 @@ fn compile_super_call(
     // We need: super as receiver, super.call as callee, then this + user args
     let super_slot = alloc_slot(ctx);
     load_super(ctx, span);
-    op(ctx, HirOp::StoreLocal { id: super_slot, span });
-    op(ctx, HirOp::LoadLocal { id: super_slot, span });
-    op(ctx, HirOp::GetProp { key: "call".to_string(), span });
+    op(
+        ctx,
+        HirOp::StoreLocal {
+            id: super_slot,
+            span,
+        },
+    );
+    op(
+        ctx,
+        HirOp::LoadLocal {
+            id: super_slot,
+            span,
+        },
+    );
+    op(
+        ctx,
+        HirOp::GetProp {
+            key: "call".to_string(),
+            span,
+        },
+    );
     let call_fn_slot = alloc_slot(ctx);
-    op(ctx, HirOp::StoreLocal { id: call_fn_slot, span });
+    op(
+        ctx,
+        HirOp::StoreLocal {
+            id: call_fn_slot,
+            span,
+        },
+    );
     // Stack for CallMethod: push receiver (super), then callee (super.call), then args
-    op(ctx, HirOp::LoadLocal { id: super_slot, span });
-    op(ctx, HirOp::LoadLocal { id: call_fn_slot, span });
+    op(
+        ctx,
+        HirOp::LoadLocal {
+            id: super_slot,
+            span,
+        },
+    );
+    op(
+        ctx,
+        HirOp::LoadLocal {
+            id: call_fn_slot,
+            span,
+        },
+    );
     op(ctx, HirOp::LoadThis { span });
     for arg in args {
         compile_call_arg(arg, ctx, span)?;
     }
-    op(ctx, HirOp::CallMethod { argc: 1 + args.len() as u32, span });
+    op(
+        ctx,
+        HirOp::CallMethod {
+            argc: 1 + args.len() as u32,
+            span,
+        },
+    );
     Ok(())
 }
 
@@ -2441,11 +2506,14 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
     let has_super = ce.superclass.is_some();
     if let Some(superclass_expr) = &ce.superclass {
         compile_expression(superclass_expr, ctx)?;
-        let s = *ctx.locals.entry("__super__".to_string()).or_insert_with(|| {
-            let idx = ctx.next_slot;
-            ctx.next_slot += 1;
-            idx
-        });
+        let s = *ctx
+            .locals
+            .entry("__super__".to_string())
+            .or_insert_with(|| {
+                let idx = ctx.next_slot;
+                ctx.next_slot += 1;
+                idx
+            });
         op(ctx, HirOp::StoreLocal { id: s, span });
     }
 
@@ -2470,9 +2538,21 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
     // Set the class name property: SetProp needs [value, obj] with obj on top.
     if let Some(name) = &ce.name {
         op(ctx, HirOp::Dup { span });
-        op(ctx, HirOp::LoadConst { value: HirConst::String(name.clone()), span });
+        op(
+            ctx,
+            HirOp::LoadConst {
+                value: HirConst::String(name.clone()),
+                span,
+            },
+        );
         op(ctx, HirOp::Swap { span });
-        op(ctx, HirOp::SetProp { key: "name".to_string(), span });
+        op(
+            ctx,
+            HirOp::SetProp {
+                key: "name".to_string(),
+                span,
+            },
+        );
         op(ctx, HirOp::Pop { span });
     }
     // Stack: [..., ctor_fn]
@@ -2480,7 +2560,13 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
     // Save ctor in a slot; original stays on stack as the final result of this expression.
     let ctor_slot = alloc_slot(ctx);
     op(ctx, HirOp::Dup { span });
-    op(ctx, HirOp::StoreLocal { id: ctor_slot, span });
+    op(
+        ctx,
+        HirOp::StoreLocal {
+            id: ctor_slot,
+            span,
+        },
+    );
     // Stack: [..., ctor_fn]
 
     // Create an explicit prototype object for the constructor so that:
@@ -2489,20 +2575,56 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
     let proto_slot = alloc_slot(ctx);
     op(ctx, HirOp::NewObject { span });
     op(ctx, HirOp::Dup { span });
-    op(ctx, HirOp::StoreLocal { id: proto_slot, span });
+    op(
+        ctx,
+        HirOp::StoreLocal {
+            id: proto_slot,
+            span,
+        },
+    );
     // Stack: [..., ctor_fn, proto_obj]
 
     // proto.constructor = ctor: SetProp needs [value, obj] with obj on top.
-    op(ctx, HirOp::LoadLocal { id: ctor_slot, span }); // value
-    op(ctx, HirOp::Swap { span });                     // proto_obj (obj) goes back to top
-    op(ctx, HirOp::SetProp { key: "constructor".to_string(), span });
+    op(
+        ctx,
+        HirOp::LoadLocal {
+            id: ctor_slot,
+            span,
+        },
+    ); // value
+    op(ctx, HirOp::Swap { span }); // proto_obj (obj) goes back to top
+    op(
+        ctx,
+        HirOp::SetProp {
+            key: "constructor".to_string(),
+            span,
+        },
+    );
     op(ctx, HirOp::Pop { span });
     // Stack: [..., ctor_fn]
 
     // ctor.prototype = proto: SetProp needs [value, obj] with obj on top.
-    op(ctx, HirOp::LoadLocal { id: proto_slot, span }); // value
-    op(ctx, HirOp::LoadLocal { id: ctor_slot, span });  // obj (ctor_fn) on top
-    op(ctx, HirOp::SetProp { key: "prototype".to_string(), span });
+    op(
+        ctx,
+        HirOp::LoadLocal {
+            id: proto_slot,
+            span,
+        },
+    ); // value
+    op(
+        ctx,
+        HirOp::LoadLocal {
+            id: ctor_slot,
+            span,
+        },
+    ); // obj (ctor_fn) on top
+    op(
+        ctx,
+        HirOp::SetProp {
+            key: "prototype".to_string(),
+            span,
+        },
+    );
     op(ctx, HirOp::Pop { span });
     // Stack: [..., ctor_fn]
 
@@ -2510,10 +2632,29 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
     // CallBuiltin(setPrototypeOf, 2) pops args: buf[1] = top (2nd arg), buf[0] = next (1st arg).
     if has_super {
         // Object.setPrototypeOf(proto, super.prototype) — makes instances inherit from super
-        op(ctx, HirOp::LoadLocal { id: proto_slot, span }); // arg0: proto
+        op(
+            ctx,
+            HirOp::LoadLocal {
+                id: proto_slot,
+                span,
+            },
+        ); // arg0: proto
         load_super(ctx, span);
-        op(ctx, HirOp::GetProp { key: "prototype".to_string(), span }); // arg1: super.prototype
-        op(ctx, HirOp::CallBuiltin { builtin: b("Object", "setPrototypeOf"), argc: 2, span });
+        op(
+            ctx,
+            HirOp::GetProp {
+                key: "prototype".to_string(),
+                span,
+            },
+        ); // arg1: super.prototype
+        op(
+            ctx,
+            HirOp::CallBuiltin {
+                builtin: b("Object", "setPrototypeOf"),
+                argc: 2,
+                span,
+            },
+        );
         op(ctx, HirOp::Pop { span });
     }
     // Stack: [..., ctor_fn]
@@ -2533,26 +2674,68 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
             ClassMemberKind::Method(fe) => {
                 compile_function_expr(fe, ctx)?;
                 let method_slot = alloc_slot(ctx);
-                op(ctx, HirOp::StoreLocal { id: method_slot, span });
+                op(
+                    ctx,
+                    HirOp::StoreLocal {
+                        id: method_slot,
+                        span,
+                    },
+                );
 
                 match &member.key {
                     ClassMemberKey::Ident(name) => {
                         // SetProp needs [value, obj] with obj on top.
-                        op(ctx, HirOp::LoadLocal { id: method_slot, span }); // value
+                        op(
+                            ctx,
+                            HirOp::LoadLocal {
+                                id: method_slot,
+                                span,
+                            },
+                        ); // value
                         if member.is_static {
-                            op(ctx, HirOp::LoadLocal { id: ctor_slot, span }); // obj on top
+                            op(
+                                ctx,
+                                HirOp::LoadLocal {
+                                    id: ctor_slot,
+                                    span,
+                                },
+                            ); // obj on top
                         } else {
-                            op(ctx, HirOp::LoadLocal { id: proto_slot, span }); // obj on top
+                            op(
+                                ctx,
+                                HirOp::LoadLocal {
+                                    id: proto_slot,
+                                    span,
+                                },
+                            ); // obj on top
                         }
-                        op(ctx, HirOp::SetProp { key: name.clone(), span });
+                        op(
+                            ctx,
+                            HirOp::SetProp {
+                                key: name.clone(),
+                                span,
+                            },
+                        );
                     }
                     ClassMemberKey::Computed(key_expr) => {
                         // SetPropDyn needs [obj, key, value] with value on top.
                         let obj_slot = alloc_slot(ctx);
                         if member.is_static {
-                            op(ctx, HirOp::LoadLocal { id: ctor_slot, span });
+                            op(
+                                ctx,
+                                HirOp::LoadLocal {
+                                    id: ctor_slot,
+                                    span,
+                                },
+                            );
                         } else {
-                            op(ctx, HirOp::LoadLocal { id: proto_slot, span });
+                            op(
+                                ctx,
+                                HirOp::LoadLocal {
+                                    id: proto_slot,
+                                    span,
+                                },
+                            );
                         }
                         op(ctx, HirOp::StoreLocal { id: obj_slot, span });
                         let key_slot = alloc_slot(ctx);
@@ -2560,7 +2743,13 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
                         op(ctx, HirOp::StoreLocal { id: key_slot, span });
                         op(ctx, HirOp::LoadLocal { id: obj_slot, span });
                         op(ctx, HirOp::LoadLocal { id: key_slot, span });
-                        op(ctx, HirOp::LoadLocal { id: method_slot, span });
+                        op(
+                            ctx,
+                            HirOp::LoadLocal {
+                                id: method_slot,
+                                span,
+                            },
+                        );
                         op(ctx, HirOp::SetPropDyn { span });
                     }
                 }
@@ -2570,43 +2759,122 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
                 let is_getter = matches!(&member.kind, ClassMemberKind::Get(_));
                 compile_function_expr(fe, ctx)?;
                 let accessor_slot = alloc_slot(ctx);
-                op(ctx, HirOp::StoreLocal { id: accessor_slot, span });
+                op(
+                    ctx,
+                    HirOp::StoreLocal {
+                        id: accessor_slot,
+                        span,
+                    },
+                );
 
                 // Build descriptor object: { get/set: fn, configurable: true }
                 op(ctx, HirOp::NewObject { span });
                 let desc_slot = alloc_slot(ctx);
-                op(ctx, HirOp::StoreLocal { id: desc_slot, span });
+                op(
+                    ctx,
+                    HirOp::StoreLocal {
+                        id: desc_slot,
+                        span,
+                    },
+                );
 
                 // desc.get/set = accessor: SetProp needs [value, obj] with obj on top.
                 let accessor_prop = if is_getter { "get" } else { "set" };
-                op(ctx, HirOp::LoadLocal { id: accessor_slot, span }); // value
-                op(ctx, HirOp::LoadLocal { id: desc_slot, span });     // obj on top
-                op(ctx, HirOp::SetProp { key: accessor_prop.to_string(), span });
+                op(
+                    ctx,
+                    HirOp::LoadLocal {
+                        id: accessor_slot,
+                        span,
+                    },
+                ); // value
+                op(
+                    ctx,
+                    HirOp::LoadLocal {
+                        id: desc_slot,
+                        span,
+                    },
+                ); // obj on top
+                op(
+                    ctx,
+                    HirOp::SetProp {
+                        key: accessor_prop.to_string(),
+                        span,
+                    },
+                );
                 op(ctx, HirOp::Pop { span });
 
                 // desc.configurable = true: SetProp needs [value, obj] with obj on top.
-                op(ctx, HirOp::LoadConst { value: HirConst::Bool(true), span }); // value
-                op(ctx, HirOp::LoadLocal { id: desc_slot, span });               // obj on top
-                op(ctx, HirOp::SetProp { key: "configurable".to_string(), span });
+                op(
+                    ctx,
+                    HirOp::LoadConst {
+                        value: HirConst::Bool(true),
+                        span,
+                    },
+                ); // value
+                op(
+                    ctx,
+                    HirOp::LoadLocal {
+                        id: desc_slot,
+                        span,
+                    },
+                ); // obj on top
+                op(
+                    ctx,
+                    HirOp::SetProp {
+                        key: "configurable".to_string(),
+                        span,
+                    },
+                );
                 op(ctx, HirOp::Pop { span });
 
                 // Object.defineProperty(target, key, desc)
                 // CallBuiltin(defineProperty, 3): args[0]=target, args[1]=key, args[2]=desc
                 if member.is_static {
-                    op(ctx, HirOp::LoadLocal { id: ctor_slot, span }); // arg0: target
+                    op(
+                        ctx,
+                        HirOp::LoadLocal {
+                            id: ctor_slot,
+                            span,
+                        },
+                    ); // arg0: target
                 } else {
-                    op(ctx, HirOp::LoadLocal { id: proto_slot, span }); // arg0: target
+                    op(
+                        ctx,
+                        HirOp::LoadLocal {
+                            id: proto_slot,
+                            span,
+                        },
+                    ); // arg0: target
                 }
                 match &member.key {
                     ClassMemberKey::Ident(name) => {
-                        op(ctx, HirOp::LoadConst { value: HirConst::String(name.clone()), span });
+                        op(
+                            ctx,
+                            HirOp::LoadConst {
+                                value: HirConst::String(name.clone()),
+                                span,
+                            },
+                        );
                     }
                     ClassMemberKey::Computed(key_expr) => {
                         compile_expression(key_expr, ctx)?;
                     }
                 }
-                op(ctx, HirOp::LoadLocal { id: desc_slot, span }); // arg2: desc
-                op(ctx, HirOp::CallBuiltin { builtin: b("Object", "defineProperty"), argc: 3, span });
+                op(
+                    ctx,
+                    HirOp::LoadLocal {
+                        id: desc_slot,
+                        span,
+                    },
+                ); // arg2: desc
+                op(
+                    ctx,
+                    HirOp::CallBuiltin {
+                        builtin: b("Object", "defineProperty"),
+                        argc: 3,
+                        span,
+                    },
+                );
                 op(ctx, HirOp::Pop { span });
             }
             ClassMemberKind::Field(init_expr) => {
@@ -2617,10 +2885,28 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
                             if let Some(init) = init_expr {
                                 compile_expression(init, ctx)?;
                             } else {
-                                op(ctx, HirOp::LoadConst { value: HirConst::Undefined, span });
+                                op(
+                                    ctx,
+                                    HirOp::LoadConst {
+                                        value: HirConst::Undefined,
+                                        span,
+                                    },
+                                );
                             }
-                            op(ctx, HirOp::LoadLocal { id: ctor_slot, span }); // obj on top
-                            op(ctx, HirOp::SetProp { key: name.clone(), span });
+                            op(
+                                ctx,
+                                HirOp::LoadLocal {
+                                    id: ctor_slot,
+                                    span,
+                                },
+                            ); // obj on top
+                            op(
+                                ctx,
+                                HirOp::SetProp {
+                                    key: name.clone(),
+                                    span,
+                                },
+                            );
                         }
                         ClassMemberKey::Computed(key_expr) => {
                             // SetPropDyn needs [obj, key, value] with value on top.
@@ -2628,15 +2914,39 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
                             if let Some(init) = init_expr {
                                 compile_expression(init, ctx)?;
                             } else {
-                                op(ctx, HirOp::LoadConst { value: HirConst::Undefined, span });
+                                op(
+                                    ctx,
+                                    HirOp::LoadConst {
+                                        value: HirConst::Undefined,
+                                        span,
+                                    },
+                                );
                             }
-                            op(ctx, HirOp::StoreLocal { id: value_slot, span });
+                            op(
+                                ctx,
+                                HirOp::StoreLocal {
+                                    id: value_slot,
+                                    span,
+                                },
+                            );
                             let key_slot = alloc_slot(ctx);
                             compile_expression(key_expr, ctx)?;
                             op(ctx, HirOp::StoreLocal { id: key_slot, span });
-                            op(ctx, HirOp::LoadLocal { id: ctor_slot, span });
+                            op(
+                                ctx,
+                                HirOp::LoadLocal {
+                                    id: ctor_slot,
+                                    span,
+                                },
+                            );
                             op(ctx, HirOp::LoadLocal { id: key_slot, span });
-                            op(ctx, HirOp::LoadLocal { id: value_slot, span });
+                            op(
+                                ctx,
+                                HirOp::LoadLocal {
+                                    id: value_slot,
+                                    span,
+                                },
+                            );
                             op(ctx, HirOp::SetPropDyn { span });
                         }
                     }
@@ -3115,7 +3425,7 @@ fn compile_assign_to_lhs(
 }
 
 fn expr_to_binding_for_assign(expr: &Expression) -> Option<Binding> {
-    use crate::frontend::ast::{ObjectPatternTarget, ObjectPatternProp, ArrayPatternElem};
+    use crate::frontend::ast::{ArrayPatternElem, ObjectPatternProp, ObjectPatternTarget};
     match expr {
         Expression::ObjectLiteral(obj) => {
             let mut props = Vec::new();
@@ -3128,15 +3438,18 @@ fn expr_to_binding_for_assign(expr: &Expression) -> Option<Binding> {
                     ObjectPropertyKey::Computed(_) => return None,
                 };
                 let (target, shorthand) = match &p.value {
-                    Expression::Identifier(id) => {
-                        (ObjectPatternTarget::Ident(id.name.clone()), key_str == id.name)
-                    }
+                    Expression::Identifier(id) => (
+                        ObjectPatternTarget::Ident(id.name.clone()),
+                        key_str == id.name,
+                    ),
                     Expression::ObjectLiteral(inner) => {
-                        let b = expr_to_binding_for_assign(&Expression::ObjectLiteral(inner.clone()))?;
+                        let b =
+                            expr_to_binding_for_assign(&Expression::ObjectLiteral(inner.clone()))?;
                         (ObjectPatternTarget::Pattern(Box::new(b)), false)
                     }
                     Expression::ArrayLiteral(inner) => {
-                        let b = expr_to_binding_for_assign(&Expression::ArrayLiteral(inner.clone()))?;
+                        let b =
+                            expr_to_binding_for_assign(&Expression::ArrayLiteral(inner.clone()))?;
                         (ObjectPatternTarget::Pattern(Box::new(b)), false)
                     }
                     _ => return None,
@@ -3161,7 +3474,8 @@ fn expr_to_binding_for_assign(expr: &Expression) -> Option<Binding> {
                             rest: false,
                         });
                     }
-                    ArrayElement::Expr(Expression::ObjectLiteral(_)) | ArrayElement::Expr(Expression::ArrayLiteral(_)) => {
+                    ArrayElement::Expr(Expression::ObjectLiteral(_))
+                    | ArrayElement::Expr(Expression::ArrayLiteral(_)) => {
                         return None;
                     }
                     ArrayElement::Hole => {
@@ -3239,7 +3553,13 @@ fn emit_hof_increment(
     span: Span,
 ) {
     op(ctx, HirOp::LoadLocal { id: i_slot, span });
-    op(ctx, HirOp::LoadConst { value: HirConst::Int(1), span });
+    op(
+        ctx,
+        HirOp::LoadConst {
+            value: HirConst::Int(1),
+            span,
+        },
+    );
     if decrement {
         op(ctx, HirOp::Sub { span });
     } else {
@@ -3514,7 +3834,13 @@ fn compile_array_hof(
         }
         HofKind::Find | HofKind::FindLast => {
             let found_slot = alloc_slot(ctx);
-            op(ctx, HirOp::StoreLocal { id: found_slot, span });
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: found_slot,
+                    span,
+                },
+            );
             let early_exit_id = new_block(ctx, span);
             let keep_looking_id = new_block(ctx, span);
             let join_id = new_block(ctx, span);
@@ -3527,19 +3853,37 @@ fn compile_array_hof(
                 },
             );
             ctx.current_block = early_exit_id as usize;
-            op(ctx, HirOp::LoadLocal { id: elem_slot, span });
+            op(
+                ctx,
+                HirOp::LoadLocal {
+                    id: elem_slot,
+                    span,
+                },
+            );
             set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = keep_looking_id as usize;
             emit_hof_increment(ctx, i_slot, is_from_right, header_id, span);
             ctx.current_block = exit_id as usize;
-            op(ctx, HirOp::LoadConst { value: HirConst::Undefined, span });
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Undefined,
+                    span,
+                },
+            );
             set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = join_id as usize;
             return Ok(());
         }
         HofKind::FindIndex | HofKind::FindLastIndex => {
             let found_slot = alloc_slot(ctx);
-            op(ctx, HirOp::StoreLocal { id: found_slot, span });
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: found_slot,
+                    span,
+                },
+            );
             let early_exit_id = new_block(ctx, span);
             let keep_looking_id = new_block(ctx, span);
             let join_id = new_block(ctx, span);
@@ -3557,14 +3901,26 @@ fn compile_array_hof(
             ctx.current_block = keep_looking_id as usize;
             emit_hof_increment(ctx, i_slot, is_from_right, header_id, span);
             ctx.current_block = exit_id as usize;
-            op(ctx, HirOp::LoadConst { value: HirConst::Int(-1), span });
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Int(-1),
+                    span,
+                },
+            );
             set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = join_id as usize;
             return Ok(());
         }
         HofKind::Some => {
             let found_slot = alloc_slot(ctx);
-            op(ctx, HirOp::StoreLocal { id: found_slot, span });
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: found_slot,
+                    span,
+                },
+            );
             let early_exit_id = new_block(ctx, span);
             let keep_looking_id = new_block(ctx, span);
             let join_id = new_block(ctx, span);
@@ -3577,19 +3933,37 @@ fn compile_array_hof(
                 },
             );
             ctx.current_block = early_exit_id as usize;
-            op(ctx, HirOp::LoadConst { value: HirConst::Bool(true), span });
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Bool(true),
+                    span,
+                },
+            );
             set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = keep_looking_id as usize;
             emit_hof_increment(ctx, i_slot, false, header_id, span);
             ctx.current_block = exit_id as usize;
-            op(ctx, HirOp::LoadConst { value: HirConst::Bool(false), span });
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Bool(false),
+                    span,
+                },
+            );
             set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = join_id as usize;
             return Ok(());
         }
         HofKind::Every => {
             let pass_slot = alloc_slot(ctx);
-            op(ctx, HirOp::StoreLocal { id: pass_slot, span });
+            op(
+                ctx,
+                HirOp::StoreLocal {
+                    id: pass_slot,
+                    span,
+                },
+            );
             let continue_id = new_block(ctx, span);
             let early_fail_id = new_block(ctx, span);
             let join_id = new_block(ctx, span);
@@ -3602,12 +3976,24 @@ fn compile_array_hof(
                 },
             );
             ctx.current_block = early_fail_id as usize;
-            op(ctx, HirOp::LoadConst { value: HirConst::Bool(false), span });
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Bool(false),
+                    span,
+                },
+            );
             set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = continue_id as usize;
             emit_hof_increment(ctx, i_slot, false, header_id, span);
             ctx.current_block = exit_id as usize;
-            op(ctx, HirOp::LoadConst { value: HirConst::Bool(true), span });
+            op(
+                ctx,
+                HirOp::LoadConst {
+                    value: HirConst::Bool(true),
+                    span,
+                },
+            );
             set_term(ctx, HirTerminator::Jump { target: join_id });
             ctx.current_block = join_id as usize;
             return Ok(());
@@ -4475,10 +4861,22 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 let super_span = m.object.span();
                 op(ctx, HirOp::LoadThis { span: e.span });
                 load_super(ctx, super_span);
-                op(ctx, HirOp::GetProp { key: "prototype".to_string(), span: super_span });
+                op(
+                    ctx,
+                    HirOp::GetProp {
+                        key: "prototype".to_string(),
+                        span: super_span,
+                    },
+                );
                 match &m.property {
                     MemberProperty::Identifier(name) => {
-                        op(ctx, HirOp::GetProp { key: name.clone(), span: e.span });
+                        op(
+                            ctx,
+                            HirOp::GetProp {
+                                key: name.clone(),
+                                span: e.span,
+                            },
+                        );
                     }
                     MemberProperty::Expression(key_expr) => {
                         op(ctx, HirOp::Dup { span: e.span });
@@ -4489,7 +4887,13 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 for arg in &e.args {
                     compile_call_arg(arg, ctx, e.span)?;
                 }
-                op(ctx, HirOp::CallMethod { argc: e.args.len() as u32, span: e.span });
+                op(
+                    ctx,
+                    HirOp::CallMethod {
+                        argc: e.args.len() as u32,
+                        span: e.span,
+                    },
+                );
             }
             Expression::Member(m) => {
                 if let MemberProperty::Expression(key_expr) = &m.property {
@@ -6154,14 +6558,28 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                 }
             }
         }
-        Expression::Member(e) if matches!(e.object.as_ref(), Expression::Super(_)) && !e.optional => {
+        Expression::Member(e)
+            if matches!(e.object.as_ref(), Expression::Super(_)) && !e.optional =>
+        {
             // super.prop → SuperClass.prototype.prop
             let super_span = e.object.span();
             load_super(ctx, super_span);
-            op(ctx, HirOp::GetProp { key: "prototype".to_string(), span: super_span });
+            op(
+                ctx,
+                HirOp::GetProp {
+                    key: "prototype".to_string(),
+                    span: super_span,
+                },
+            );
             match &e.property {
                 MemberProperty::Identifier(name) => {
-                    op(ctx, HirOp::GetProp { key: name.clone(), span: e.span });
+                    op(
+                        ctx,
+                        HirOp::GetProp {
+                            key: name.clone(),
+                            span: e.span,
+                        },
+                    );
                 }
                 MemberProperty::Expression(key_expr) => {
                     op(ctx, HirOp::Dup { span: e.span });

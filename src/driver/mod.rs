@@ -84,7 +84,10 @@ impl Driver {
     pub fn bc(source: &str) -> Result<String, DriverError> {
         let script = Self::ast(source)?;
         let funcs = script_to_hir(&script)?;
-        let chunks: Vec<_> = funcs.iter().map(|f| (f.name.clone(), hir_to_bytecode(f))).collect();
+        let chunks: Vec<_> = funcs
+            .iter()
+            .map(|f| (f.name.clone(), hir_to_bytecode(f)))
+            .collect();
         let mut out = String::new();
         for (i, (name, cf)) in chunks.iter().enumerate() {
             let label = name.as_deref().unwrap_or("<anonymous>");

@@ -1,4 +1,4 @@
-use super::{error, BuiltinContext, BuiltinError};
+use super::{BuiltinContext, BuiltinError, error};
 use crate::runtime::Value;
 
 pub fn parse(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
@@ -22,7 +22,9 @@ pub fn stringify(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Buil
         Ok(Some(s)) => Ok(Value::String(s)),
         Ok(None) => Ok(Value::Undefined),
         Err(e) if e.circular => Err(BuiltinError::Throw(error::type_error(
-            &[Value::String("Converting circular structure to JSON".to_string())],
+            &[Value::String(
+                "Converting circular structure to JSON".to_string(),
+            )],
             ctx.heap,
         ))),
         Err(_) => Ok(Value::Undefined),
