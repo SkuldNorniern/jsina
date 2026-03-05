@@ -4,7 +4,5 @@
 use crate::runtime::Value;
 
 pub fn create(args: &[Value], _heap: &mut crate::runtime::Heap) -> Value {
-    args.first()
-        .cloned()
-        .unwrap_or(Value::Null)
+    args.first().cloned().unwrap_or(Value::Null)
 }

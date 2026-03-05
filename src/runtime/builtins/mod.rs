@@ -5,6 +5,7 @@
 
 mod array;
 mod boolean;
+mod compat;
 mod date;
 mod dollar262;
 mod encode;
@@ -21,6 +22,7 @@ mod math;
 mod number;
 mod object;
 mod promise;
+mod proxy;
 mod reflect;
 mod regex_engine;
 mod regexp;
@@ -30,8 +32,6 @@ mod symbol;
 mod timeout;
 mod typed_array;
 mod weakmap;
-mod proxy;
-mod compat;
 
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -695,6 +695,11 @@ const BUILTINS: &[BuiltinDef] = &[
     },
     BuiltinDef {
         category: "String",
+        name: "matchAll",
+        entry: BuiltinEntry::Throwing(string::match_all_throwing),
+    },
+    BuiltinDef {
+        category: "String",
         name: "search",
         entry: BuiltinEntry::Throwing(string::search_throwing),
     },
@@ -981,17 +986,22 @@ const BUILTINS: &[BuiltinDef] = &[
     },
     BuiltinDef {
         category: "String",
+        name: "substring",
+        entry: BuiltinEntry::Normal(string::substring),
+    },
+    BuiltinDef {
+        category: "String",
         name: "substr",
         entry: BuiltinEntry::Normal(string::substr),
     },
     BuiltinDef {
         category: "String",
-        name: "trimLeft",
+        name: "trimStart",
         entry: BuiltinEntry::Normal(string::trim_left),
     },
     BuiltinDef {
         category: "String",
-        name: "trimRight",
+        name: "trimEnd",
         entry: BuiltinEntry::Normal(string::trim_right),
     },
     // Date 0..4
@@ -1373,9 +1383,10 @@ pub fn length(id: u8) -> i32 {
             | ("String", "fontsize")
             | ("String", "link")
             | ("String", "match")
+            | ("String", "matchAll")
             | ("String", "search") => 1,
             ("String", "replace") | ("String", "replaceAll") => 2,
-            ("String", "substr") => 2,
+            ("String", "substr") | ("String", "substring") => 2,
             ("Date", "setYear") => 1,
             ("Array", "includes") | ("Array", "indexOf") | ("Array", "lastIndexOf") => 1,
             ("RegExp", "compile") => 2,

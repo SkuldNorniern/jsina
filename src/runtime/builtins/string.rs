@@ -1,4 +1,4 @@
-use super::{regex_engine, BuiltinContext, BuiltinError, to_number, to_prop_key};
+use super::{BuiltinContext, BuiltinError, regex_engine, to_number, to_prop_key};
 use crate::runtime::{Heap, Value};
 
 fn html_escape(s: &str) -> String {
@@ -210,6 +210,31 @@ pub fn match_throwing(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value,
     Ok(match_impl(&receiver, regexp_val, ctx.heap))
 }
 
+pub fn match_all_throwing(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
+    let receiver = args.first().cloned().unwrap_or(Value::Undefined);
+    let regexp_val = args.get(1);
+    if let Some(Value::Object(reg_id)) = regexp_val {
+        let matcher = ctx.heap.get_prop(*reg_id, "Symbol.matchAll");
+        let callable = matches!(
+            matcher,
+            Value::Function(_)
+                | Value::DynamicFunction(_)
+                | Value::Builtin(_)
+                | Value::BoundBuiltin(_, _, _)
+                | Value::BoundFunction(_, _, _)
+        );
+        if !matches!(matcher, Value::Undefined) && callable {
+            return Err(BuiltinError::Invoke {
+                callee: matcher,
+                this_arg: Value::Object(*reg_id),
+                args: vec![receiver],
+                new_object: None,
+            });
+        }
+    }
+    Ok(match_impl(&receiver, regexp_val, ctx.heap))
+}
+
 fn search_impl(receiver: &Value, regexp: Option<&Value>, heap: &mut Heap) -> Value {
     let result = match_impl(receiver, regexp, heap);
     match result {
@@ -323,7 +348,10 @@ fn replace_all_impl(
     }
 }
 
-pub fn replace_all_throwing(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
+pub fn replace_all_throwing(
+    args: &[Value],
+    ctx: &mut BuiltinContext,
+) -> Result<Value, BuiltinError> {
     let receiver = args.first().cloned().unwrap_or(Value::Undefined);
     let search_val = args.get(1);
     let replace_val = args.get(2).cloned();
@@ -625,6 +653,50 @@ pub fn substr(args: &[Value], _heap: &mut Heap) -> Value {
         .unwrap_or(len_i);
     let take_count = (count as usize).min(chars.len().saturating_sub(from));
     let result: String = chars.into_iter().skip(from).take(take_count).collect();
+    Value::String(result)
+}
+
+pub fn substring(args: &[Value], _heap: &mut Heap) -> Value {
+    let string_value = match args.first() {
+        Some(Value::String(value)) => value.clone(),
+        Some(value) => value.to_string(),
+        None => String::new(),
+    };
+    let chars: Vec<char> = string_value.chars().collect();
+    let string_length = chars.len() as i32;
+
+    let start_number = args.get(1).map(to_number).unwrap_or(0.0);
+    let end_number = args.get(2).map(to_number);
+
+    let start_index = if start_number.is_nan() || start_number.is_infinite() {
+        0
+    } else {
+        start_number as i32
+    }
+    .clamp(0, string_length);
+
+    let end_index = end_number
+        .map(|number| {
+            if number.is_nan() || number.is_infinite() {
+                0
+            } else {
+                number as i32
+            }
+            .clamp(0, string_length)
+        })
+        .unwrap_or(string_length);
+
+    let (from_index, to_index) = if start_index <= end_index {
+        (start_index, end_index)
+    } else {
+        (end_index, start_index)
+    };
+
+    let result: String = chars
+        .into_iter()
+        .skip(from_index as usize)
+        .take((to_index - from_index) as usize)
+        .collect();
     Value::String(result)
 }
 

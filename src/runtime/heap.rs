@@ -358,6 +358,11 @@ impl Heap {
         self.set_prop(str_proto_id, "match", Value::Builtin(b("String", "match")));
         self.set_prop(
             str_proto_id,
+            "matchAll",
+            Value::Builtin(b("String", "matchAll")),
+        );
+        self.set_prop(
+            str_proto_id,
             "search",
             Value::Builtin(b("String", "search")),
         );
@@ -462,6 +467,11 @@ impl Heap {
         self.set_prop(str_proto_id, "sub", Value::Builtin(b("String", "sub")));
         self.set_prop(
             str_proto_id,
+            "substring",
+            Value::Builtin(b("String", "substring")),
+        );
+        self.set_prop(
+            str_proto_id,
             "substr",
             Value::Builtin(b("String", "substr")),
         );
@@ -469,22 +479,22 @@ impl Heap {
         self.set_prop(
             str_proto_id,
             "trimLeft",
-            Value::Builtin(b("String", "trimLeft")),
+            Value::Builtin(b("String", "trimStart")),
         );
         self.set_prop(
             str_proto_id,
             "trimStart",
-            Value::Builtin(b("String", "trimLeft")),
+            Value::Builtin(b("String", "trimStart")),
         );
         self.set_prop(
             str_proto_id,
             "trimRight",
-            Value::Builtin(b("String", "trimRight")),
+            Value::Builtin(b("String", "trimEnd")),
         );
         self.set_prop(
             str_proto_id,
             "trimEnd",
-            Value::Builtin(b("String", "trimRight")),
+            Value::Builtin(b("String", "trimEnd")),
         );
         let str_id = self.alloc_object();
         self.set_prop(str_id, "prototype", Value::Object(str_proto_id));
@@ -860,7 +870,11 @@ impl Heap {
         self.set_prop(global_id, "module", Value::Object(module_id));
         self.set_prop(global_id, "exports", Value::Object(exports_id));
         self.set_prop(global_id, "__dirname", Value::String(".".to_string()));
-        self.set_prop(global_id, "__filename", Value::String("script.js".to_string()));
+        self.set_prop(
+            global_id,
+            "__filename",
+            Value::String("script.js".to_string()),
+        );
     }
 
     /// Add $262 host object for test262 harness. Match V8/Bun/Deno: $262 only exists when running via test262.

@@ -5,13 +5,13 @@ use crate::runtime::builtins;
 use crate::runtime::{Heap, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::calls::{execute_builtin, pop_args, read_i16, read_u16, read_u8, setup_callee_locals};
+use super::calls::{execute_builtin, pop_args, read_i16, read_u8, read_u16, setup_callee_locals};
 use super::ops::{
     add_values, div_values, gt_values, gte_values, in_check, instanceof_check, is_nullish,
     is_truthy, loose_eq, lt_values, lte_values, mod_values, mul_values, pow_values, strict_eq,
     sub_values, value_to_prop_key, value_to_prop_key_with_heap,
 };
-use super::props::{resolve_get_prop, GetPropCache};
+use super::props::{GetPropCache, resolve_get_prop};
 use super::tiering::{JitTiering, JitTieringStats};
 use super::types::{BuiltinResult, Completion, Program, VmError};
 
@@ -2449,6 +2449,15 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 7);
+    }
+
+    #[test]
+    fn interpret_constructor_argument_sets_instance_property() {
+        let result = crate::driver::Driver::run_to_string(
+            "function main() { function C(message) { this.message = message; } var o = new C('x'); return o.message; }",
+        )
+        .expect("run");
+        assert_eq!(result, "x");
     }
 
     #[test]

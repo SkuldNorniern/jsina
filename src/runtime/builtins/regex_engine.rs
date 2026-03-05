@@ -38,11 +38,7 @@ fn matches_escape(c: char, next: char, case_insensitive: bool) -> bool {
 }
 
 fn matches_dot(c: char, dot_all: bool) -> bool {
-    if c == '\n' {
-        dot_all
-    } else {
-        true
-    }
+    if c == '\n' { dot_all } else { true }
 }
 
 fn is_quantifier(c: u8) -> bool {
@@ -82,7 +78,11 @@ fn parse_char_class(pattern: &[u8], i: &mut usize, _negated: bool) -> Option<Vec
             continue;
         }
         *i += 1;
-        if *i < pattern.len() && pattern[*i] == b'-' && *i + 1 < pattern.len() && pattern[*i + 1] != b']' {
+        if *i < pattern.len()
+            && pattern[*i] == b'-'
+            && *i + 1 < pattern.len()
+            && pattern[*i + 1] != b']'
+        {
             let end = pattern[*i + 1];
             *i += 2;
             ranges.push((c, end));
@@ -104,11 +104,7 @@ fn in_char_class(c: u8, ranges: &[(u8, u8)], negated: bool) -> bool {
             break;
         }
     }
-    if negated {
-        !found
-    } else {
-        found
-    }
+    if negated { !found } else { found }
 }
 
 fn char_in_class(c: char, ranges: &[(u8, u8)], negated: bool) -> bool {

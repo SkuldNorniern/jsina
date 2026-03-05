@@ -132,7 +132,14 @@ impl Driver {
     ) -> Result<i64, DriverError> {
         with_host(host, || {
             Self::run_with_host_and_limit_inner(
-                source, trace, None, enable_jit, true, false, false, compat_mode,
+                source,
+                trace,
+                None,
+                enable_jit,
+                true,
+                false,
+                false,
+                compat_mode,
             )
             .map(|v| v.to_i64())
         })
@@ -194,7 +201,14 @@ impl Driver {
         compat_mode: bool,
     ) -> Result<i64, DriverError> {
         Self::run_with_host_and_limit_inner(
-            source, trace, None, enable_jit, false, false, false, compat_mode,
+            source,
+            trace,
+            None,
+            enable_jit,
+            false,
+            false,
+            false,
+            compat_mode,
         )
         .map(|v| v.to_i64())
     }
@@ -202,8 +216,10 @@ impl Driver {
     pub fn run_to_string(source: &str) -> Result<String, DriverError> {
         let host = CliHost;
         with_host(&host, || {
-            Self::run_with_host_and_limit_inner(source, false, None, false, false, false, false, false)
-                .map(|v| format!("{}", v))
+            Self::run_with_host_and_limit_inner(
+                source, false, None, false, false, false, false, false,
+            )
+            .map(|v| format!("{}", v))
         })
     }
 

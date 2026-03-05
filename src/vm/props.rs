@@ -226,6 +226,7 @@ pub(crate) fn primitive_string_method(key: &str) -> Value {
         "lastIndexOf" => Value::Builtin(b("Array", "lastIndexOf")),
         "split" => Value::Builtin(b("String", "split")),
         "match" => Value::Builtin(b("String", "match")),
+        "matchAll" => Value::Builtin(b("String", "matchAll")),
         "search" => Value::Builtin(b("String", "search")),
         "replace" => Value::Builtin(b("String", "replace")),
         "replaceAll" => Value::Builtin(b("String", "replaceAll")),
@@ -251,9 +252,10 @@ pub(crate) fn primitive_string_method(key: &str) -> Value {
         "strike" => Value::Builtin(b("String", "strike")),
         "sub" => Value::Builtin(b("String", "sub")),
         "sup" => Value::Builtin(b("String", "sup")),
+        "substring" => Value::Builtin(b("String", "substring")),
         "substr" => Value::Builtin(b("String", "substr")),
-        "trimLeft" | "trimStart" => Value::Builtin(b("String", "trimLeft")),
-        "trimRight" | "trimEnd" => Value::Builtin(b("String", "trimRight")),
+        "trimLeft" | "trimStart" => Value::Builtin(b("String", "trimStart")),
+        "trimRight" | "trimEnd" => Value::Builtin(b("String", "trimEnd")),
         _ => Value::Undefined,
     }
 }

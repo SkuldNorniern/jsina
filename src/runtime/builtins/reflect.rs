@@ -213,7 +213,10 @@ pub fn reflect_construct(args: &[Value], ctx: &mut BuiltinContext) -> Result<Val
     }
 }
 
-pub fn reflect_define_property(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
+pub fn reflect_define_property(
+    args: &[Value],
+    ctx: &mut BuiltinContext,
+) -> Result<Value, BuiltinError> {
     let a = reflect_args(args, 3);
     if a.len() < 3 {
         return Err(BuiltinError::Throw(error::type_error(
@@ -231,7 +234,9 @@ pub fn reflect_has(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Bu
     let a = reflect_args(args, 2);
     if a.len() < 2 {
         return Err(BuiltinError::Throw(error::type_error(
-            &[Value::String("Reflect.has requires 2 arguments".to_string())],
+            &[Value::String(
+                "Reflect.has requires 2 arguments".to_string(),
+            )],
             ctx.heap,
         )));
     }
@@ -239,7 +244,10 @@ pub fn reflect_has(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Bu
     Ok(result)
 }
 
-pub fn reflect_delete_property(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
+pub fn reflect_delete_property(
+    args: &[Value],
+    ctx: &mut BuiltinContext,
+) -> Result<Value, BuiltinError> {
     let a = reflect_args(args, 2);
     if a.len() < 2 {
         return Err(BuiltinError::Throw(error::type_error(

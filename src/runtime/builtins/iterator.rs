@@ -8,8 +8,10 @@ fn make_map_iterator(ctx: &mut BuiltinContext, map_id: usize, mode: i32) -> Valu
         ctx.heap.array_push(keys_arr, Value::String(k.clone()));
     }
     let iter_obj = ctx.heap.alloc_object();
-    ctx.heap.set_prop(iter_obj, "__iter_map", Value::Map(map_id));
-    ctx.heap.set_prop(iter_obj, "__iter_keys", Value::Array(keys_arr));
+    ctx.heap
+        .set_prop(iter_obj, "__iter_map", Value::Map(map_id));
+    ctx.heap
+        .set_prop(iter_obj, "__iter_keys", Value::Array(keys_arr));
     ctx.heap.set_prop(iter_obj, "__iter_idx", Value::Int(0));
     ctx.heap.set_prop(iter_obj, "__iter_mode", Value::Int(mode));
     let next_id = super::resolve("Iterator", "mapNext").unwrap();
@@ -28,10 +30,13 @@ fn make_set_iterator_with_mode(ctx: &mut BuiltinContext, set_id: usize, entries:
         ctx.heap.array_push(keys_arr, Value::String(k.clone()));
     }
     let iter_obj = ctx.heap.alloc_object();
-    ctx.heap.set_prop(iter_obj, "__iter_set", Value::Set(set_id));
-    ctx.heap.set_prop(iter_obj, "__iter_keys", Value::Array(keys_arr));
+    ctx.heap
+        .set_prop(iter_obj, "__iter_set", Value::Set(set_id));
+    ctx.heap
+        .set_prop(iter_obj, "__iter_keys", Value::Array(keys_arr));
     ctx.heap.set_prop(iter_obj, "__iter_idx", Value::Int(0));
-    ctx.heap.set_prop(iter_obj, "__iter_entries", Value::Bool(entries));
+    ctx.heap
+        .set_prop(iter_obj, "__iter_entries", Value::Bool(entries));
     let next_id = super::resolve("Iterator", "setNext").unwrap();
     ctx.heap.set_prop(
         iter_obj,
@@ -144,12 +149,13 @@ pub fn get_iterator(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, B
             let keys: Vec<String> = ctx.heap.map_keys(map_id);
             let keys_arr = ctx.heap.alloc_array();
             for k in &keys {
-                ctx.heap
-                    .array_push(keys_arr, Value::String(k.clone()));
+                ctx.heap.array_push(keys_arr, Value::String(k.clone()));
             }
             let iter_obj = ctx.heap.alloc_object();
-            ctx.heap.set_prop(iter_obj, "__iter_map", Value::Map(map_id));
-            ctx.heap.set_prop(iter_obj, "__iter_keys", Value::Array(keys_arr));
+            ctx.heap
+                .set_prop(iter_obj, "__iter_map", Value::Map(map_id));
+            ctx.heap
+                .set_prop(iter_obj, "__iter_keys", Value::Array(keys_arr));
             ctx.heap.set_prop(iter_obj, "__iter_idx", Value::Int(0));
             ctx.heap.set_prop(iter_obj, "__iter_mode", Value::Int(0)); // 0=entries
             let next_id = super::resolve("Iterator", "mapNext").unwrap();
@@ -164,12 +170,13 @@ pub fn get_iterator(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, B
             let keys: Vec<String> = ctx.heap.set_keys(set_id);
             let keys_arr = ctx.heap.alloc_array();
             for k in &keys {
-                ctx.heap
-                    .array_push(keys_arr, Value::String(k.clone()));
+                ctx.heap.array_push(keys_arr, Value::String(k.clone()));
             }
             let iter_obj = ctx.heap.alloc_object();
-            ctx.heap.set_prop(iter_obj, "__iter_set", Value::Set(set_id));
-            ctx.heap.set_prop(iter_obj, "__iter_keys", Value::Array(keys_arr));
+            ctx.heap
+                .set_prop(iter_obj, "__iter_set", Value::Set(set_id));
+            ctx.heap
+                .set_prop(iter_obj, "__iter_keys", Value::Array(keys_arr));
             ctx.heap.set_prop(iter_obj, "__iter_idx", Value::Int(0));
             let next_id = super::resolve("Iterator", "setNext").unwrap();
             ctx.heap.set_prop(
@@ -272,9 +279,11 @@ pub fn map_next(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, Built
     if idx < len {
         let key_str = match ctx.heap.get_array_prop(keys_arr, &idx.to_string()) {
             Value::String(s) => s,
-            _ => return Err(BuiltinError::Throw(Value::String(
-                "TypeError: bad map iterator key".to_string(),
-            ))),
+            _ => {
+                return Err(BuiltinError::Throw(Value::String(
+                    "TypeError: bad map iterator key".to_string(),
+                )));
+            }
         };
         let val = ctx.heap.map_get(map_id, &key_str);
         let value = match mode {

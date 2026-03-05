@@ -563,7 +563,6 @@ fn compile_init_block(
         locals: HashMap::new(),
         next_slot: 0,
         return_span: span,
-        throw_span: None,
         func_index,
         block_func_index: None,
         func_expr_map,
@@ -603,7 +602,6 @@ struct LowerCtx<'a> {
     locals: HashMap<String, u32>,
     next_slot: u32,
     return_span: Span,
-    throw_span: Option<Span>,
     func_index: &'a HashMap<String, u32>,
     block_func_index: Option<HashMap<String, u32>>,
     func_expr_map: &'a HashMap<NodeId, u32>,
@@ -653,12 +651,12 @@ fn loop_stack_pop(ctx: &mut LowerCtx<'_>) {
 }
 
 fn terminator_for_exit(ctx: &LowerCtx<'_>) -> HirTerminator {
-    if let Some(span) = ctx.throw_span {
-        HirTerminator::Throw { span }
-    } else {
-        HirTerminator::Return {
+    match &ctx.blocks[ctx.current_block].terminator {
+        HirTerminator::Throw { span } => HirTerminator::Throw { span: *span },
+        HirTerminator::Return { span } => HirTerminator::Return { span: *span },
+        _ => HirTerminator::Return {
             span: ctx.return_span,
-        }
+        },
     }
 }
 
@@ -1300,7 +1298,6 @@ fn compile_function(
         locals: HashMap::new(),
         next_slot: 0,
         return_span: span,
-        throw_span: None,
         func_index,
         block_func_index: None,
         func_expr_map,
@@ -1421,7 +1418,6 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             return Ok(hit_return);
         }
         Statement::Return(r) => {
-            ctx.throw_span = None;
             ctx.return_span = r.span;
             if let Some(ref expr) = r.argument {
                 compile_expression(expr, ctx)?;
@@ -1430,7 +1426,6 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             return Ok(true);
         }
         Statement::Throw(t) => {
-            ctx.throw_span = Some(t.span);
             compile_expression(&t.argument, ctx)?;
             ctx.blocks[ctx.current_block].terminator = HirTerminator::Throw { span: t.span };
             return Ok(true);
@@ -3086,7 +3081,6 @@ fn compile_function_expr_to_hir(
         locals: HashMap::new(),
         next_slot: 0,
         return_span: span,
-        throw_span: None,
         func_index,
         block_func_index: None,
         func_expr_map,
@@ -4810,15 +4804,51 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                     MemberProperty::Expression(key_expr) => {
                         let obj_slot = alloc_slot(ctx);
                         let key_slot = alloc_slot(ctx);
-                        op(ctx, HirOp::StoreLocal { id: obj_slot, span: e.span });
+                        op(
+                            ctx,
+                            HirOp::StoreLocal {
+                                id: obj_slot,
+                                span: e.span,
+                            },
+                        );
                         compile_expression(key_expr, ctx)?;
-                        op(ctx, HirOp::StoreLocal { id: key_slot, span: e.span });
+                        op(
+                            ctx,
+                            HirOp::StoreLocal {
+                                id: key_slot,
+                                span: e.span,
+                            },
+                        );
                         compile_expression(&e.right, ctx)?;
                         let value_slot = alloc_slot(ctx);
-                        op(ctx, HirOp::StoreLocal { id: value_slot, span: e.span });
-                        op(ctx, HirOp::LoadLocal { id: obj_slot, span: e.span });
-                        op(ctx, HirOp::LoadLocal { id: key_slot, span: e.span });
-                        op(ctx, HirOp::LoadLocal { id: value_slot, span: e.span });
+                        op(
+                            ctx,
+                            HirOp::StoreLocal {
+                                id: value_slot,
+                                span: e.span,
+                            },
+                        );
+                        op(
+                            ctx,
+                            HirOp::LoadLocal {
+                                id: obj_slot,
+                                span: e.span,
+                            },
+                        );
+                        op(
+                            ctx,
+                            HirOp::LoadLocal {
+                                id: key_slot,
+                                span: e.span,
+                            },
+                        );
+                        op(
+                            ctx,
+                            HirOp::LoadLocal {
+                                id: value_slot,
+                                span: e.span,
+                            },
+                        );
                         ctx.blocks[ctx.current_block]
                             .ops
                             .push(HirOp::SetPropDyn { span: e.span });
@@ -6777,11 +6807,13 @@ mod tests {
 
     #[test]
     fn lower_reduce_arrow_expression_body() {
-        let result = crate::driver::Driver::run(
-            "function main(){ return [1,2,3].reduce((a,x)=>a+x, 0); }",
-        )
-        .expect("run");
-        assert_eq!(result, 6, "arrow expression body must not parse comma as part of body");
+        let result =
+            crate::driver::Driver::run("function main(){ return [1,2,3].reduce((a,x)=>a+x, 0); }")
+                .expect("run");
+        assert_eq!(
+            result, 6,
+            "arrow expression body must not parse comma as part of body"
+        );
     }
 
     #[test]
