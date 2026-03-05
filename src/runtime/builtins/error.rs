@@ -10,8 +10,41 @@ fn make_error(heap: &mut Heap, msg: String, constructor_name: &str) -> Value {
     Value::Object(obj_id)
 }
 
+fn is_likely_this_arg(v: &Value) -> bool {
+    matches!(
+        v,
+        Value::Object(_)
+            | Value::Array(_)
+            | Value::Map(_)
+            | Value::Set(_)
+            | Value::Date(_)
+            | Value::Function(_)
+            | Value::DynamicFunction(_)
+            | Value::Builtin(_)
+            | Value::BoundBuiltin(_, _, _)
+            | Value::BoundFunction(_, _, _)
+            | Value::Generator(_)
+            | Value::Promise(_)
+    )
+}
+
+fn constructor_message_arg(args: &[Value]) -> String {
+    let message_value = if args.len() >= 2 {
+        args.get(1)
+    } else if args.first().is_some_and(is_likely_this_arg) {
+        None
+    } else {
+        args.first()
+    };
+
+    message_value
+        .filter(|v| !matches!(v, Value::Undefined | Value::Null))
+        .map(|v| v.to_string())
+        .unwrap_or_default()
+}
+
 pub fn error(args: &[Value], heap: &mut Heap) -> Value {
-    make_error(heap, error_message_arg(args), "Error")
+    make_error(heap, constructor_message_arg(args), "Error")
 }
 
 fn error_message_arg(args: &[Value]) -> String {
@@ -22,23 +55,27 @@ fn error_message_arg(args: &[Value]) -> String {
 }
 
 pub fn reference_error(args: &[Value], heap: &mut Heap) -> Value {
-    make_error(heap, error_message_arg(args), "ReferenceError")
+    make_error(heap, constructor_message_arg(args), "ReferenceError")
 }
 
 pub fn type_error(args: &[Value], heap: &mut Heap) -> Value {
-    make_error(heap, error_message_arg(args), "TypeError")
+    make_error(heap, constructor_message_arg(args), "TypeError")
 }
 
 pub fn range_error(args: &[Value], heap: &mut Heap) -> Value {
-    make_error(heap, error_message_arg(args), "RangeError")
+    make_error(heap, constructor_message_arg(args), "RangeError")
 }
 
 pub fn syntax_error(args: &[Value], heap: &mut Heap) -> Value {
-    make_error(heap, error_message_arg(args), "SyntaxError")
+    make_error(heap, constructor_message_arg(args), "SyntaxError")
 }
 
 pub fn uri_error(args: &[Value], heap: &mut Heap) -> Value {
-    make_error(heap, error_message_arg(args), "URIError")
+    make_error(heap, constructor_message_arg(args), "URIError")
+}
+
+pub fn eval_error(args: &[Value], heap: &mut Heap) -> Value {
+    make_error(heap, constructor_message_arg(args), "EvalError")
 }
 
 pub fn is_error(args: &[Value], heap: &mut Heap) -> Value {

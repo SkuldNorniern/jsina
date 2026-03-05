@@ -1161,6 +1161,16 @@ const BUILTINS: &[BuiltinDef] = &[
         entry: BuiltinEntry::Normal(error::syntax_error),
     },
     BuiltinDef {
+        category: "Error",
+        name: "URIError",
+        entry: BuiltinEntry::Normal(error::uri_error),
+    },
+    BuiltinDef {
+        category: "Error",
+        name: "EvalError",
+        entry: BuiltinEntry::Normal(error::eval_error),
+    },
+    BuiltinDef {
         category: "$262",
         name: "createRealm",
         entry: BuiltinEntry::Throwing(dollar262::create_realm),
@@ -1474,6 +1484,12 @@ pub fn length(id: u8) -> i32 {
             ("Reflect", "set") | ("Reflect", "apply") | ("Reflect", "defineProperty") => 3,
             ("Reflect", "construct") => 2,
             ("Global", "escape") | ("Global", "unescape") => 1,
+            ("Error", "ReferenceError")
+            | ("Error", "TypeError")
+            | ("Error", "RangeError")
+            | ("Error", "SyntaxError")
+            | ("Error", "URIError")
+            | ("Error", "EvalError") => 1,
             _ => 0,
         })
         .unwrap_or(0)

@@ -545,12 +545,20 @@ impl Heap {
             "name",
             Value::String("ReferenceError".to_string()),
         );
-        self.set_prop(ref_err_id, "__call__", Value::Builtin(b("Type", "Error")));
+        self.set_prop(
+            ref_err_id,
+            "__call__",
+            Value::Builtin(b("Error", "ReferenceError")),
+        );
         self.set_prop(global_id, "ReferenceError", Value::Object(ref_err_id));
 
         let type_err_id = self.alloc_object();
         self.set_prop(type_err_id, "name", Value::String("TypeError".to_string()));
-        self.set_prop(type_err_id, "__call__", Value::Builtin(b("Type", "Error")));
+        self.set_prop(
+            type_err_id,
+            "__call__",
+            Value::Builtin(b("Error", "TypeError")),
+        );
         self.set_prop(global_id, "TypeError", Value::Object(type_err_id));
 
         let range_err_id = self.alloc_object();
@@ -559,7 +567,11 @@ impl Heap {
             "name",
             Value::String("RangeError".to_string()),
         );
-        self.set_prop(range_err_id, "__call__", Value::Builtin(b("Type", "Error")));
+        self.set_prop(
+            range_err_id,
+            "__call__",
+            Value::Builtin(b("Error", "RangeError")),
+        );
         self.set_prop(global_id, "RangeError", Value::Object(range_err_id));
 
         let syntax_err_id = self.alloc_object();
@@ -571,18 +583,26 @@ impl Heap {
         self.set_prop(
             syntax_err_id,
             "__call__",
-            Value::Builtin(b("Type", "Error")),
+            Value::Builtin(b("Error", "SyntaxError")),
         );
         self.set_prop(global_id, "SyntaxError", Value::Object(syntax_err_id));
 
         let uri_err_id = self.alloc_object();
         self.set_prop(uri_err_id, "name", Value::String("URIError".to_string()));
-        self.set_prop(uri_err_id, "__call__", Value::Builtin(b("Type", "Error")));
+        self.set_prop(
+            uri_err_id,
+            "__call__",
+            Value::Builtin(b("Error", "URIError")),
+        );
         self.set_prop(global_id, "URIError", Value::Object(uri_err_id));
 
         let eval_err_id = self.alloc_object();
         self.set_prop(eval_err_id, "name", Value::String("EvalError".to_string()));
-        self.set_prop(eval_err_id, "__call__", Value::Builtin(b("Type", "Error")));
+        self.set_prop(
+            eval_err_id,
+            "__call__",
+            Value::Builtin(b("Error", "EvalError")),
+        );
         self.set_prop(global_id, "EvalError", Value::Object(eval_err_id));
 
         let aggregate_err_id = self.alloc_object();

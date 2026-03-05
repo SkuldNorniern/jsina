@@ -2,11 +2,62 @@
 //! Uses eval internally. Last argument is body, preceding are param names.
 //! Returns Value::DynamicFunction so the created function can be invoked in the caller's context.
 
-use super::{BuiltinContext, BuiltinError, to_prop_key};
+use super::{BuiltinContext, BuiltinError, error, to_prop_key};
 use crate::frontend::{Parser, check_early_errors};
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::runtime::Value;
 use crate::vm::{Completion, Program, interpret_program_with_heap};
+
+fn invalid_function_syntax_error(heap: &mut crate::runtime::Heap) -> BuiltinError {
+    BuiltinError::Throw(error::syntax_error(
+        &[Value::String("Invalid function body".to_string())],
+        heap,
+    ))
+}
+
+fn normalize_html_comment_tokens(
+    source: &str,
+    line_start_initial: bool,
+    replacement: &str,
+) -> String {
+    let mut normalized = String::with_capacity(source.len());
+    let mut byte_index = 0;
+    let mut at_line_start = line_start_initial;
+
+    while byte_index < source.len() {
+        let rest = &source[byte_index..];
+
+        if rest.starts_with("<!--") {
+            normalized.push_str(replacement);
+            byte_index += 4;
+            at_line_start = false;
+            continue;
+        }
+
+        if at_line_start && rest.starts_with("-->") {
+            normalized.push_str(replacement);
+            byte_index += 3;
+            at_line_start = false;
+            continue;
+        }
+
+        if let Some(ch) = rest.chars().next() {
+            normalized.push(ch);
+            byte_index += ch.len_utf8();
+            if matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+                at_line_start = true;
+            } else if at_line_start && matches!(ch, ' ' | '\t') {
+                at_line_start = true;
+            } else {
+                at_line_start = false;
+            }
+        } else {
+            break;
+        }
+    }
+
+    normalized
+}
 
 pub fn function_constructor(
     args: &[Value],
@@ -19,16 +70,10 @@ pub fn function_constructor(
     };
     if actual.is_empty() {
         let wrapped = "function main() { return (function() {}); }\n";
-        let script = Parser::new(wrapped).parse().map_err(|_| {
-            BuiltinError::Throw(Value::String(
-                "SyntaxError: Invalid function body".to_string(),
-            ))
-        })?;
-        let funcs = script_to_hir(&script).map_err(|_| {
-            BuiltinError::Throw(Value::String(
-                "SyntaxError: Invalid function body".to_string(),
-            ))
-        })?;
+        let script = Parser::new(wrapped)
+            .parse()
+            .map_err(|_| invalid_function_syntax_error(ctx.heap))?;
+        let funcs = script_to_hir(&script).map_err(|_| invalid_function_syntax_error(ctx.heap))?;
         let entry = funcs.iter().position(|f| f.name.as_deref() == Some("main"));
         let entry = match entry {
             Some(i) => i,
@@ -68,10 +113,10 @@ pub fn function_constructor(
             Err(e) => Err(BuiltinError::Throw(Value::String(e.to_string()))),
         };
     }
-    let body = to_prop_key(actual.last().unwrap());
+    let body = normalize_html_comment_tokens(&to_prop_key(actual.last().unwrap()), true, "//");
     let params: Vec<String> = actual[..actual.len().saturating_sub(1)]
         .iter()
-        .map(to_prop_key)
+        .map(|v| normalize_html_comment_tokens(&to_prop_key(v), false, "/**/"))
         .collect();
     let param_list = params.join(", ");
     let wrapped = format!(
@@ -80,24 +125,14 @@ pub fn function_constructor(
     );
     let script = match Parser::new(&wrapped).parse() {
         Ok(s) => s,
-        Err(_) => {
-            return Err(BuiltinError::Throw(Value::String(
-                "SyntaxError: Invalid function body".to_string(),
-            )));
-        }
+        Err(_) => return Err(invalid_function_syntax_error(ctx.heap)),
     };
     if check_early_errors(&script).is_err() {
-        return Err(BuiltinError::Throw(Value::String(
-            "SyntaxError: Invalid function body".to_string(),
-        )));
+        return Err(invalid_function_syntax_error(ctx.heap));
     }
     let funcs = match script_to_hir(&script) {
         Ok(f) => f,
-        Err(_) => {
-            return Err(BuiltinError::Throw(Value::String(
-                "SyntaxError: Invalid function body".to_string(),
-            )));
-        }
+        Err(_) => return Err(invalid_function_syntax_error(ctx.heap)),
     };
     let entry = funcs.iter().position(|f| f.name.as_deref() == Some("main"));
     let entry = match entry {

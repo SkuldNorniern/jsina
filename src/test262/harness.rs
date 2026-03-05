@@ -286,7 +286,7 @@ fn wrap_test(body: &str, prelude: &str) -> String {
         format!("{}{}", prelude, body)
     } else {
         format!(
-            "function main() {{\nfunction __test__() {{\n{}\n{}\n}}\n__test__();\nreturn 0;\n}}\n",
+            "function main() {{\nfunction __test__() {{\n{}\n{}\n}}\n__test__.call(globalThis);\nreturn 0;\n}}\n",
             prelude, body
         )
     }
