@@ -73,9 +73,10 @@ impl GetPropCache {
             && slot.key_len == key.len()
             && slot.key_hash == kh
             && slot.key == key
-            && let Some(ref v) = slot.value {
-                return v.clone();
-            }
+            && let Some(ref v) = slot.value
+        {
+            return v.clone();
+        }
         let result = if is_array {
             heap.get_array_prop(obj_id, key)
         } else {
@@ -200,10 +201,9 @@ fn function_prototype_prop(key: &str) -> Value {
 }
 
 fn builtin_prop(id: u8, key: &str, heap: &Heap) -> Value {
-    if (key == "length" || key == "name")
-        && heap.builtin_prop_deleted(id, key) {
-            return Value::Undefined;
-        }
+    if (key == "length" || key == "name") && heap.builtin_prop_deleted(id, key) {
+        return Value::Undefined;
+    }
     match key {
         "length" => Value::Int(builtins::length(id)),
         "name" => Value::String(builtins::name(id).to_string()),

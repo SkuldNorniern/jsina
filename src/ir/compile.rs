@@ -219,7 +219,7 @@ pub fn hir_to_bytecode(func: &HirFunction) -> CompiledFunction {
                 }
                 HirOp::CallBuiltin { builtin, argc, .. } => {
                     code.push(Opcode::CallBuiltin as u8);
-                    code.push(*builtin );
+                    code.push(*builtin);
                     code.push((*argc).min(255) as u8);
                 }
                 HirOp::CallMethod { argc, .. } => {

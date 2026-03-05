@@ -2659,9 +2659,10 @@ fn compile_class_expr(ce: &ClassExprData, ctx: &mut LowerCtx<'_>) -> Result<(), 
         // Skip constructor – already compiled above.
         if !member.is_static
             && let ClassMemberKey::Ident(name) = &member.key
-                && name == "constructor" {
-                    continue;
-                }
+            && name == "constructor"
+        {
+            continue;
+        }
 
         match &member.kind {
             ClassMemberKind::Method(fe) => {
@@ -3583,10 +3584,7 @@ fn compile_array_hof(
     let cond_slot = alloc_slot(ctx);
 
     let result_slot = match kind {
-        HofKind::Map | HofKind::Filter | HofKind::FlatMap => {
-            
-            alloc_slot(ctx)
-        }
+        HofKind::Map | HofKind::Filter | HofKind::FlatMap => alloc_slot(ctx),
         _ => u32::MAX,
     };
 
@@ -4555,18 +4553,19 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
             UnaryOp::Plus => compile_expression(&e.argument, ctx)?,
             UnaryOp::Minus => {
                 if let Expression::Literal(lit) = e.argument.as_ref()
-                    && let LiteralValue::BigInt(s) = &lit.value {
-                        let negated = if s.starts_with('-') {
-                            s[1..].to_string()
-                        } else {
-                            format!("-{}", s)
-                        };
-                        ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
-                            value: HirConst::BigInt(negated),
-                            span: e.span,
-                        });
-                        return Ok(());
-                    }
+                    && let LiteralValue::BigInt(s) = &lit.value
+                {
+                    let negated = if s.starts_with('-') {
+                        s[1..].to_string()
+                    } else {
+                        format!("-{}", s)
+                    };
+                    ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
+                        value: HirConst::BigInt(negated),
+                        span: e.span,
+                    });
+                    return Ok(());
+                }
                 ctx.blocks[ctx.current_block].ops.push(HirOp::LoadConst {
                     value: HirConst::Int(0),
                     span: e.span,
@@ -4999,9 +4998,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             ctx,
                             e.span,
                         )?;
-                    } else if matches!(obj_name, Some(s) if s == "console")
-                        && prop == "log"
-                    {
+                    } else if matches!(obj_name, Some(s) if s == "console") && prop == "log" {
                         for arg in &e.args {
                             compile_call_arg(arg, ctx, e.span)?;
                         }
@@ -5030,8 +5027,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name, Some(s) if s == "Math") && prop == "min"
-                    {
+                    } else if matches!(obj_name, Some(s) if s == "Math") && prop == "min" {
                         for arg in &e.args {
                             compile_call_arg(arg, ctx, e.span)?;
                         }
@@ -5040,8 +5036,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: e.args.len() as u32,
                             span: e.span,
                         });
-                    } else if matches!(obj_name, Some(s) if s == "Math") && prop == "max"
-                    {
+                    } else if matches!(obj_name, Some(s) if s == "Math") && prop == "max" {
                         for arg in &e.args {
                             compile_call_arg(arg, ctx, e.span)?;
                         }
@@ -5111,9 +5106,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name, Some(s) if s == "Math")
-                        && prop == "sumPrecise"
-                    {
+                    } else if matches!(obj_name, Some(s) if s == "Math") && prop == "sumPrecise" {
                         for arg in &e.args {
                             compile_call_arg(arg, ctx, e.span)?;
                         }
@@ -5377,8 +5370,7 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             argc: 1,
                             span: e.span,
                         });
-                    } else if matches!(obj_name, Some(s) if s == "String")
-                        && prop == "fromCharCode"
+                    } else if matches!(obj_name, Some(s) if s == "String") && prop == "fromCharCode"
                     {
                         for arg in &e.args {
                             compile_call_arg(arg, ctx, e.span)?;
@@ -5771,18 +5763,15 @@ fn compile_expression(expr: &Expression, ctx: &mut LowerCtx<'_>) -> Result<(), L
                             _ => unreachable!(),
                         };
                         compile_array_hof(kind, &m.object, &e.args, e.span, ctx)?;
-                    } else if !e.args.is_empty()
-                        && matches!(prop, "reduce" | "reduceRight")
-                        && {
-                            let cb = &e.args[0];
-                            matches!(
-                                cb,
-                                CallArg::Expr(Expression::FunctionExpr(_))
-                                    | CallArg::Expr(Expression::ArrowFunction(_))
-                                    | CallArg::Expr(Expression::Identifier(_))
-                            )
-                        }
-                    {
+                    } else if !e.args.is_empty() && matches!(prop, "reduce" | "reduceRight") && {
+                        let cb = &e.args[0];
+                        matches!(
+                            cb,
+                            CallArg::Expr(Expression::FunctionExpr(_))
+                                | CallArg::Expr(Expression::ArrowFunction(_))
+                                | CallArg::Expr(Expression::Identifier(_))
+                        )
+                    } {
                         compile_array_reduce(&m.object, &e.args, e.span, ctx)?;
                     } else if args_has_spread(&e.args) {
                         compile_call_with_spread(

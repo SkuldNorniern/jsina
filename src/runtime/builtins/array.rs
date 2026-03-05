@@ -902,9 +902,10 @@ pub fn copy_within(args: &[Value], heap: &mut Heap) -> Value {
         .min(len_usize.saturating_sub(target));
     for i in 0..count {
         if let Some(v) = elements.get(start + i)
-            && target + i < elements.len() {
-                elements[target + i] = v.clone();
-            }
+            && target + i < elements.len()
+        {
+            elements[target + i] = v.clone();
+        }
     }
     heap.array_splice(receiver, elements);
     Value::Array(receiver)

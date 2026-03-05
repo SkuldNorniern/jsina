@@ -410,12 +410,14 @@ pub fn get_own_property_descriptor(args: &[Value], heap: &mut Heap) -> Value {
         .unwrap_or_default();
     match target {
         Value::Object(id) => {
-            if is_regexp_constructor_object(*id, heap) && heap.object_has_own_property(*id, &key)
-                && let Some((getter_id, setter_id)) = regexp_legacy_accessor_ids(&key) {
-                    let getter = Value::Builtin(getter_id);
-                    let setter = setter_id.map(Value::Builtin).unwrap_or(Value::Undefined);
-                    return create_accessor_descriptor(getter, setter, false, true, heap);
-                }
+            if is_regexp_constructor_object(*id, heap)
+                && heap.object_has_own_property(*id, &key)
+                && let Some((getter_id, setter_id)) = regexp_legacy_accessor_ids(&key)
+            {
+                let getter = Value::Builtin(getter_id);
+                let setter = setter_id.map(Value::Builtin).unwrap_or(Value::Undefined);
+                return create_accessor_descriptor(getter, setter, false, true, heap);
+            }
             if !heap.object_has_own_property(*id, &key) {
                 return Value::Undefined;
             }

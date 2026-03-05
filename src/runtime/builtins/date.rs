@@ -199,7 +199,11 @@ pub fn set_year(args: &[Value], heap: &mut Heap) -> Value {
         return Value::Number(f64::NAN);
     }
     let yr = year as i32;
-    let yr = if (0..=99).contains(&yr) { yr + 1900 } else { yr };
+    let yr = if (0..=99).contains(&yr) {
+        yr + 1900
+    } else {
+        yr
+    };
     let secs = (ms / 1000.0) as i64;
     let days = secs / 86400;
     let (_, mo, d) = days_to_ymd(days);

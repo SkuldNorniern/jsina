@@ -13,9 +13,10 @@ fn add_from_array(heap: &mut Heap, set_id: usize, arr_id: usize) {
 pub fn create(args: &[Value], heap: &mut Heap) -> Value {
     let id = heap.alloc_set();
     if let Some(iterable) = args.first()
-        && let Value::Array(arr_id) = iterable {
-            add_from_array(heap, id, *arr_id);
-        }
+        && let Value::Array(arr_id) = iterable
+    {
+        add_from_array(heap, id, *arr_id);
+    }
     Value::Set(id)
 }
 

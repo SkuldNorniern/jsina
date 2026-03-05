@@ -90,8 +90,9 @@ pub fn is_integer(args: &[Value], _heap: &mut Heap) -> Value {
 
 pub fn is_safe_integer(args: &[Value], _heap: &mut Heap) -> Value {
     let n = args.first().map(to_number).unwrap_or(f64::NAN);
-    let ok =
-        n.is_finite() && n.fract() == 0.0 && (-9007199254740991.0..=9007199254740991.0).contains(&n);
+    let ok = n.is_finite()
+        && n.fract() == 0.0
+        && (-9007199254740991.0..=9007199254740991.0).contains(&n);
     Value::Bool(ok)
 }
 

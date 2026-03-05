@@ -53,9 +53,10 @@ impl<'a> RunState<'a> {
     #[inline(always)]
     fn set_local_at(&mut self, stack_base: usize, num_locals: usize, slot: usize, v: Value) {
         if slot < num_locals
-            && let Some(ptr) = self.stack.get_mut(stack_base + slot) {
-                *ptr = v;
-            }
+            && let Some(ptr) = self.stack.get_mut(stack_base + slot)
+        {
+            *ptr = v;
+        }
     }
 
     fn throw_into_handler_slot(&mut self, slot: usize, v: Value, is_fin: bool, hpc: usize) {
@@ -235,7 +236,6 @@ const CYCLE_THRESHOLD: usize = 3;
 
 #[inline(always)]
 fn hash_execution_state(chunk_index: usize, pc: usize, stack_len: usize, frames_len: usize) -> u64 {
-    
     (chunk_index as u64)
         .wrapping_mul(31)
         .wrapping_add(pc as u64)
@@ -329,9 +329,10 @@ pub fn interpret_program_with_heap_and_entry(
         loop_counter = loop_counter.wrapping_add(1);
         if (loop_counter & CHECK_INTERVAL_MASK) == 0 {
             if let Some(c) = cancel
-                && c.load(Ordering::Relaxed) {
-                    return Err(VmError::Cancelled);
-                }
+                && c.load(Ordering::Relaxed)
+            {
+                return Err(VmError::Cancelled);
+            }
             if enable_infinite_loop_detection {
                 let h = hash_execution_state(chunk_index, pc, stack_len, frames_len);
                 cycle_buffer[cycle_idx] = h;
@@ -519,9 +520,10 @@ pub fn interpret_program_with_heap_and_entry(
                 pc += 1;
                 let val = state.stack.pop().ok_or_else(underflow)?;
                 if slot < num_locals
-                    && let Some(ptr) = state.stack.get_mut(stack_base + slot) {
-                        *ptr = val;
-                    }
+                    && let Some(ptr) = state.stack.get_mut(stack_base + slot)
+                {
+                    *ptr = val;
+                }
             }
             0x05 => {
                 state.stack.push(state.frames[frame_idx].this_value.clone());
@@ -762,9 +764,10 @@ pub fn interpret_program_with_heap_and_entry(
                 let popped = state.frames.pop();
                 let callee_stack_base = popped.as_ref().map(|f| f.stack_base).unwrap_or(0);
                 if let Some(ref f) = popped
-                    && f.is_dynamic {
-                        state.chunks_stack.pop();
-                    }
+                    && f.is_dynamic
+                {
+                    state.chunks_stack.pop();
+                }
                 let result = if let Some(ref f) = popped {
                     if let Some(gen_id) = f.generator_id {
                         // Generator function body completed: return {value, done: true}
@@ -1039,12 +1042,13 @@ pub fn interpret_program_with_heap_and_entry(
                     let callee = state.stack.pop().ok_or_else(underflow)?;
                     let receiver = state.stack.pop().ok_or_else(underflow)?;
                     if let (Value::Builtin(bid), Value::Array(arr_id)) = (&callee, &receiver)
-                        && *bid == builtins::ARRAY_PUSH_BUILTIN_ID {
-                            heap.array_push(*arr_id, arg);
-                            state.stack.push(Value::Int(heap.array_len(*arr_id) as i32));
-                            state.frames[frame_idx].pc = pc;
-                            continue;
-                        }
+                        && *bid == builtins::ARRAY_PUSH_BUILTIN_ID
+                    {
+                        heap.array_push(*arr_id, arg);
+                        state.stack.push(Value::Int(heap.array_len(*arr_id) as i32));
+                        state.frames[frame_idx].pc = pc;
+                        continue;
+                    }
                     state.stack.push(receiver);
                     state.stack.push(callee);
                     state.stack.push(arg);
@@ -1305,7 +1309,8 @@ pub fn interpret_program_with_heap_and_entry(
                         } else if heap.is_html_dda_object(obj_id) {
                             state.stack.push(Value::Null);
                         } else {
-                            let msg = "TypeError: callee is not a function (got object)".to_string();
+                            let msg =
+                                "TypeError: callee is not a function (got object)".to_string();
                             if let Some(completion) = propagate_call_throw(
                                 program,
                                 &mut state,

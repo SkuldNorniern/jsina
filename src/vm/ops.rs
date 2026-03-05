@@ -391,9 +391,10 @@ fn get_constructor_name(constructor: &Value, heap: &Heap) -> Option<String> {
                 "Date",
             ] {
                 if let Value::Object(gid) = heap.get_prop(global, name)
-                    && gid == *id {
-                        return Some(name.to_string());
-                    }
+                    && gid == *id
+                {
+                    return Some(name.to_string());
+                }
             }
             None
         }

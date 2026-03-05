@@ -2,7 +2,7 @@
 //! Uses eval internally. Last argument is body, preceding are param names.
 //! Returns Value::DynamicFunction so the created function can be invoked in the caller's context.
 
-use super::{BuiltinContext, BuiltinError, error, to_prop_key};
+use super::{BuiltinContext, BuiltinError, error, html_comments, to_prop_key};
 use crate::frontend::{Parser, check_early_errors};
 use crate::ir::{hir_to_bytecode, script_to_hir};
 use crate::runtime::Value;
@@ -13,50 +13,6 @@ fn invalid_function_syntax_error(heap: &mut crate::runtime::Heap) -> BuiltinErro
         &[Value::String("Invalid function body".to_string())],
         heap,
     ))
-}
-
-fn normalize_html_comment_tokens(
-    source: &str,
-    line_start_initial: bool,
-    replacement: &str,
-) -> String {
-    let mut normalized = String::with_capacity(source.len());
-    let mut byte_index = 0;
-    let mut at_line_start = line_start_initial;
-
-    while byte_index < source.len() {
-        let rest = &source[byte_index..];
-
-        if rest.starts_with("<!--") {
-            normalized.push_str(replacement);
-            byte_index += 4;
-            at_line_start = false;
-            continue;
-        }
-
-        if at_line_start && rest.starts_with("-->") {
-            normalized.push_str(replacement);
-            byte_index += 3;
-            at_line_start = false;
-            continue;
-        }
-
-        if let Some(ch) = rest.chars().next() {
-            normalized.push(ch);
-            byte_index += ch.len_utf8();
-            if matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
-                at_line_start = true;
-            } else if at_line_start && matches!(ch, ' ' | '\t') {
-                at_line_start = true;
-            } else {
-                at_line_start = false;
-            }
-        } else {
-            break;
-        }
-    }
-
-    normalized
 }
 
 pub fn function_constructor(
@@ -101,11 +57,12 @@ pub fn function_constructor(
         ) {
             Ok(Completion::Return(v)) => {
                 if let Value::Function(inner_idx) = v
-                    && let Some(inner_chunk) = program.chunks.get(inner_idx) {
-                        ctx.heap.dynamic_chunks.push(inner_chunk.clone());
-                        ctx.heap.dynamic_captures.push(Vec::new());
-                        return Ok(Value::DynamicFunction(ctx.heap.dynamic_chunks.len() - 1));
-                    }
+                    && let Some(inner_chunk) = program.chunks.get(inner_idx)
+                {
+                    ctx.heap.dynamic_chunks.push(inner_chunk.clone());
+                    ctx.heap.dynamic_captures.push(Vec::new());
+                    return Ok(Value::DynamicFunction(ctx.heap.dynamic_chunks.len() - 1));
+                }
                 Ok(v)
             }
             Ok(Completion::Throw(v)) => Err(BuiltinError::Throw(v)),
@@ -113,10 +70,16 @@ pub fn function_constructor(
             Err(e) => Err(BuiltinError::Throw(Value::String(e.to_string()))),
         };
     }
-    let body = normalize_html_comment_tokens(&to_prop_key(actual.last().unwrap()), true, "//");
+    let body = html_comments::normalize_function_constructor_source(
+        &to_prop_key(actual.last().unwrap()),
+        true,
+        "//",
+    );
     let params: Vec<String> = actual[..actual.len().saturating_sub(1)]
         .iter()
-        .map(|v| normalize_html_comment_tokens(&to_prop_key(v), false, "/**/"))
+        .map(|v| {
+            html_comments::normalize_function_constructor_source(&to_prop_key(v), false, "/**/")
+        })
         .collect();
     let param_list = params.join(", ");
     let wrapped = format!(
@@ -159,11 +122,12 @@ pub fn function_constructor(
     match interpret_program_with_heap(&program, ctx.heap, false, None, false, false, None) {
         Ok(Completion::Return(v)) => {
             if let Value::Function(inner_idx) = v
-                && let Some(inner_chunk) = program.chunks.get(inner_idx) {
-                    ctx.heap.dynamic_chunks.push(inner_chunk.clone());
-                    ctx.heap.dynamic_captures.push(Vec::new());
-                    return Ok(Value::DynamicFunction(ctx.heap.dynamic_chunks.len() - 1));
-                }
+                && let Some(inner_chunk) = program.chunks.get(inner_idx)
+            {
+                ctx.heap.dynamic_chunks.push(inner_chunk.clone());
+                ctx.heap.dynamic_captures.push(Vec::new());
+                return Ok(Value::DynamicFunction(ctx.heap.dynamic_chunks.len() - 1));
+            }
             Ok(v)
         }
         Ok(Completion::Throw(v)) => Err(BuiltinError::Throw(v)),

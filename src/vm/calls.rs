@@ -155,12 +155,13 @@ pub(crate) fn setup_callee_locals(
         })
         .map(|s| s as usize);
     if let Some(arguments_slot) = arguments_slot
-        && arguments_slot < locals.len() {
-            let arguments_array_id = heap.alloc_array();
-            if !args.is_empty() {
-                heap.array_push_values(arguments_array_id, args);
-            }
-            locals[arguments_slot] = Value::Array(arguments_array_id);
+        && arguments_slot < locals.len()
+    {
+        let arguments_array_id = heap.alloc_array();
+        if !args.is_empty() {
+            heap.array_push_values(arguments_array_id, args);
         }
+        locals[arguments_slot] = Value::Array(arguments_array_id);
+    }
     locals
 }

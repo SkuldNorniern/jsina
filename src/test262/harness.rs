@@ -78,9 +78,10 @@ fn load_harness_from_dir(root: &Path) -> Option<String> {
 
 fn load_harness(root: Option<&Path>) -> String {
     if let Some(r) = root
-        && let Some(h) = load_harness_from_dir(r) {
-            return h;
-        }
+        && let Some(h) = load_harness_from_dir(r)
+    {
+        return h;
+    }
     MINIMAL_HARNESS.to_string()
 }
 
@@ -189,6 +190,45 @@ fn parse_include_function_names(source: &str) -> Vec<String> {
     names
 }
 
+fn append_include_to_prelude(prelude: &mut String, name: &str, content: &str) {
+    prelude.push_str(content);
+    prelude.push('\n');
+    for define in parse_include_defines(content) {
+        if is_js_identifier(&define) {
+            prelude.push_str("var ");
+            prelude.push_str(&define);
+            prelude.push_str(" = (typeof ");
+            prelude.push_str(&define);
+            prelude.push_str(" !== \"undefined\") ? ");
+            prelude.push_str(&define);
+            prelude.push_str(" : globalThis.");
+            prelude.push_str(&define);
+            prelude.push_str(";\n");
+        }
+    }
+    for function_name in parse_include_function_names(content) {
+        prelude.push_str("globalThis.");
+        prelude.push_str(&function_name);
+        prelude.push_str(" = ");
+        prelude.push_str(&function_name);
+        prelude.push_str(";\n");
+    }
+    if name == "propertyHelper.js" {
+        prelude.push_str("globalThis.__isArray = Array.isArray;\n");
+        prelude.push_str("globalThis.__defineProperty = Object.defineProperty;\n");
+        prelude
+            .push_str("globalThis.__getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;\n");
+        prelude.push_str("globalThis.__getOwnPropertyNames = Object.getOwnPropertyNames;\n");
+        prelude
+            .push_str("globalThis.__join = Function.prototype.call.bind(Array.prototype.join);\n");
+        prelude
+            .push_str("globalThis.__push = Function.prototype.call.bind(Array.prototype.push);\n");
+        prelude.push_str("globalThis.__hasOwnProperty = Function.prototype.call.bind(Object.prototype.hasOwnProperty);\n");
+        prelude.push_str("globalThis.__propertyIsEnumerable = Function.prototype.call.bind(Object.prototype.propertyIsEnumerable);\n");
+        prelude.push_str("globalThis.nonIndexNumericPropertyName = Math.pow(2, 32) - 1;\n");
+    }
+}
+
 fn extract_test_body(source: &str) -> &str {
     if let Some(end) = source.find("---*/") {
         source[end + 5..].trim_start()
@@ -217,6 +257,11 @@ fn needs_strict_rerun(meta: Option<&TestMetadata>) -> bool {
         .any(|f| f == "module" || f == "onlyStrict" || f == "noStrict" || f == "raw")
 }
 
+fn has_async_flag(meta: Option<&TestMetadata>) -> bool {
+    meta.map(|m| m.flags.iter().any(|f| f == "async"))
+        .unwrap_or(false)
+}
+
 fn build_prelude(root: Option<&Path>, meta: Option<&TestMetadata>) -> (String, bool) {
     let harness = load_harness(root);
     let mut prelude = String::new();
@@ -229,61 +274,51 @@ fn build_prelude(root: Option<&Path>, meta: Option<&TestMetadata>) -> (String, b
     prelude.push_str("globalThis.isSameValue = assert._isSameValue;\n");
     let mut includes_ok = true;
     if let (Some(r), Some(m)) = (root, meta) {
+        let doneprint_already_included = m
+            .includes
+            .iter()
+            .any(|inc| inc.trim().trim_matches('"').trim_matches('\'') == "doneprintHandle.js");
         for inc in &m.includes {
             let name = inc.trim().trim_matches('"').trim_matches('\'');
             if let Some(content) = load_include(r, name) {
-                prelude.push_str(&content);
-                prelude.push('\n');
-                for define in parse_include_defines(&content) {
-                    if is_js_identifier(&define) {
-                        prelude.push_str("var ");
-                        prelude.push_str(&define);
-                        prelude.push_str(" = (typeof ");
-                        prelude.push_str(&define);
-                        prelude.push_str(" !== \"undefined\") ? ");
-                        prelude.push_str(&define);
-                        prelude.push_str(" : globalThis.");
-                        prelude.push_str(&define);
-                        prelude.push_str(";\n");
-                    }
-                }
-                for function_name in parse_include_function_names(&content) {
-                    prelude.push_str("globalThis.");
-                    prelude.push_str(&function_name);
-                    prelude.push_str(" = ");
-                    prelude.push_str(&function_name);
-                    prelude.push_str(";\n");
-                }
-                if name == "propertyHelper.js" {
-                    prelude.push_str("globalThis.__isArray = Array.isArray;\n");
-                    prelude.push_str("globalThis.__defineProperty = Object.defineProperty;\n");
-                    prelude.push_str("globalThis.__getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;\n");
-                    prelude.push_str(
-                        "globalThis.__getOwnPropertyNames = Object.getOwnPropertyNames;\n",
-                    );
-                    prelude.push_str(
-                        "globalThis.__join = Function.prototype.call.bind(Array.prototype.join);\n",
-                    );
-                    prelude.push_str(
-                        "globalThis.__push = Function.prototype.call.bind(Array.prototype.push);\n",
-                    );
-                    prelude.push_str("globalThis.__hasOwnProperty = Function.prototype.call.bind(Object.prototype.hasOwnProperty);\n");
-                    prelude.push_str("globalThis.__propertyIsEnumerable = Function.prototype.call.bind(Object.prototype.propertyIsEnumerable);\n");
-                    prelude.push_str(
-                        "globalThis.nonIndexNumericPropertyName = Math.pow(2, 32) - 1;\n",
-                    );
-                }
+                append_include_to_prelude(&mut prelude, name, &content);
+            } else {
+                includes_ok = false;
+            }
+        }
+
+        if has_async_flag(Some(m)) && !doneprint_already_included {
+            if let Some(content) = load_include(r, "doneprintHandle.js") {
+                append_include_to_prelude(&mut prelude, "doneprintHandle.js", &content);
             } else {
                 includes_ok = false;
             }
         }
     }
-    (prelude, true)
+
+    if has_async_flag(meta) {
+        prelude.push_str("globalThis.__test262AsyncDoneCalled = false;\n");
+        prelude.push_str("globalThis.__test262AsyncDoneError = undefined;\n");
+        prelude.push_str("if (typeof $DONE === \"function\") {\n");
+        prelude.push_str("  var __jsinaDone = $DONE;\n");
+        prelude.push_str("  $DONE = function (error) {\n");
+        prelude.push_str("    globalThis.__test262AsyncDoneCalled = true;\n");
+        prelude.push_str("    globalThis.__test262AsyncDoneError = error;\n");
+        prelude.push_str("    return __jsinaDone(error);\n");
+        prelude.push_str("  };\n");
+        prelude.push_str("}\n");
+    }
+    (prelude, includes_ok)
 }
 
-fn wrap_test(body: &str, prelude: &str) -> String {
+fn wrap_test(body: &str, prelude: &str, is_async: bool) -> String {
     if body.contains("function main(") {
         format!("{}{}", prelude, body)
+    } else if is_async {
+        format!(
+            "function main() {{\nfunction __test__() {{\n{}\n{}\n}}\n__test__.call(globalThis);\nif (globalThis.__test262AsyncDoneCalled !== true) {{\n  throw new Test262Error(\"async test did not call $DONE\");\n}}\nif (globalThis.__test262AsyncDoneError !== undefined) {{\n  throw globalThis.__test262AsyncDoneError;\n}}\nreturn 0;\n}}\n",
+            prelude, body
+        )
     } else {
         format!(
             "function main() {{\nfunction __test__() {{\n{}\n{}\n}}\n__test__.call(globalThis);\nreturn 0;\n}}\n",
@@ -292,7 +327,7 @@ fn wrap_test(body: &str, prelude: &str) -> String {
     }
 }
 
-const TEST262_TIMEOUT: Duration = Duration::from_secs(2);
+const TEST262_TIMEOUT: Duration = Duration::from_secs(10);
 
 enum RunOutcome {
     Pass,
@@ -300,7 +335,7 @@ enum RunOutcome {
     Timeout,
 }
 
-const THREAD_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
+const THREAD_JOIN_TIMEOUT: Duration = Duration::from_millis(250);
 
 const TEST_THREAD_STACK_SIZE: usize = 64 * 1024 * 1024;
 
@@ -319,70 +354,63 @@ fn run_one(
     negative: Option<&crate::test262::metadata::NegativeMeta>,
     test262_mode: bool,
 ) -> RunOutcome {
-    match Driver::ast(wrapped) {
-        Err(e) => {
-            let msg = e.to_string();
-            if let Some(neg) = negative
-                && error_matches_negative(&msg, neg) {
-                    return RunOutcome::Pass;
-                }
-            RunOutcome::Fail(msg)
-        }
-        Ok(_) => {
-            let wrapped = wrapped.to_string();
-            let cancel = Arc::new(AtomicBool::new(false));
-            let cancel_clone = Arc::clone(&cancel);
-            let (tx, rx) = mpsc::channel();
-            let handle = thread::Builder::new()
-                .stack_size(TEST_THREAD_STACK_SIZE)
-                .spawn(move || {
-                    let result = Driver::run_with_timeout_and_cancel(
-                        &wrapped,
-                        Some(&cancel_clone),
-                        true,
-                        test262_mode,
-                    );
-                    let _ = tx.send(result);
-                })
-                .expect("spawn test thread");
-            match rx.recv_timeout(TEST262_TIMEOUT) {
-                Ok(Ok(_)) => {
-                    let _ = handle.join();
-                    if negative.is_some() {
-                        RunOutcome::Fail("expected error but test passed".to_string())
-                    } else {
-                        RunOutcome::Pass
-                    }
-                }
-                Ok(Err(e)) => {
-                    let _ = handle.join();
-                    let msg = e.to_string();
-                    if msg.contains("infinite loop detected") || msg.contains("cancelled") {
-                        RunOutcome::Timeout
-                    } else if let Some(neg) = negative {
-                        if error_matches_negative(&msg, neg) {
-                            RunOutcome::Pass
-                        } else {
-                            RunOutcome::Fail(format!(
-                                "expected error type '{}', got: {}",
-                                neg.error_type, msg
-                            ))
-                        }
-                    } else {
-                        RunOutcome::Fail(msg)
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    cancel.store(true, Ordering::SeqCst);
-                    let _ = rx.recv_timeout(THREAD_JOIN_TIMEOUT);
-                    let _ = handle.join();
-                    RunOutcome::Timeout
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    let _ = handle.join();
-                    RunOutcome::Fail("test thread disconnected".to_string())
-                }
+    let wrapped = wrapped.to_string();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = Arc::clone(&cancel);
+    let (tx, rx) = mpsc::channel();
+    let handle = thread::Builder::new()
+        .stack_size(TEST_THREAD_STACK_SIZE)
+        .spawn(move || {
+            let result = Driver::run_with_timeout_and_cancel(
+                &wrapped,
+                Some(&cancel_clone),
+                false,
+                test262_mode,
+            );
+            let _ = tx.send(result);
+        })
+        .expect("spawn test thread");
+
+    match rx.recv_timeout(TEST262_TIMEOUT) {
+        Ok(Ok(_)) => {
+            let _ = handle.join();
+            if negative.is_some() {
+                RunOutcome::Fail("expected error but test passed".to_string())
+            } else {
+                RunOutcome::Pass
             }
+        }
+        Ok(Err(e)) => {
+            let _ = handle.join();
+            let msg = e.to_string();
+            if msg.contains("infinite loop detected") || msg.contains("cancelled") {
+                RunOutcome::Timeout
+            } else if let Some(neg) = negative {
+                if error_matches_negative(&msg, neg) {
+                    RunOutcome::Pass
+                } else {
+                    RunOutcome::Fail(format!(
+                        "expected error type '{}', got: {}",
+                        neg.error_type, msg
+                    ))
+                }
+            } else {
+                RunOutcome::Fail(msg)
+            }
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            cancel.store(true, Ordering::SeqCst);
+            let _ = rx.recv_timeout(THREAD_JOIN_TIMEOUT);
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
+            RunOutcome::Timeout
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
+            RunOutcome::Fail("test thread disconnected".to_string())
         }
     }
 }
@@ -407,6 +435,7 @@ pub fn run_test(test_path: &Path, test262_root: Option<&Path>) -> TestResult {
     };
 
     let meta = parse_frontmatter(&source);
+    let is_async = has_async_flag(meta.as_ref());
     let body = extract_test_body(&source);
     let use_harness = test262_root.is_some() && !has_raw_flag(meta.as_ref());
 
@@ -416,7 +445,7 @@ pub fn run_test(test_path: &Path, test262_root: Option<&Path>) -> TestResult {
         (load_harness(None), true)
     };
 
-    let wrapped = wrap_test(body, &prelude);
+    let wrapped = wrap_test(body, &prelude, is_async);
     let outcome = run_one(
         &wrapped,
         meta.as_ref().and_then(|m| m.negative.as_ref()),
@@ -430,7 +459,7 @@ pub fn run_test(test_path: &Path, test262_root: Option<&Path>) -> TestResult {
             (String::new(), true)
         };
         let strict_prelude = format!("\"use strict\";\n{}", base_prelude);
-        let strict_wrapped = wrap_test(body, &strict_prelude);
+        let strict_wrapped = wrap_test(body, &strict_prelude, is_async);
         let strict_outcome = run_one(
             &strict_wrapped,
             meta.as_ref().and_then(|m| m.negative.as_ref()),

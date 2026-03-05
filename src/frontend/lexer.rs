@@ -1,3 +1,4 @@
+use super::html_comments;
 use super::token_type::{Token, TokenType};
 use super::trie::Trie;
 use crate::diagnostics::{Position, Span};
@@ -34,75 +35,6 @@ impl Lexer<'_> {
             .and_then(|s| s.chars().next())
     }
 
-    fn peek_n(&self, n: usize) -> Option<char> {
-        self.source
-            .get(self.position.byte_offset..)
-            .and_then(|s| s.chars().nth(n))
-    }
-
-    fn is_line_terminator(ch: char) -> bool {
-        matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}')
-    }
-
-    fn is_horizontal_whitespace(ch: char) -> bool {
-        ch.is_whitespace() && !Self::is_line_terminator(ch)
-    }
-
-    fn line_prefix_before_current(&self) -> &str {
-        let before = &self.source[..self.position.byte_offset];
-        let mut line_start = 0;
-        for (idx, ch) in before.char_indices().rev() {
-            if Self::is_line_terminator(ch) {
-                line_start = idx + ch.len_utf8();
-                break;
-            }
-        }
-        &before[line_start..]
-    }
-
-    fn is_html_close_comment_prefix(prefix: &str) -> bool {
-        let mut idx = 0;
-        let len = prefix.len();
-
-        let consume_ws = |i: &mut usize| {
-            while *i < len {
-                let Some(ch) = prefix[*i..].chars().next() else {
-                    break;
-                };
-                if Self::is_horizontal_whitespace(ch) {
-                    *i += ch.len_utf8();
-                } else {
-                    break;
-                }
-            }
-        };
-
-        consume_ws(&mut idx);
-
-        if idx < len && prefix[idx..].starts_with("*/") {
-            idx += 2;
-        }
-
-        loop {
-            consume_ws(&mut idx);
-            if idx >= len || !prefix[idx..].starts_with("/*") {
-                break;
-            }
-            let comment_start = idx + 2;
-            let Some(rel_end) = prefix[comment_start..].find("*/") else {
-                return false;
-            };
-            let comment_body = &prefix[comment_start..comment_start + rel_end];
-            if comment_body.chars().any(Self::is_line_terminator) {
-                return false;
-            }
-            idx = comment_start + rel_end + 2;
-        }
-
-        consume_ws(&mut idx);
-        idx == len
-    }
-
     fn advance(&mut self) {
         if let Some(ch) = self.current_char {
             self.position.advance(ch);
@@ -124,11 +56,7 @@ impl Lexer<'_> {
     }
 
     fn scan_html_open_comment(&mut self) -> bool {
-        if self.current_char != Some('<')
-            || self.peek() != Some('!')
-            || self.peek_n(2) != Some('-')
-            || self.peek_n(3) != Some('-')
-        {
+        if !html_comments::starts_html_open_comment(&self.source, self.position.byte_offset) {
             return false;
         }
 
@@ -138,7 +66,7 @@ impl Lexer<'_> {
         self.advance();
 
         while let Some(ch) = self.current_char {
-            if Self::is_line_terminator(ch) {
+            if html_comments::is_line_terminator(ch) {
                 break;
             }
             self.advance();
@@ -147,18 +75,11 @@ impl Lexer<'_> {
     }
 
     fn scan_html_close_comment(&mut self) -> bool {
-        if self.current_char != Some('-') || self.peek() != Some('-') || self.peek_n(2) != Some('>')
-        {
+        if !html_comments::starts_html_close_comment(&self.source, self.position.byte_offset) {
             return false;
         }
 
-        let html_close_allowed = if self.source[..self.position.byte_offset].ends_with("*/") {
-            true
-        } else {
-            let prefix = self.line_prefix_before_current();
-            Self::is_html_close_comment_prefix(prefix)
-        };
-        if !html_close_allowed {
+        if !html_comments::html_close_comment_allowed(&self.source, self.position.byte_offset) {
             return false;
         }
 
@@ -167,7 +88,7 @@ impl Lexer<'_> {
         self.advance();
 
         while let Some(ch) = self.current_char {
-            if Self::is_line_terminator(ch) {
+            if html_comments::is_line_terminator(ch) {
                 break;
             }
             self.advance();
@@ -366,9 +287,7 @@ impl Lexer<'_> {
                 }
             }
         } else if self
-            .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| {
-                c.is_ascii_digit()
-            })
+            .consume_digits_with_separators(&mut lexeme, &mut raw_for_span, |c| c.is_ascii_digit())
             .is_some()
         {
             let span = Span::from_text(start_pos, &raw_for_span);
@@ -636,7 +555,7 @@ impl Lexer<'_> {
         if self.current_char == Some('/') {
             self.advance();
             while let Some(ch) = self.current_char {
-                if Self::is_line_terminator(ch) {
+                if html_comments::is_line_terminator(ch) {
                     break;
                 }
                 self.advance();

@@ -649,11 +649,13 @@ fn match_full(pattern: &[u8], text: &str, flags: &Flags) -> Option<(usize, usize
         if byte_idx > text.len() {
             break;
         }
-        if end_anchor && byte_idx != 0
+        if end_anchor
+            && byte_idx != 0
             && let Some(end) = try_match_disjunction(pattern, 0, text, byte_idx, flags)
-                && end == text.len() {
-                    return Some((byte_idx, end));
-                }
+            && end == text.len()
+        {
+            return Some((byte_idx, end));
+        }
         if let Some(end) = try_match_disjunction(pattern, 0, text, byte_idx, flags) {
             return Some((byte_idx, end));
         }

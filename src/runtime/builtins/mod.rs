@@ -15,6 +15,7 @@ mod function_ctor;
 mod function_proto;
 mod generator;
 mod host;
+mod html_comments;
 mod iterator;
 mod json;
 mod map;

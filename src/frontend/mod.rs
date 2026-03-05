@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod early_errors;
+mod html_comments;
 pub mod lexer;
 pub mod parser;
 pub mod token_type;

@@ -61,10 +61,9 @@ pub fn extract_branch_loop_limit(chunk: &crate::ir::bytecode::BytecodeChunk) -> 
                     pc += 1;
                     if let crate::ir::bytecode::ConstEntry::Int(n) = constants.get(idx as usize)? {
                         let v = *n;
-                        if (10_000..=10_000_000).contains(&v)
-                            && best_limit.is_none_or(|b| v > b) {
-                                best_limit = Some(v);
-                            }
+                        if (10_000..=10_000_000).contains(&v) && best_limit.is_none_or(|b| v > b) {
+                            best_limit = Some(v);
+                        }
                     }
                 }
             }
@@ -74,10 +73,9 @@ pub fn extract_branch_loop_limit(chunk: &crate::ir::bytecode::BytecodeChunk) -> 
                     pc += 2;
                     if let crate::ir::bytecode::ConstEntry::Int(n) = constants.get(idx)? {
                         let v = *n;
-                        if (10_000..=10_000_000).contains(&v)
-                            && best_limit.is_none_or(|b| v > b) {
-                                best_limit = Some(v);
-                            }
+                        if (10_000..=10_000_000).contains(&v) && best_limit.is_none_or(|b| v > b) {
+                            best_limit = Some(v);
+                        }
                     }
                 }
             }

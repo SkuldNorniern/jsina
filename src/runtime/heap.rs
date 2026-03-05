@@ -1360,14 +1360,16 @@ impl Heap {
                     return elements[idx].clone();
                 }
                 if let Some(props) = self.array_props.get(arr_id)
-                    && let Some(v) = props.get(key) {
-                        return v.clone();
-                    }
-            }
-            if let Some(props) = self.array_props.get(arr_id)
-                && let Some(v) = props.get(key) {
+                    && let Some(v) = props.get(key)
+                {
                     return v.clone();
                 }
+            }
+            if let Some(props) = self.array_props.get(arr_id)
+                && let Some(v) = props.get(key)
+            {
+                return v.clone();
+            }
         }
         if let Some(proto_id) = self.array_prototype_id {
             return self.get_prop(proto_id, key);
@@ -1395,9 +1397,10 @@ impl Heap {
         }
         if let Ok(idx) = key.parse::<usize>() {
             if let Some(elements) = self.arrays.get_mut(arr_id)
-                && idx < elements.len() {
-                    elements[idx] = Value::Undefined;
-                }
+                && idx < elements.len()
+            {
+                elements[idx] = Value::Undefined;
+            }
         } else if let Some(props) = self.array_props.get_mut(arr_id) {
             props.remove(key);
         }
@@ -1407,10 +1410,11 @@ impl Heap {
         if let Some(elements) = self.arrays.get_mut(arr_id) {
             if key == "length" {
                 if let Value::Int(n) = value
-                    && n >= 0 {
-                        let n = n as usize;
-                        elements.truncate(n.min(MAX_ARRAY_LENGTH));
-                    }
+                    && n >= 0
+                {
+                    let n = n as usize;
+                    elements.truncate(n.min(MAX_ARRAY_LENGTH));
+                }
                 return;
             }
             if let Ok(idx) = key.parse::<usize>() {
@@ -1534,13 +1538,15 @@ impl Heap {
                 return true;
             }
             if let Ok(idx) = key.parse::<usize>()
-                && idx < elements.len() {
-                    return true;
-                }
+                && idx < elements.len()
+            {
+                return true;
+            }
             if let Some(props) = self.array_props.get(arr_id)
-                && props.contains_key(key) {
-                    return true;
-                }
+                && props.contains_key(key)
+            {
+                return true;
+            }
         }
         if let Some(proto_id) = self.array_prototype_id {
             return self.object_has_property(proto_id, key);
@@ -1610,7 +1616,7 @@ impl Heap {
                     }
                 } else {
                     let ctor = self.get_prop(*id, "constructor");
-                    
+
                     if let crate::runtime::Value::Object(ctor_id) = ctor {
                         if let crate::runtime::Value::String(s) = self.get_prop(ctor_id, "name") {
                             if !s.is_empty() {

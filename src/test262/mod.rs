@@ -480,6 +480,51 @@ mod tests {
     }
 
     #[test]
+    fn run_async_done_passes() {
+        let result = run_test(
+            Path::new("tests/test262/corpus/async-done-pass.js"),
+            Some(Path::new("asset/test262")),
+        );
+        assert_eq!(
+            result.status,
+            TestStatus::Pass,
+            "async test with $DONE() should pass: status={:?}, message={:?}",
+            result.status,
+            result.message
+        );
+    }
+
+    #[test]
+    fn run_async_done_with_error_fails() {
+        let result = run_test(
+            Path::new("tests/test262/corpus/async-done-fail.js"),
+            Some(Path::new("asset/test262")),
+        );
+        assert_eq!(
+            result.status,
+            TestStatus::Fail,
+            "async test with $DONE(error) should fail: status={:?}, message={:?}",
+            result.status,
+            result.message
+        );
+    }
+
+    #[test]
+    fn run_async_without_done_fails() {
+        let result = run_test(
+            Path::new("tests/test262/corpus/async-no-done.js"),
+            Some(Path::new("asset/test262")),
+        );
+        assert_eq!(
+            result.status,
+            TestStatus::Fail,
+            "async test without $DONE should fail: status={:?}, message={:?}",
+            result.status,
+            result.message
+        );
+    }
+
+    #[test]
     fn run_escape_argument_bigint() {
         let result = run_test(
             Path::new("test/annexB/built-ins/escape/argument_bigint.js"),

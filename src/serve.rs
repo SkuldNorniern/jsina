@@ -121,6 +121,8 @@ pub fn serve(dir: &str, port: Option<u16>) -> Result<(), std::io::Error> {
     let listener = TcpListener::bind(&addr)?;
     eprintln!("jsina serve: http://{}", addr);
     eprintln!("serving from: {}", root.display());
-    for s in listener.incoming().flatten() { handle_client(s, root) }
+    for s in listener.incoming().flatten() {
+        handle_client(s, root)
+    }
     Ok(())
 }

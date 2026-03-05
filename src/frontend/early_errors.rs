@@ -4,9 +4,10 @@ use crate::frontend::ast::*;
 fn is_use_strict(stmt: &Statement) -> bool {
     if let Statement::Expression(e) = stmt
         && let Expression::Literal(lit) = &*e.expression
-            && let LiteralValue::String(s) = &lit.value {
-                return s == "use strict";
-            }
+        && let LiteralValue::String(s) = &lit.value
+    {
+        return s == "use strict";
+    }
     false
 }
 
