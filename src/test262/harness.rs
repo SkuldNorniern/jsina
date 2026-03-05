@@ -1,10 +1,10 @@
 use crate::driver::Driver;
-use crate::test262::metadata::{parse_frontmatter, skip_reason_by_features, TestMetadata};
 use crate::test262::TestStatus;
+use crate::test262::metadata::{TestMetadata, parse_frontmatter};
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -17,6 +17,7 @@ pub struct TestResult {
 
 const MINIMAL_HARNESS: &str = r#"
 function Test262Error(message) {
+  this.name = "Test262Error";
   this.message = message || "";
 }
 Test262Error.prototype.toString = function () {
@@ -43,6 +44,13 @@ assert.sameValue = function (actual, expected, message) {
   message = message + 'Expected SameValue(' + assert._toString(actual) + ', ' + assert._toString(expected) + ') to be true';
   throw new Test262Error(message);
 };
+assert.notSameValue = function (actual, unexpected, message) {
+  if (!assert._isSameValue(actual, unexpected)) return;
+  if (message === undefined) message = '';
+  else message = message + ' ';
+  message = message + 'Expected SameValue(' + assert._toString(actual) + ', ' + assert._toString(unexpected) + ') to be false';
+  throw new Test262Error(message);
+};
 function $DONOTEVALUATE() {
   throw "Test262: This statement should not be evaluated.";
 }
@@ -55,7 +63,13 @@ fn load_harness_from_dir(root: &Path) -> Option<String> {
     let mut out = String::new();
     for name in HARNESS_FILES {
         let path = harness_dir.join(name);
-        let content = std::fs::read_to_string(&path).ok()?;
+        let mut content = std::fs::read_to_string(&path).ok()?;
+        if name == &"sta.js" {
+            content = content.replace(
+                "this.message = message || \"\";",
+                "this.name = \"Test262Error\"; this.message = message || \"\";",
+            );
+        }
         out.push_str(&content);
         out.push('\n');
     }
@@ -212,6 +226,7 @@ fn build_prelude(root: Option<&Path>, meta: Option<&TestMetadata>) -> (String, b
     }
     prelude.push_str(&harness);
     prelude.push('\n');
+    prelude.push_str("globalThis.assert = assert;\n");
     prelude.push_str("globalThis.isSameValue = assert._isSameValue;\n");
     let mut includes_ok = true;
     if let (Some(r), Some(m)) = (root, meta) {
@@ -240,12 +255,31 @@ fn build_prelude(root: Option<&Path>, meta: Option<&TestMetadata>) -> (String, b
                     prelude.push_str(&function_name);
                     prelude.push_str(";\n");
                 }
+                if name == "propertyHelper.js" {
+                    prelude.push_str("globalThis.__isArray = Array.isArray;\n");
+                    prelude.push_str("globalThis.__defineProperty = Object.defineProperty;\n");
+                    prelude.push_str("globalThis.__getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;\n");
+                    prelude.push_str(
+                        "globalThis.__getOwnPropertyNames = Object.getOwnPropertyNames;\n",
+                    );
+                    prelude.push_str(
+                        "globalThis.__join = Function.prototype.call.bind(Array.prototype.join);\n",
+                    );
+                    prelude.push_str(
+                        "globalThis.__push = Function.prototype.call.bind(Array.prototype.push);\n",
+                    );
+                    prelude.push_str("globalThis.__hasOwnProperty = Function.prototype.call.bind(Object.prototype.hasOwnProperty);\n");
+                    prelude.push_str("globalThis.__propertyIsEnumerable = Function.prototype.call.bind(Object.prototype.propertyIsEnumerable);\n");
+                    prelude.push_str(
+                        "globalThis.nonIndexNumericPropertyName = Math.pow(2, 32) - 1;\n",
+                    );
+                }
             } else {
                 includes_ok = false;
             }
         }
     }
-    (prelude, includes_ok)
+    (prelude, true)
 }
 
 fn wrap_test(body: &str, prelude: &str) -> String {
@@ -259,19 +293,6 @@ fn wrap_test(body: &str, prelude: &str) -> String {
     }
 }
 
-fn classify_unsupported_error(message: &str) -> Option<String> {
-    if message.contains("unsupported: class not implemented") {
-        return Some("feature not supported: class".to_string());
-    }
-    if message.contains("nested destructuring not yet supported") {
-        return Some("feature not supported: nested destructuring".to_string());
-    }
-    if message.contains("(JSINA-PARSE-011)") {
-        return Some("feature not supported: array rest destructuring".to_string());
-    }
-    None
-}
-
 const TEST262_TIMEOUT: Duration = Duration::from_secs(2);
 
 enum RunOutcome {
@@ -282,11 +303,33 @@ enum RunOutcome {
 
 const THREAD_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
 
-const TEST_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+const TEST_THREAD_STACK_SIZE: usize = 64 * 1024 * 1024;
 
-fn run_one(wrapped: &str, negative: Option<&crate::test262::metadata::NegativeMeta>) -> RunOutcome {
+fn error_matches_negative(msg: &str, neg: &crate::test262::metadata::NegativeMeta) -> bool {
+    if neg.error_type.is_empty() {
+        return true;
+    }
+    msg.contains(&neg.error_type)
+        || (neg.error_type == "SyntaxError"
+            && (msg.contains("JSINA-PARSE") || msg.contains("JSINA-EARLY")))
+        || (neg.error_type == "ReferenceError" && msg.contains("undefined variable"))
+}
+
+fn run_one(
+    wrapped: &str,
+    negative: Option<&crate::test262::metadata::NegativeMeta>,
+    test262_mode: bool,
+) -> RunOutcome {
     match Driver::ast(wrapped) {
-        Err(e) => RunOutcome::Fail(e.to_string()),
+        Err(e) => {
+            let msg = e.to_string();
+            if let Some(neg) = negative {
+                if error_matches_negative(&msg, neg) {
+                    return RunOutcome::Pass;
+                }
+            }
+            RunOutcome::Fail(msg)
+        }
         Ok(_) => {
             let wrapped = wrapped.to_string();
             let cancel = Arc::new(AtomicBool::new(false));
@@ -299,6 +342,7 @@ fn run_one(wrapped: &str, negative: Option<&crate::test262::metadata::NegativeMe
                         &wrapped,
                         Some(&cancel_clone),
                         true,
+                        test262_mode,
                     );
                     let _ = tx.send(result);
                 })
@@ -315,23 +359,16 @@ fn run_one(wrapped: &str, negative: Option<&crate::test262::metadata::NegativeMe
                 Ok(Err(e)) => {
                     let _ = handle.join();
                     let msg = e.to_string();
-                    if msg.contains("infinite loop detected")
-                        || msg.contains("cancelled")
-                    {
+                    if msg.contains("infinite loop detected") || msg.contains("cancelled") {
                         RunOutcome::Timeout
                     } else if let Some(neg) = negative {
-                        let matches = msg.contains(&neg.error_type)
-                            || (neg.error_type == "SyntaxError"
-                                && (msg.contains("JSINA-PARSE") || msg.contains("JSINA-EARLY")))
-                            || (neg.error_type == "ReferenceError"
-                                && msg.contains("undefined variable"));
-                        if !neg.error_type.is_empty() && !matches {
+                        if error_matches_negative(&msg, neg) {
+                            RunOutcome::Pass
+                        } else {
                             RunOutcome::Fail(format!(
                                 "expected error type '{}', got: {}",
                                 neg.error_type, msg
                             ))
-                        } else {
-                            RunOutcome::Pass
                         }
                     } else {
                         RunOutcome::Fail(msg)
@@ -372,45 +409,21 @@ pub fn run_test(test_path: &Path, test262_root: Option<&Path>) -> TestResult {
     };
 
     let meta = parse_frontmatter(&source);
-    if let Some(ref m) = meta {
-        if let Some(reason) = skip_reason_by_features(m, test_path) {
-            return TestResult {
-                path: test_path.to_string_lossy().to_string(),
-                status: TestStatus::SkipFeature,
-                message: Some(reason),
-            };
-        }
-    }
-
     let body = extract_test_body(&source);
     let use_harness = test262_root.is_some() && !has_raw_flag(meta.as_ref());
 
-    let (prelude, includes_ok) = if use_harness {
+    let (prelude, _) = if use_harness {
         build_prelude(test262_root, meta.as_ref())
     } else {
         (load_harness(None), true)
     };
 
-    if !includes_ok {
-        return TestResult {
-            path: test_path.to_string_lossy().to_string(),
-            status: TestStatus::SkipParse,
-            message: Some("required include file not found or unreadable".to_string()),
-        };
-    }
-
     let wrapped = wrap_test(body, &prelude);
-
-    let outcome = run_one(&wrapped, meta.as_ref().and_then(|m| m.negative.as_ref()));
-    if let RunOutcome::Fail(message) = &outcome {
-        if let Some(reason) = classify_unsupported_error(message) {
-            return TestResult {
-                path: test_path.to_string_lossy().to_string(),
-                status: TestStatus::SkipFeature,
-                message: Some(reason),
-            };
-        }
-    }
+    let outcome = run_one(
+        &wrapped,
+        meta.as_ref().and_then(|m| m.negative.as_ref()),
+        test262_root.is_some(),
+    );
 
     if matches!(outcome, RunOutcome::Pass) && needs_strict_rerun(meta.as_ref()) {
         let (base_prelude, _) = if use_harness {
@@ -423,17 +436,9 @@ pub fn run_test(test_path: &Path, test262_root: Option<&Path>) -> TestResult {
         let strict_outcome = run_one(
             &strict_wrapped,
             meta.as_ref().and_then(|m| m.negative.as_ref()),
+            test262_root.is_some(),
         );
         if !matches!(strict_outcome, RunOutcome::Pass) {
-            if let RunOutcome::Fail(message) = &strict_outcome {
-                if let Some(reason) = classify_unsupported_error(message) {
-                    return TestResult {
-                        path: test_path.to_string_lossy().to_string(),
-                        status: TestStatus::SkipFeature,
-                        message: Some(reason),
-                    };
-                }
-            }
             return TestResult {
                 path: test_path.to_string_lossy().to_string(),
                 status: match strict_outcome {
@@ -457,7 +462,7 @@ pub fn run_test(test_path: &Path, test262_root: Option<&Path>) -> TestResult {
         RunOutcome::Timeout => TestResult {
             path: test_path.to_string_lossy().to_string(),
             status: TestStatus::Timeout,
-            message: Some("timeout (30s)".to_string()),
+            message: Some(format!("timeout ({}s)", TEST262_TIMEOUT.as_secs())),
         },
         RunOutcome::Fail(msg) => TestResult {
             path: test_path.to_string_lossy().to_string(),
