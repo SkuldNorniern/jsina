@@ -1,6 +1,7 @@
 use super::codes::ErrorCode;
 use super::span::Span;
 use crate::vm::VmError;
+use inksac::{Color, Style, Styleable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -104,21 +105,51 @@ impl Diagnostic {
     pub fn format(&self, source: Option<&str>) -> String {
         let mut out = String::new();
 
+        let (header_style, label_style) = match self.severity {
+            Severity::Error => (
+                Style::builder().foreground(Color::Red).bold().build(),
+                None,
+            ),
+            Severity::Warning => (
+                Style::builder().foreground(Color::Yellow).build(),
+                Some(Style::builder().foreground(Color::Yellow).bold().build()),
+            ),
+            Severity::Info => (
+                Style::builder().foreground(Color::Cyan).build(),
+                Some(Style::builder().foreground(Color::Cyan).bold().build()),
+            ),
+        };
+
+        let dim_style = Style::builder().dim().build();
         let loc = self
             .primary_span
             .map(|s| format!(" at {}", s))
             .unwrap_or_default();
+
         let header = match self.severity {
             Severity::Error => format!("{} ({}){}\n", self.message, self.code, loc),
-            _ => format!(
-                "{}: {} ({}){}\n",
-                self.severity.label(),
-                self.message,
-                self.code,
-                loc
-            ),
+            _ => {
+                let label = self.severity.label();
+                format!("{}: {} ({}){}\n", label, self.message, self.code, loc)
+            }
         };
-        out.push_str(&header);
+        let header_styled = match self.severity {
+            Severity::Error => header.style(header_style).to_string(),
+            _ => {
+                let (label, rest) = header
+                    .split_once(':')
+                    .map(|(l, r)| (l, format!(":{}", r)))
+                    .unwrap_or_else(|| ("", header.clone()));
+                format!(
+                    "{}{}",
+                    label
+                        .style(label_style.expect("label_style set for warning/info"))
+                        .to_string(),
+                    rest.style(header_style).to_string()
+                )
+            }
+        };
+        out.push_str(&header_styled);
 
         if let (Some(span), Some(src)) = (self.primary_span, source)
             && let Some(snippet) = self.extract_snippet(src, span)
@@ -127,15 +158,24 @@ impl Diagnostic {
         }
 
         if let Some(cause) = &self.cause {
-            out.push_str(&format!("  cause: {}\n", cause));
+            out.push_str(&format!(
+                "  {}\n",
+                format!("cause: {}", cause).style(dim_style).to_string()
+            ));
         }
 
         if let Some(help) = &self.help {
-            out.push_str(&format!("  help: {}\n", help));
+            out.push_str(&format!(
+                "  {}\n",
+                format!("help: {}", help).style(dim_style).to_string()
+            ));
         }
 
         for note in &self.notes {
-            out.push_str(&format!("  note: {}\n", note));
+            out.push_str(&format!(
+                "  {}\n",
+                format!("note: {}", note).style(dim_style).to_string()
+            ));
         }
 
         out
@@ -160,11 +200,15 @@ impl Diagnostic {
         let last_line = (end_line + CONTEXT_WINDOW_LINES).min(total_lines);
         let gutter_width = last_line.to_string().len();
 
+        let cyan_style = Style::builder().foreground(Color::Cyan).build();
+        let red_style = Style::builder().foreground(Color::Red).bold().build();
+
         let mut out = String::new();
-        out.push_str(&format!(
+        let loc_line = format!(
             "  --> {}:{}\n",
             span.start.line, span.start.column
-        ));
+        );
+        out.push_str(&loc_line.style(cyan_style).to_string());
         out.push_str(&format!("  {} |\n", " ".repeat(gutter_width)));
 
         for line_number in first_line..=last_line {
@@ -178,7 +222,11 @@ impl Diagnostic {
 
             if (start_line..=end_line).contains(&line_number) {
                 let marker = Self::marker_for_line(line, span, line_number, start_line, end_line);
-                out.push_str(&format!("  {} | {}\n", " ".repeat(gutter_width), marker));
+                out.push_str(&format!(
+                    "  {} | {}\n",
+                    " ".repeat(gutter_width),
+                    marker.style(red_style).to_string()
+                ));
             }
         }
 

@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::driver::Driver;
+use inksac::{Color, Style, Styleable};
 
 #[derive(Debug)]
 pub enum CliError {
@@ -36,45 +37,93 @@ impl From<crate::driver::DriverError> for CliError {
     }
 }
 
-const HELP: &str = r#"jsina - JavaScript engine (ECMAScript 2026 aware)
+fn help_text() -> String {
+    let header_style = Style::builder().foreground(Color::Cyan).bold().build();
+    let cmd_style = Style::builder().foreground(Color::Green).build();
+    let opt_style = Style::builder().foreground(Color::Yellow).build();
+    let dim_style = Style::builder().dim().build();
 
-USAGE:
-    jsina <command> [options] [file]
+    let title = format!("{} - JavaScript engine (ECMAScript 2026 aware)", "liora".style(header_style).to_string());
+    let usage_h = "USAGE:".style(header_style).to_string();
+    let usage_line = format!("    liora <command> [options] [file]");
+    let commands_h = "COMMANDS:".style(header_style).to_string();
+    let opts_h = "OPTIONS (run):".style(header_style).to_string();
+    let examples_h = "EXAMPLES:".style(header_style).to_string();
 
-COMMANDS:
-    run      Execute a JavaScript file (default)
-    serve    Serve static files and run JS via /run?file= (default dir: sample/simple_web)
-    tokens   Dump tokens from source
-    ast      Dump AST
-    hir      Dump HIR / Lamina IR
-    bc       Dump bytecode
-    ir       Alias for hir - dump Lamina IR
-    test262  Run test262 (allowlist or --all; --filter PAT; --limit N; --json for CI)
+    format!(
+        r#"{}
 
-OPTIONS (run):
-    --seed N        Seed RNG for deterministic Math.random (M2 replay)
-    --trace-exec    Print each opcode as it executes (debug)
-    --jit           Try JIT for trivial main (numeric only); fallback to interpreter
-    --jit-stats     Print JIT/tiering counters to stderr
-    --compat        Node compat: add require, process stubs (for running Node-style scripts)
+{}
+    {}
 
-EXAMPLES:
-    jsina run script.js
-    jsina run --seed 42 script.js
-    jsina serve sample/simple_web
-    jsina tokens script.js
-    jsina hir script.js
-"#;
+{}
+    {}      Execute a JavaScript file (default)
+    {}    Serve static files and run JS via /run?file= (default dir: sample/simple_web)
+    {}   Dump tokens from source
+    {}      Dump AST
+    {}      Dump HIR / Lamina IR
+    {}     Dump bytecode
+    {}       Alias for hir - dump Lamina IR
+    {}  Run test262 (allowlist or --all; --filter PAT; --limit N; --json for CI)
+
+{}
+    {} N        Seed RNG for deterministic Math.random (M2 replay)
+    {}    Print each opcode as it executes (debug)
+    {}           Try JIT for trivial main (numeric only); fallback to interpreter
+    {}     Print JIT/tiering counters to stderr
+    {}        Node compat: add require, process stubs (for running Node-style scripts)
+
+{}
+    liora {} script.js
+    liora {} --seed 42 script.js
+    liora {} sample/simple_web
+    liora {} script.js
+    liora {} script.js
+"#,
+        title,
+        usage_h,
+        usage_line.style(dim_style).to_string(),
+        commands_h,
+        "run".style(cmd_style).to_string(),
+        "serve".style(cmd_style).to_string(),
+        "tokens".style(cmd_style).to_string(),
+        "ast".style(cmd_style).to_string(),
+        "hir".style(cmd_style).to_string(),
+        "bc".style(cmd_style).to_string(),
+        "ir".style(cmd_style).to_string(),
+        "test262".style(cmd_style).to_string(),
+        opts_h,
+        "--seed".style(opt_style).to_string(),
+        "--trace-exec".style(opt_style).to_string(),
+        "--jit".style(opt_style).to_string(),
+        "--jit-stats".style(opt_style).to_string(),
+        "--compat".style(opt_style).to_string(),
+        examples_h,
+        "run".style(cmd_style).to_string(),
+        "run".style(cmd_style).to_string(),
+        "serve".style(cmd_style).to_string(),
+        "tokens".style(cmd_style).to_string(),
+        "hir".style(cmd_style).to_string(),
+    )
+}
 
 pub fn run(args: &[String]) -> Result<(), CliError> {
+    if args.len() <= 1 {
+        print!("{}", help_text());
+        return Ok(());
+    }
+
     let (command, path) = parse_args(args)?;
     let cmd = command.as_deref().unwrap_or("run");
-    let source =
-        if cmd == "test262" || cmd == "serve" || cmd == "help" || cmd == "-h" || cmd == "--help" {
-            String::new()
-        } else {
-            load_source(path)?
-        };
+
+    let read_source = || -> Result<String, CliError> {
+        let input_path = path.ok_or_else(|| CliError::Usage("missing file path".to_string()))?;
+        let source_path = Path::new(input_path);
+        if !source_path.exists() {
+            return Err(CliError::Usage(format!("file not found: {}", input_path)));
+        }
+        Ok(fs::read_to_string(source_path)?)
+    };
 
     match cmd {
         "serve" => {
@@ -82,6 +131,7 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             crate::serve::serve(&serve_dir, port)?;
         }
         "run" => {
+            let source = read_source()?;
             let (seed, trace, jit, jit_stats, compat) = parse_run_opts(args);
             if let Some(s) = seed {
                 crate::runtime::builtins::seed_random(s);
@@ -103,17 +153,21 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             println!("{}", result);
         }
         "tokens" => {
+            let source = read_source()?;
             commands::tokens(&source);
         }
         "ast" => {
+            let source = read_source()?;
             let script = Driver::ast(&source)?;
             commands::ast(&script);
         }
         "hir" | "ir" => {
+            let source = read_source()?;
             let ir = Driver::hir(&source)?;
             println!("{}", ir);
         }
         "bc" => {
+            let source = read_source()?;
             let bc = Driver::bc(&source)?;
             println!("{}", bc);
         }
@@ -122,7 +176,7 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             commands::test262(flag_dir.as_deref(), all, json, limit, filter.as_deref())?;
         }
         "help" | "-h" | "--help" => {
-            print!("{}", HELP);
+            print!("{}", help_text());
         }
         _ => {
             return Err(CliError::Usage(format!(
@@ -282,14 +336,4 @@ fn parse_test262_args(
         }
     }
     Ok((test262_dir, all, json, limit, filter))
-}
-
-fn load_source(path: Option<&str>) -> Result<String, CliError> {
-    match path {
-        Some(p) => {
-            let content = fs::read_to_string(Path::new(p))?;
-            Ok(content)
-        }
-        None => Ok("function main() { let x = 10; let y = 40; return x + y; }".to_string()),
-    }
 }

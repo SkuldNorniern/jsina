@@ -2,7 +2,8 @@ use crate::cli::CliError;
 use crate::driver::Driver;
 use crate::frontend::ast;
 use crate::frontend::{Expression, Script, Statement, TokenType};
-use crate::test262::{TestStatus, load_allowlist, run_test};
+use crate::test262::{load_allowlist, run_test, TestStatus};
+use inksac::{Color, Style, Styleable};
 use std::path::Path;
 
 pub fn tokens(source: &str) {
@@ -455,7 +456,8 @@ pub fn test262(
         if entry.map(|e| e.reason.as_str()) == Some("known-bug") {
             skip += 1;
             if !json_output {
-                println!("SKIP  {}  known-bug", test_path_str);
+                let skip_style = Style::builder().foreground(Color::Yellow).build();
+                println!("{}  {}  known-bug", "SKIP".style(skip_style).to_string(), test_path_str);
             }
             continue;
         }
@@ -477,14 +479,17 @@ pub fn test262(
                     } else {
                         ""
                     };
-                    println!("PASS  {}{}", result.path, suffix);
+                    let pass_style = Style::builder().foreground(Color::Green).build();
+                    println!("{}  {}{}", "PASS".style(pass_style).to_string(), result.path, suffix);
                 }
             }
             TestStatus::Fail => {
                 fail += 1;
                 if !json_output {
+                    let fail_style = Style::builder().foreground(Color::Red).bold().build();
                     println!(
-                        "FAIL  {}  {}",
+                        "{}  {}  {}",
+                        "FAIL".style(fail_style).to_string(),
                         result.path,
                         result.message.as_deref().unwrap_or("")
                     );
@@ -493,8 +498,10 @@ pub fn test262(
             TestStatus::Timeout => {
                 timeout += 1;
                 if !json_output {
+                    let timeout_style = Style::builder().foreground(Color::Magenta).build();
                     println!(
-                        "TIMEOUT  {}  {}",
+                        "{}  {}  {}",
+                        "TIMEOUT".style(timeout_style).to_string(),
                         result.path,
                         result.message.as_deref().unwrap_or("")
                     );
@@ -504,14 +511,17 @@ pub fn test262(
                 skip += 1;
                 if !json_output {
                     let reason = result.message.as_deref().unwrap_or("(no reason)");
-                    println!("SKIP  {}  [{}]", result.path, reason);
+                    let skip_style = Style::builder().foreground(Color::Yellow).build();
+                    println!("{}  {}  [{}]", "SKIP".style(skip_style).to_string(), result.path, reason);
                 }
             }
             TestStatus::HarnessError => {
                 fail += 1;
                 if !json_output {
+                    let error_style = Style::builder().foreground(Color::Red).bold().build();
                     println!(
-                        "ERROR {}  {}",
+                        "{} {}  {}",
+                        "ERROR".style(error_style).to_string(),
                         result.path,
                         result.message.as_deref().unwrap_or("")
                     );
