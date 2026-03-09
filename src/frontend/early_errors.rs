@@ -72,6 +72,223 @@ fn is_iteration(stmt: &Statement) -> bool {
     )
 }
 
+fn is_forbidden_single_statement_declaration(stmt: &Statement) -> bool {
+    match stmt {
+        Statement::LetDecl(_)
+        | Statement::ConstDecl(_)
+        | Statement::ClassDecl(_)
+        | Statement::FunctionDecl(_) => true,
+        Statement::Labeled(l) => is_forbidden_single_statement_declaration(&l.body),
+        _ => false,
+    }
+}
+
+fn check_single_statement_context(stmt: &Statement, errors: &mut Vec<EarlyError>) {
+    if is_forbidden_single_statement_declaration(stmt) {
+        errors.push(EarlyError {
+            code: ErrorCode::EarlyStrictReserved,
+            message: "declaration not allowed in single-statement context".to_string(),
+            span: stmt.span(),
+        });
+    }
+}
+
+fn check_class_body(
+    body: &ClassBody,
+    scope: &mut Scope,
+    ctx: &CheckContext,
+    errors: &mut Vec<EarlyError>,
+) {
+    for member in &body.members {
+        if let ClassMemberKey::Computed(expr) = &member.key {
+            check_expression(expr, scope, ctx, errors);
+        }
+        match &member.kind {
+            ClassMemberKind::Method(func)
+            | ClassMemberKind::Get(func)
+            | ClassMemberKind::Set(func) => {
+                check_function_expression(func, scope, ctx, errors)
+            }
+            ClassMemberKind::Field(Some(init)) => check_expression(init, scope, ctx, errors),
+            ClassMemberKind::Field(None) => {}
+        }
+    }
+}
+
+fn check_function_expression(
+    function: &FunctionExprData,
+    scope: &mut Scope,
+    ctx: &CheckContext,
+    errors: &mut Vec<EarlyError>,
+) {
+    scope.enter_function();
+    let fn_strict = ctx.strict
+        || (if let Statement::Block(b) = &*function.body {
+            block_is_strict(&b.body)
+        } else {
+            false
+        });
+    let fn_ctx = CheckContext {
+        in_function: true,
+        in_iteration: ctx.in_iteration,
+        in_switch: ctx.in_switch,
+        strict: fn_strict,
+        iter_labels: ctx.iter_labels.clone(),
+        break_labels: ctx.break_labels.clone(),
+    };
+    check_statement(&function.body, scope, &fn_ctx, errors);
+    scope.leave_function();
+}
+
+fn check_expression(
+    expression: &Expression,
+    scope: &mut Scope,
+    ctx: &CheckContext,
+    errors: &mut Vec<EarlyError>,
+) {
+    match expression {
+        Expression::Literal(_) | Expression::This(_) | Expression::Identifier(_) | Expression::Super(_) => {}
+        Expression::Binary(b) => {
+            check_expression(&b.left, scope, ctx, errors);
+            check_expression(&b.right, scope, ctx, errors);
+        }
+        Expression::Unary(u) => check_expression(&u.argument, scope, ctx, errors),
+        Expression::Call(c) => {
+            check_expression(&c.callee, scope, ctx, errors);
+            for arg in &c.args {
+                match arg {
+                    CallArg::Expr(expr) | CallArg::Spread(expr) => {
+                        check_expression(expr, scope, ctx, errors)
+                    }
+                }
+            }
+        }
+        Expression::Assign(a) => {
+            if ctx.strict
+                && let Expression::Identifier(identifier) = &*a.left
+                && is_strict_reserved(&identifier.name)
+            {
+                errors.push(EarlyError {
+                    code: ErrorCode::EarlyStrictReserved,
+                    message: format!(
+                        "'{}' may not be assigned in strict mode",
+                        identifier.name
+                    ),
+                    span: identifier.span,
+                });
+            }
+            check_expression(&a.left, scope, ctx, errors);
+            check_expression(&a.right, scope, ctx, errors);
+        }
+        Expression::Conditional(c) => {
+            check_expression(&c.condition, scope, ctx, errors);
+            check_expression(&c.then_expr, scope, ctx, errors);
+            check_expression(&c.else_expr, scope, ctx, errors);
+        }
+        Expression::ObjectLiteral(object_literal) => {
+            for property_or_spread in &object_literal.properties {
+                match property_or_spread {
+                    ObjectPropertyOrSpread::Spread(expr) => check_expression(expr, scope, ctx, errors),
+                    ObjectPropertyOrSpread::Property(property) => {
+                        if let ObjectPropertyKey::Computed(expr) = &property.key {
+                            check_expression(expr, scope, ctx, errors);
+                        }
+                        check_expression(&property.value, scope, ctx, errors);
+                    }
+                }
+            }
+        }
+        Expression::ArrayLiteral(array_literal) => {
+            for element in &array_literal.elements {
+                match element {
+                    ArrayElement::Expr(expr) | ArrayElement::Spread(expr) => {
+                        check_expression(expr, scope, ctx, errors)
+                    }
+                    ArrayElement::Hole => {}
+                }
+            }
+        }
+        Expression::Member(member) => {
+            check_expression(&member.object, scope, ctx, errors);
+            if let MemberProperty::Expression(expr) = &member.property {
+                check_expression(expr, scope, ctx, errors);
+            }
+        }
+        Expression::FunctionExpr(function_expression) => {
+            check_function_expression(function_expression, scope, ctx, errors)
+        }
+        Expression::ArrowFunction(arrow_function) => match &arrow_function.body {
+            ArrowBody::Expression(expr) => check_expression(expr, scope, ctx, errors),
+            ArrowBody::Block(block) => {
+                scope.enter_function();
+                let fn_strict = ctx.strict
+                    || (if let Statement::Block(b) = block.as_ref() {
+                        block_is_strict(&b.body)
+                    } else {
+                        false
+                    });
+                let fn_ctx = CheckContext {
+                    in_function: true,
+                    in_iteration: ctx.in_iteration,
+                    in_switch: ctx.in_switch,
+                    strict: fn_strict,
+                    iter_labels: ctx.iter_labels.clone(),
+                    break_labels: ctx.break_labels.clone(),
+                };
+                check_statement(block, scope, &fn_ctx, errors);
+                scope.leave_function();
+            }
+        },
+        Expression::PrefixIncrement(postfix)
+        | Expression::PrefixDecrement(postfix)
+        | Expression::PostfixIncrement(postfix)
+        | Expression::PostfixDecrement(postfix) => {
+            if ctx.strict
+                && let Expression::Identifier(identifier) = &*postfix.argument
+                && is_strict_reserved(&identifier.name)
+            {
+                errors.push(EarlyError {
+                    code: ErrorCode::EarlyStrictReserved,
+                    message: format!(
+                        "'{}' may not be updated in strict mode",
+                        identifier.name
+                    ),
+                    span: identifier.span,
+                });
+            }
+            check_expression(&postfix.argument, scope, ctx, errors)
+        }
+        Expression::New(new_expression) => {
+            check_expression(&new_expression.callee, scope, ctx, errors);
+            for arg in &new_expression.args {
+                match arg {
+                    CallArg::Expr(expr) | CallArg::Spread(expr) => {
+                        check_expression(expr, scope, ctx, errors)
+                    }
+                }
+            }
+        }
+        Expression::ClassExpr(class_expression) => {
+            if let Some(superclass) = &class_expression.superclass {
+                check_expression(superclass, scope, ctx, errors);
+            }
+            check_class_body(&class_expression.body, scope, ctx, errors);
+        }
+        Expression::LogicalAssign(logical_assign) => {
+            check_expression(&logical_assign.left, scope, ctx, errors);
+            check_expression(&logical_assign.right, scope, ctx, errors);
+        }
+        Expression::Yield(yield_expression) => {
+            if let Some(argument) = &yield_expression.argument {
+                check_expression(argument, scope, ctx, errors);
+            }
+        }
+        Expression::Await(await_expression) => {
+            check_expression(&await_expression.argument, scope, ctx, errors)
+        }
+    }
+}
+
 fn check_script(script: &Script, errors: &mut Vec<EarlyError>) {
     let mut scope = Scope::new();
     let script_strict = script_is_strict(script);
@@ -103,6 +320,7 @@ fn check_statement(
             scope.leave_block();
         }
         Statement::Labeled(l) => {
+            check_single_statement_context(&l.body, errors);
             let mut new_ctx = ctx.clone();
             if is_iteration(&l.body) {
                 new_ctx.iter_labels.push(l.label.clone());
@@ -113,6 +331,10 @@ fn check_statement(
             check_statement(&l.body, scope, &new_ctx, errors);
         }
         Statement::ClassDecl(c) => {
+            if let Some(superclass) = &c.superclass {
+                check_expression(superclass, scope, ctx, errors);
+            }
+            check_class_body(&c.body, scope, ctx, errors);
             if ctx.strict && is_strict_reserved(&c.name) {
                 errors.push(EarlyError {
                     code: ErrorCode::EarlyStrictReserved,
@@ -168,6 +390,9 @@ fn check_statement(
             scope.leave_function();
         }
         Statement::Return(r) => {
+            if let Some(argument) = &r.argument {
+                check_expression(argument, scope, ctx, errors);
+            }
             if !ctx.in_function {
                 errors.push(EarlyError {
                     code: ErrorCode::EarlyReturnOutsideFunction,
@@ -212,6 +437,9 @@ fn check_statement(
         }
         Statement::LetDecl(d) => {
             for decl in &d.declarations {
+                if let Some(init) = &decl.init {
+                    check_expression(init, scope, ctx, errors);
+                }
                 for name in decl.binding.names() {
                     if ctx.strict && is_strict_reserved(name) {
                         errors.push(EarlyError {
@@ -235,6 +463,9 @@ fn check_statement(
         }
         Statement::ConstDecl(d) => {
             for decl in &d.declarations {
+                if let Some(init) = &decl.init {
+                    check_expression(init, scope, ctx, errors);
+                }
                 for name in decl.binding.names() {
                     if ctx.strict && is_strict_reserved(name) {
                         errors.push(EarlyError {
@@ -258,6 +489,9 @@ fn check_statement(
         }
         Statement::VarDecl(d) => {
             for decl in &d.declarations {
+                if let Some(init) = &decl.init {
+                    check_expression(init, scope, ctx, errors);
+                }
                 for name in decl.binding.names() {
                     if ctx.strict && is_strict_reserved(name) {
                         errors.push(EarlyError {
@@ -274,12 +508,17 @@ fn check_statement(
             }
         }
         Statement::If(i) => {
+            check_expression(&i.condition, scope, ctx, errors);
+            check_single_statement_context(&i.then_branch, errors);
             check_statement(&i.then_branch, scope, ctx, errors);
             if let Some(else_b) = &i.else_branch {
+                check_single_statement_context(else_b, errors);
                 check_statement(else_b, scope, ctx, errors);
             }
         }
         Statement::With(w) => {
+            check_expression(&w.object, scope, ctx, errors);
+            check_single_statement_context(&w.body, errors);
             if ctx.strict {
                 errors.push(EarlyError {
                     code: ErrorCode::EarlyStrictReserved,
@@ -290,6 +529,8 @@ fn check_statement(
             check_statement(&w.body, scope, ctx, errors);
         }
         Statement::While(w) => {
+            check_expression(&w.condition, scope, ctx, errors);
+            check_single_statement_context(&w.body, errors);
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,
                 in_iteration: true,
@@ -301,6 +542,8 @@ fn check_statement(
             check_statement(&w.body, scope, &iter_ctx, errors);
         }
         Statement::DoWhile(d) => {
+            check_expression(&d.condition, scope, ctx, errors);
+            check_single_statement_context(&d.body, errors);
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,
                 in_iteration: true,
@@ -316,6 +559,13 @@ fn check_statement(
             if let Some(ref init) = f.init {
                 check_statement(init, scope, ctx, errors);
             }
+            if let Some(condition) = &f.condition {
+                check_expression(condition, scope, ctx, errors);
+            }
+            if let Some(update) = &f.update {
+                check_expression(update, scope, ctx, errors);
+            }
+            check_single_statement_context(&f.body, errors);
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,
                 in_iteration: true,
@@ -329,6 +579,7 @@ fn check_statement(
         }
         Statement::ForIn(f) => {
             scope.enter_block();
+            check_expression(&f.right, scope, ctx, errors);
             match &f.left {
                 ForInOfLeft::LetDecl(n) | ForInOfLeft::ConstDecl(n) => {
                     if ctx.strict && is_strict_reserved(n) {
@@ -377,6 +628,7 @@ fn check_statement(
                 }
                 ForInOfLeft::Identifier(_) | ForInOfLeft::Pattern(_) => {}
             }
+            check_single_statement_context(&f.body, errors);
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,
                 in_iteration: true,
@@ -390,6 +642,7 @@ fn check_statement(
         }
         Statement::ForOf(f) => {
             scope.enter_block();
+            check_expression(&f.right, scope, ctx, errors);
             match &f.left {
                 ForInOfLeft::LetDecl(n) | ForInOfLeft::ConstDecl(n) => {
                     if ctx.strict && is_strict_reserved(n) {
@@ -438,6 +691,7 @@ fn check_statement(
                 }
                 ForInOfLeft::Identifier(_) | ForInOfLeft::Pattern(_) => {}
             }
+            check_single_statement_context(&f.body, errors);
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,
                 in_iteration: true,
@@ -450,6 +704,7 @@ fn check_statement(
             scope.leave_block();
         }
         Statement::Switch(s) => {
+            check_expression(&s.discriminant, scope, ctx, errors);
             let switch_ctx = CheckContext {
                 in_function: ctx.in_function,
                 in_iteration: ctx.in_iteration,
@@ -459,14 +714,19 @@ fn check_statement(
                 break_labels: ctx.break_labels.clone(),
             };
             for case in &s.cases {
+                if let Some(test) = &case.test {
+                    check_expression(test, scope, &switch_ctx, errors);
+                }
                 for stmt in &case.body {
                     check_statement(stmt, scope, &switch_ctx, errors);
                 }
             }
         }
-        Statement::Expression(_) => {}
+        Statement::Expression(expr_stmt) => {
+            check_expression(&expr_stmt.expression, scope, ctx, errors)
+        }
         Statement::Empty(_) => {}
-        Statement::Throw(_) => {}
+        Statement::Throw(throw_stmt) => check_expression(&throw_stmt.argument, scope, ctx, errors),
         Statement::Try(t) => {
             check_statement(&t.body, scope, ctx, errors);
             if let Some(ref c) = t.catch_body {
@@ -657,6 +917,22 @@ mod tests {
     fn check_non_strict_eval_ok() {
         let r = parse_and_check("function f(eval) { return eval; }");
         assert!(r.is_ok());
+    }
+
+    #[test]
+    fn check_strict_arguments_assignment() {
+        let r = parse_and_check(r#""use strict"; function f() { arguments = 1; }"#);
+        assert!(r.is_err());
+        let errs = r.unwrap_err();
+        assert!(errs.iter().any(|e| e.message.contains("arguments")));
+    }
+
+    #[test]
+    fn check_strict_eval_update() {
+        let r = parse_and_check(r#""use strict"; function f() { eval++; }"#);
+        assert!(r.is_err());
+        let errs = r.unwrap_err();
+        assert!(errs.iter().any(|e| e.message.contains("eval")));
     }
 
     #[test]

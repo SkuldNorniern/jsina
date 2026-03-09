@@ -620,11 +620,25 @@ impl Parser {
         &mut self,
         start_span: Span,
         method_name: Option<String>,
+        is_generator: bool,
+        is_async: bool,
     ) -> Result<Expression, ParseError> {
         self.expect(TokenType::LeftParen)?;
         let params = self.parse_params()?;
         self.expect(TokenType::RightParen)?;
+        if is_generator {
+            self.generator_depth += 1;
+        }
+        if is_async {
+            self.async_depth += 1;
+        }
         let body = Box::new(self.parse_block()?);
+        if is_async {
+            self.async_depth -= 1;
+        }
+        if is_generator {
+            self.generator_depth -= 1;
+        }
         let span = start_span.merge(body.span());
         Ok(Expression::FunctionExpr(FunctionExprData {
             id: self.next_id(),
@@ -632,8 +646,8 @@ impl Parser {
             name: method_name,
             params,
             body,
-            is_generator: false,
-            is_async: false,
+            is_generator,
+            is_async,
         }))
     }
 
@@ -714,12 +728,39 @@ impl Parser {
                 self.advance();
             }
 
-            let is_get = matches!(
+            let mut method_is_async = false;
+            let mut method_is_generator = false;
+            let async_prefix = (matches!(
+                self.current().map(|t| &t.token_type),
+                Some(TokenType::Async) | Some(TokenType::Identifier)
+            ) && self.current().map(|t| t.lexeme.as_str()) == Some("async"))
+                && !matches!(
+                    self.peek(),
+                    Some(TokenType::LeftParen)
+                        | Some(TokenType::Semicolon)
+                        | Some(TokenType::RightBrace)
+                        | Some(TokenType::Assign)
+                        | Some(TokenType::Eof)
+                        | None
+                );
+            if async_prefix {
+                method_is_async = true;
+                self.advance();
+                method_is_generator = self.optional(TokenType::Multiply);
+            } else if self.optional(TokenType::Multiply) {
+                method_is_generator = true;
+            }
+
+            let is_get = !method_is_async
+                && !method_is_generator
+                && matches!(
                 self.current().map(|t| &t.token_type),
                 Some(TokenType::Identifier)
             ) && self.current().map(|t| t.lexeme.as_str()) == Some("get")
                 && !matches!(self.peek(), Some(TokenType::LeftParen));
-            let is_set = matches!(
+            let is_set = !method_is_async
+                && !method_is_generator
+                && matches!(
                 self.current().map(|t| &t.token_type),
                 Some(TokenType::Identifier)
             ) && self.current().map(|t| t.lexeme.as_str()) == Some("set")
@@ -749,7 +790,19 @@ impl Parser {
                 self.expect(TokenType::LeftParen)?;
                 let params = self.parse_params()?;
                 self.expect(TokenType::RightParen)?;
+                if method_is_generator {
+                    self.generator_depth += 1;
+                }
+                if method_is_async {
+                    self.async_depth += 1;
+                }
                 let body = self.parse_block()?;
+                if method_is_async {
+                    self.async_depth -= 1;
+                }
+                if method_is_generator {
+                    self.generator_depth -= 1;
+                }
                 let fe_span = member_span_start.merge(body.span());
                 let fe_id = self.next_id();
                 let fe = FunctionExprData {
@@ -758,8 +811,8 @@ impl Parser {
                     name: None,
                     params,
                     body: Box::new(body),
-                    is_generator: false,
-                    is_async: false,
+                    is_generator: method_is_generator,
+                    is_async: method_is_async,
                 };
                 let kind = if is_get {
                     ClassMemberKind::Get(fe)
@@ -1503,7 +1556,7 @@ impl Parser {
         self.expect(TokenType::LeftParen)?;
         let object = Box::new(self.parse_expression()?);
         self.expect(TokenType::RightParen)?;
-        let body = Box::new(self.parse_statement()?);
+        let body = Box::new(self.parse_with_body_statement()?);
         let span = start_span.merge(body.span());
         Ok(Statement::With(WithStmt {
             id,
@@ -1511,6 +1564,72 @@ impl Parser {
             object,
             body,
         }))
+    }
+
+    fn parse_with_body_statement(&mut self) -> Result<Statement, ParseError> {
+        let current = self.current().ok_or_else(|| ParseError {
+            code: ErrorCode::ParseUnexpectedEofExpected,
+            message: "unexpected end after with statement".to_string(),
+            span: None,
+        })?;
+
+        match current.token_type {
+            TokenType::Const | TokenType::Class | TokenType::Function => {
+                return Err(ParseError {
+                    code: ErrorCode::ParseUnexpectedToken,
+                    message: "declaration not allowed in with statement body".to_string(),
+                    span: Some(current.span),
+                });
+            }
+            TokenType::Async => {
+                if matches!(self.peek(), Some(TokenType::Function)) {
+                    return Err(ParseError {
+                        code: ErrorCode::ParseUnexpectedToken,
+                        message: "declaration not allowed in with statement body".to_string(),
+                        span: Some(current.span),
+                    });
+                }
+            }
+            TokenType::Let => {
+                let next = self.tokens.get(self.pos + 1).cloned();
+                if let Some(next_token) = next {
+                    let has_line_terminator = next_token.span.start.line > current.span.end.line;
+                    if has_line_terminator {
+                        if matches!(next_token.token_type, TokenType::LeftBracket) {
+                            return Err(ParseError {
+                                code: ErrorCode::ParseUnexpectedToken,
+                                message: "declaration not allowed in with statement body"
+                                    .to_string(),
+                                span: Some(current.span),
+                            });
+                        }
+
+                        let let_span = current.span;
+                        self.advance();
+                        let ident_expr = Expression::Identifier(IdentifierExpr {
+                            id: self.next_id(),
+                            span: let_span,
+                            name: "let".to_string(),
+                        });
+                        let expr_stmt = Statement::Expression(ExpressionStmt {
+                            id: self.next_id(),
+                            span: let_span,
+                            expression: Box::new(ident_expr),
+                        });
+                        return Ok(expr_stmt);
+                    }
+                }
+
+                return Err(ParseError {
+                    code: ErrorCode::ParseUnexpectedToken,
+                    message: "declaration not allowed in with statement body".to_string(),
+                    span: Some(current.span),
+                });
+            }
+            _ => {}
+        }
+
+        self.parse_statement()
     }
 
     fn parse_while(&mut self) -> Result<Statement, ParseError> {
@@ -3325,7 +3444,41 @@ impl Parser {
                         continue;
                     }
 
-                    let is_accessor_prefix = property_token.token_type == TokenType::Identifier
+                    let mut method_is_async = false;
+                    let mut method_is_generator = false;
+                    let async_prefix = (matches!(
+                        self.current().map(|t| &t.token_type),
+                        Some(TokenType::Async) | Some(TokenType::Identifier)
+                    ) && self.current().map(|t| t.lexeme.as_str()) == Some("async"))
+                        && !matches!(
+                            self.peek(),
+                            Some(TokenType::LeftParen)
+                                | Some(TokenType::Colon)
+                                | Some(TokenType::Comma)
+                                | Some(TokenType::RightBrace)
+                                | Some(TokenType::Eof)
+                                | None
+                        );
+                    if async_prefix {
+                        method_is_async = true;
+                        self.advance();
+                        method_is_generator = self.optional(TokenType::Multiply);
+                    } else if self.optional(TokenType::Multiply) {
+                        method_is_generator = true;
+                    }
+
+                    let property_token = self
+                        .current()
+                        .ok_or_else(|| ParseError {
+                            code: ErrorCode::ParseUnexpectedEofExpected,
+                            message: "unexpected end in object literal".to_string(),
+                            span: None,
+                        })?
+                        .clone();
+
+                    let is_accessor_prefix = !method_is_async
+                        && !method_is_generator
+                        && property_token.token_type == TokenType::Identifier
                         && (property_token.lexeme == "get" || property_token.lexeme == "set")
                         && !matches!(
                             self.peek(),
@@ -3359,7 +3512,12 @@ impl Parser {
                             (ObjectPropertyKey::Static(key.clone()), key_span, Some(key))
                         };
 
-                        let value = self.parse_object_method_expression(key_span, method_name)?;
+                        let value = self.parse_object_method_expression(
+                            key_span,
+                            method_name,
+                            false,
+                            false,
+                        )?;
                         properties.push(ObjectPropertyOrSpread::Property(ObjectProperty {
                             key,
                             value,
@@ -3375,7 +3533,12 @@ impl Parser {
                             self.current().map(|t| &t.token_type),
                             Some(TokenType::LeftParen)
                         ) {
-                            self.parse_object_method_expression(key_span, None)?
+                            self.parse_object_method_expression(
+                                key_span,
+                                None,
+                                method_is_generator,
+                                method_is_async,
+                            )?
                         } else {
                             self.expect(TokenType::Colon)?;
                             self.parse_assignment_expression_allow_in()?
@@ -3394,7 +3557,12 @@ impl Parser {
                             self.current().map(|t| &t.token_type),
                             Some(TokenType::LeftParen)
                         ) {
-                            self.parse_object_method_expression(key_span, Some(key.clone()))?
+                            self.parse_object_method_expression(
+                                key_span,
+                                Some(key.clone()),
+                                method_is_generator,
+                                method_is_async,
+                            )?
                         } else if self.optional(TokenType::Colon) {
                             self.parse_assignment_expression_allow_in()?
                         } else if is_identifier_key {
