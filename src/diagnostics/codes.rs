@@ -1,4 +1,4 @@
-//! Structured error codes for jsina diagnostics.
+//! Structured error codes for liora diagnostics.
 //!
 //! Format: JSINA-{CATEGORY}-{NUMBER}
 //! Categories: PARSE (parser), EARLY (early errors), BC (bytecode/driver), RUN (runtime/driver)

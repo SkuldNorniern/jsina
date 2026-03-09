@@ -1,7 +1,7 @@
 //! timeout(callback, delay) - test262 host hook stub.
 //!
 //! test262 harness scripts may call this helper to schedule asynchronous cleanup.
-//! jsina executes callbacks immediately so async harness tests can complete.
+//! liora executes callbacks immediately so async harness tests can complete.
 
 use super::{BuiltinContext, BuiltinError};
 use crate::runtime::Value;
