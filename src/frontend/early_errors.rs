@@ -279,6 +279,16 @@ fn check_statement(
                 check_statement(else_b, scope, ctx, errors);
             }
         }
+        Statement::With(w) => {
+            if ctx.strict {
+                errors.push(EarlyError {
+                    code: ErrorCode::EarlyStrictReserved,
+                    message: "'with' is not allowed in strict mode".to_string(),
+                    span: w.span,
+                });
+            }
+            check_statement(&w.body, scope, ctx, errors);
+        }
         Statement::While(w) => {
             let iter_ctx = CheckContext {
                 in_function: ctx.in_function,
@@ -659,5 +669,13 @@ mod tests {
     fn check_for_of_let_redeclaration_in_separate_loops_ok() {
         let r = parse_and_check("for (let ctor of ctors) {} for (let ctor of ctors) {}");
         assert!(r.is_ok());
+    }
+
+    #[test]
+    fn check_with_not_allowed_in_strict_mode() {
+        let r = parse_and_check("'use strict'; with ({}) {}");
+        assert!(r.is_err());
+        let errs = r.unwrap_err();
+        assert!(errs.iter().any(|e| e.message.contains("'with' is not allowed")));
     }
 }

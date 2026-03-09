@@ -462,6 +462,7 @@ impl Parser {
             TokenType::Break => self.parse_break(),
             TokenType::Continue => self.parse_continue(),
             TokenType::If => self.parse_if(),
+            TokenType::With => self.parse_with(),
             TokenType::While => self.parse_while(),
             TokenType::Do => self.parse_do_while(),
             TokenType::For => self.parse_for(),
@@ -1493,6 +1494,22 @@ impl Parser {
             condition,
             then_branch,
             else_branch,
+        }))
+    }
+
+    fn parse_with(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.expect(TokenType::With)?.span;
+        let id = self.next_id();
+        self.expect(TokenType::LeftParen)?;
+        let object = Box::new(self.parse_expression()?);
+        self.expect(TokenType::RightParen)?;
+        let body = Box::new(self.parse_statement()?);
+        let span = start_span.merge(body.span());
+        Ok(Statement::With(WithStmt {
+            id,
+            span,
+            object,
+            body,
         }))
     }
 
@@ -4620,6 +4637,20 @@ mod tests {
             }
         }
         panic!("expected for-in in block");
+    }
+
+    #[test]
+    fn parse_with_statement() {
+        let script = parse_ok("function f() { with (obj) { return x; } }");
+        if let Statement::FunctionDecl(f) = &script.body[0] {
+            if let Statement::Block(b) = &*f.body {
+                if let Statement::With(w) = &b.body[0] {
+                    assert!(matches!(w.object.as_ref(), Expression::Identifier(_)));
+                    return;
+                }
+            }
+        }
+        panic!("expected with statement in block");
     }
 
     #[test]

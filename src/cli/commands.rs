@@ -72,6 +72,10 @@ fn print_stmt(idx: usize, stmt: &Statement, indent: usize) {
                 print_stmt(0, else_b, indent + 1);
             }
         }
+        Statement::With(s) => {
+            println!("{}[{}] With ({})", pad, idx, format_expr(&s.object));
+            print_stmt(0, &s.body, indent + 1);
+        }
         Statement::While(s) => {
             println!("{}[{}] While cond: {}", pad, idx, format_expr(&s.condition));
             print_stmt(0, &s.body, indent + 1);
@@ -457,7 +461,11 @@ pub fn test262(
             skip += 1;
             if !json_output {
                 let skip_style = Style::builder().foreground(Color::Yellow).build();
-                println!("{}  {}  known-bug", "SKIP".style(skip_style).to_string(), test_path_str);
+                println!(
+                    "{}  {}  known-bug",
+                    "SKIP".style(skip_style).to_string(),
+                    test_path_str
+                );
             }
             continue;
         }
@@ -480,7 +488,12 @@ pub fn test262(
                         ""
                     };
                     let pass_style = Style::builder().foreground(Color::Green).build();
-                    println!("{}  {}{}", "PASS".style(pass_style).to_string(), result.path, suffix);
+                    println!(
+                        "{}  {}{}",
+                        "PASS".style(pass_style).to_string(),
+                        result.path,
+                        suffix
+                    );
                 }
             }
             TestStatus::Fail => {
@@ -512,7 +525,12 @@ pub fn test262(
                 if !json_output {
                     let reason = result.message.as_deref().unwrap_or("(no reason)");
                     let skip_style = Style::builder().foreground(Color::Yellow).build();
-                    println!("{}  {}  [{}]", "SKIP".style(skip_style).to_string(), result.path, reason);
+                    println!(
+                        "{}  {}  [{}]",
+                        "SKIP".style(skip_style).to_string(),
+                        result.path,
+                        reason
+                    );
                 }
             }
             TestStatus::HarnessError => {

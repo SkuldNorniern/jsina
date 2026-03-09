@@ -151,6 +151,10 @@ fn collect_function_exprs_stmt(stmt: &Statement, out: &mut Vec<(NodeId, Function
                 collect_function_exprs_stmt(e, out);
             }
         }
+        Statement::With(w) => {
+            collect_function_exprs_expr(&w.object, out);
+            collect_function_exprs_stmt(&w.body, out);
+        }
         Statement::While(w) => {
             collect_function_exprs_expr(&w.condition, out);
             collect_function_exprs_stmt(&w.body, out);
@@ -445,6 +449,7 @@ pub fn script_to_hir(script: &Script) -> Result<Vec<HirFunction>, LowerError> {
             | Statement::Block(_)
             | Statement::Labeled(_)
             | Statement::If(_)
+            | Statement::With(_)
             | Statement::While(_)
             | Statement::DoWhile(_)
             | Statement::For(_)
@@ -1668,6 +1673,12 @@ fn compile_statement(stmt: &Statement, ctx: &mut LowerCtx<'_>) -> Result<bool, L
             };
 
             ctx.current_block = merge_id as usize;
+        }
+        Statement::With(w) => {
+            return Err(LowerError::Unsupported(
+                "with statement is not supported yet".to_string(),
+                Some(w.span),
+            ));
         }
         Statement::While(w) => {
             let cond_slot = ctx.next_slot;

@@ -15,6 +15,7 @@ pub enum Statement {
     Block(BlockStmt),
     Labeled(LabeledStmt),
     If(IfStmt),
+    With(WithStmt),
     While(WhileStmt),
     DoWhile(DoWhileStmt),
     For(ForStmt),
@@ -132,6 +133,14 @@ pub struct IfStmt {
     pub condition: Box<Expression>,
     pub then_branch: Box<Statement>,
     pub else_branch: Option<Box<Statement>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WithStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub object: Box<Expression>,
+    pub body: Box<Statement>,
 }
 
 #[derive(Debug, Clone)]
@@ -657,6 +666,7 @@ impl Statement {
             Statement::Block(s) => s.span,
             Statement::Labeled(s) => s.span,
             Statement::If(s) => s.span,
+            Statement::With(s) => s.span,
             Statement::While(s) => s.span,
             Statement::DoWhile(s) => s.span,
             Statement::For(s) => s.span,
