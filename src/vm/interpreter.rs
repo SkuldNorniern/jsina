@@ -662,6 +662,12 @@ fn hash_execution_state(
     hash
 }
 
+#[inline(always)]
+fn apply_relative_jump(pc: usize, offset: i16) -> Result<usize, VmError> {
+    pc.checked_add_signed(offset as isize)
+        .ok_or(VmError::InvalidJumpTarget { pc, offset })
+}
+
 pub fn interpret_program_with_heap_and_entry(
     program: &Program,
     heap: &mut Heap,
@@ -1344,24 +1350,24 @@ pub fn interpret_program_with_heap_and_entry(
 
             // ---- Jumps ----
             0x30 => {
-                let offset = read_i16(code, pc) as isize;
+                let offset = read_i16(code, pc);
                 pc += 2;
                 let val = state.stack.pop().ok_or_else(underflow)?;
                 if !is_truthy(&val) {
-                    pc = (pc as isize + offset) as usize;
+                    pc = apply_relative_jump(pc, offset)?;
                 }
             }
             0x31 => {
-                let offset = read_i16(code, pc) as isize;
+                let offset = read_i16(code, pc);
                 pc += 2;
-                pc = (pc as isize + offset) as usize;
+                pc = apply_relative_jump(pc, offset)?;
             }
             0x32 => {
-                let offset = read_i16(code, pc) as isize;
+                let offset = read_i16(code, pc);
                 pc += 2;
                 let val = state.stack.pop().ok_or_else(underflow)?;
                 if is_nullish(&val) {
-                    pc = (pc as isize + offset) as usize;
+                    pc = apply_relative_jump(pc, offset)?;
                 }
             }
 
@@ -2544,18 +2550,16 @@ fn handle_apply_invoke(
         }
     }
     loop {
-        let bind_unwrap = match &callee {
-            Value::BoundFunction(target, bound_this, bound_args) => {
-                let mut merged = bound_args.clone();
-                merged.extend(args.clone());
-                Some((target.as_ref().clone(), bound_this.as_ref().clone(), merged))
+        if let Value::BoundFunction(target, bound_this, bound_args) = &callee {
+            let mut merged = bound_args.clone();
+            merged.extend(std::mem::take(&mut args));
+            let rebound_callee = target.as_ref().clone();
+            let rebound_this = bound_this.as_ref().clone();
+            callee = rebound_callee;
+            if new_object.is_none() {
+                this_arg = rebound_this;
             }
-            _ => None,
-        };
-        if let Some((new_callee, new_this, new_args)) = bind_unwrap {
-            callee = new_callee;
-            this_arg = new_this;
-            args = new_args;
+            args = merged;
             continue;
         }
         match &callee {
@@ -2778,7 +2782,7 @@ fn handle_apply_invoke(
             Value::BoundBuiltin(builtin_id, bound_val, _append_target) => {
                 let mut call_args = Vec::with_capacity(args.len() + 1);
                 call_args.push(bound_val.as_ref().clone());
-                call_args.extend(args.iter().cloned());
+                call_args.extend(std::mem::take(&mut args));
                 for v in &call_args {
                     state.stack.push(v.clone());
                 }
@@ -3285,6 +3289,25 @@ mod tests {
     }
 
     #[test]
+    fn interpret_invalid_jump_target_errors() {
+        let chunk = BytecodeChunk {
+            code: vec![Opcode::Jump as u8, 0xfc, 0xff],
+            constants: vec![],
+            num_locals: 0,
+            named_locals: vec![],
+            mapped_arguments_slots: vec![],
+            captured_names: vec![],
+            rest_param_index: None,
+            handlers: vec![],
+            arguments_slot: None,
+            is_generator: false,
+            is_async: false,
+        };
+        let err = interpret(&chunk).expect_err("invalid jump should error");
+        assert!(matches!(err, VmError::InvalidJumpTarget { .. }));
+    }
+
+    #[test]
     fn interpret_dynamic_function_repeated_calls() {
         let result = crate::driver::Driver::run(
             "function main() { var x = 5; var f = function() { return x + 1; }; return f() + f(); }",
@@ -3337,5 +3360,23 @@ mod tests {
         )
         .expect("finite loop should complete");
         assert_eq!(result, 5000);
+    }
+
+    #[test]
+    fn interpret_new_nested_bound_function_ignores_bound_this() {
+        let result = crate::driver::Driver::run(
+            "function main() { function C() { this.v = 7; } var b1 = C.bind({ v: 1 }); var b2 = b1.bind({ v: 2 }); var o = new b2(); return o.v; }",
+        )
+        .expect("run");
+        assert_eq!(result, 7);
+    }
+
+    #[test]
+    fn interpret_new_bound_builtin_constructor() {
+        let result = crate::driver::Driver::run(
+            "function main() { var BoundArray = Array.bind(null); var arr = new BoundArray(2); return arr.length; }",
+        )
+        .expect("run");
+        assert_eq!(result, 2);
     }
 }

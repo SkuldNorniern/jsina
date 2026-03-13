@@ -64,6 +64,8 @@ pub enum ErrorCode {
     RunInvalidOpcode,
     /// VM invalid constant index
     RunInvalidConstIndex,
+    /// VM invalid jump target
+    RunInvalidJumpTarget,
     /// Infinite loop detected
     RunInfiniteLoopDetected,
     /// Execution cancelled (timeout)
@@ -118,6 +120,7 @@ impl ErrorCode {
             | Self::RunStackUnderflow
             | Self::RunInvalidOpcode
             | Self::RunInvalidConstIndex
+            | Self::RunInvalidJumpTarget
             | Self::RunInfiniteLoopDetected
             | Self::RunCancelled => ErrorCategory::Runtime,
         }
@@ -156,6 +159,7 @@ impl ErrorCode {
             Self::RunInvalidConstIndex => "JSINA-RUN-006",
             Self::RunInfiniteLoopDetected => "JSINA-RUN-007",
             Self::RunCancelled => "JSINA-RUN-008",
+            Self::RunInvalidJumpTarget => "JSINA-RUN-009",
         }
     }
 }

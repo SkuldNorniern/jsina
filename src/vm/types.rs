@@ -33,6 +33,10 @@ pub enum VmError {
     },
     InvalidOpcode(u8),
     InvalidConstIndex(usize),
+    InvalidJumpTarget {
+        pc: usize,
+        offset: i16,
+    },
     InfiniteLoopDetected,
     Cancelled,
 }
@@ -54,6 +58,13 @@ impl std::fmt::Display for VmError {
             }
             Self::InvalidOpcode(b) => write!(f, "invalid opcode: 0x{:02x}", b),
             Self::InvalidConstIndex(i) => write!(f, "invalid constant index: {}", i),
+            Self::InvalidJumpTarget { pc, offset } => {
+                write!(
+                    f,
+                    "invalid jump target from pc={} with offset={}",
+                    pc, offset
+                )
+            }
             Self::InfiniteLoopDetected => write!(f, "infinite loop detected"),
             Self::Cancelled => write!(f, "execution cancelled (timeout)"),
         }

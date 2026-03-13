@@ -314,6 +314,14 @@ pub fn vm_error_to_diagnostic(e: &VmError) -> Diagnostic {
         .with_cause("a constant pool index was out of bounds")
         .with_help("ensure the bytecode references valid constant indices"),
 
+        VmError::InvalidJumpTarget { pc, offset } => Diagnostic::error(
+            ErrorCode::RunInvalidJumpTarget,
+            format!("invalid jump target from pc={} with offset={}", pc, offset),
+            None,
+        )
+        .with_cause("a jump instruction resolved to an invalid program counter")
+        .with_help("ensure jump offsets remain within the bytecode chunk bounds"),
+
         VmError::InfiniteLoopDetected => Diagnostic::error(
             ErrorCode::RunInfiniteLoopDetected,
             "infinite loop detected",
