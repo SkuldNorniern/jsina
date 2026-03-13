@@ -663,9 +663,14 @@ fn hash_execution_state(
 }
 
 #[inline(always)]
-fn apply_relative_jump(pc: usize, offset: i16) -> Result<usize, VmError> {
-    pc.checked_add_signed(offset as isize)
-        .ok_or(VmError::InvalidJumpTarget { pc, offset })
+fn apply_relative_jump(pc: usize, offset: i16, code_len: usize) -> Result<usize, VmError> {
+    let target = pc
+        .checked_add_signed(offset as isize)
+        .ok_or(VmError::InvalidJumpTarget { pc, offset })?;
+    if target > code_len {
+        return Err(VmError::InvalidJumpTarget { pc, offset });
+    }
+    Ok(target)
 }
 
 pub fn interpret_program_with_heap_and_entry(
@@ -1354,20 +1359,20 @@ pub fn interpret_program_with_heap_and_entry(
                 pc += 2;
                 let val = state.stack.pop().ok_or_else(underflow)?;
                 if !is_truthy(&val) {
-                    pc = apply_relative_jump(pc, offset)?;
+                    pc = apply_relative_jump(pc, offset, code.len())?;
                 }
             }
             0x31 => {
                 let offset = read_i16(code, pc);
                 pc += 2;
-                pc = apply_relative_jump(pc, offset)?;
+                pc = apply_relative_jump(pc, offset, code.len())?;
             }
             0x32 => {
                 let offset = read_i16(code, pc);
                 pc += 2;
                 let val = state.stack.pop().ok_or_else(underflow)?;
                 if is_nullish(&val) {
-                    pc = apply_relative_jump(pc, offset)?;
+                    pc = apply_relative_jump(pc, offset, code.len())?;
                 }
             }
 
@@ -3304,6 +3309,25 @@ mod tests {
             is_async: false,
         };
         let err = interpret(&chunk).expect_err("invalid jump should error");
+        assert!(matches!(err, VmError::InvalidJumpTarget { .. }));
+    }
+
+    #[test]
+    fn interpret_jump_past_chunk_errors() {
+        let chunk = BytecodeChunk {
+            code: vec![Opcode::Jump as u8, 0x05, 0x00],
+            constants: vec![],
+            num_locals: 0,
+            named_locals: vec![],
+            mapped_arguments_slots: vec![],
+            captured_names: vec![],
+            rest_param_index: None,
+            handlers: vec![],
+            arguments_slot: None,
+            is_generator: false,
+            is_async: false,
+        };
+        let err = interpret(&chunk).expect_err("forward out-of-range jump should error");
         assert!(matches!(err, VmError::InvalidJumpTarget { .. }));
     }
 

@@ -306,4 +306,38 @@ mod tests {
             Value::Int(1)
         );
     }
+
+    #[test]
+    fn number_coercion_handles_trimmed_and_empty_strings() {
+        let mut heap = Heap::new();
+        assert_eq!(
+            number(&[Value::String(" 42 ".to_string())], &mut heap),
+            Value::Int(42)
+        );
+        assert_eq!(
+            number(&[Value::String("".to_string())], &mut heap),
+            Value::Int(0)
+        );
+    }
+
+    #[test]
+    fn number_coercion_handles_prefixed_radix_literals() {
+        let mut heap = Heap::new();
+        assert_eq!(
+            number(&[Value::String("0x10".to_string())], &mut heap),
+            Value::Int(16)
+        );
+        assert_eq!(
+            number(&[Value::String("0b11".to_string())], &mut heap),
+            Value::Int(3)
+        );
+        assert_eq!(
+            number(&[Value::String("0o10".to_string())], &mut heap),
+            Value::Int(8)
+        );
+        assert!(matches!(
+            number(&[Value::String("0x".to_string())], &mut heap),
+            Value::Number(number) if number.is_nan()
+        ));
+    }
 }
