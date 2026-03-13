@@ -1695,8 +1695,8 @@ pub fn interpret_program_with_heap_and_entry(
                         });
                     }
                     Value::BoundFunction(target, bound_this, bound_args) => {
-                        let mut merged = bound_args.clone();
-                        merged.extend(args.iter().cloned());
+                        let mut merged = bound_args;
+                        merged.extend(args);
                         if let Some(c) = handle_apply_invoke(
                             program,
                             heap,
@@ -1711,16 +1711,10 @@ pub fn interpret_program_with_heap_and_entry(
                             return Ok(c);
                         }
                     }
-                    Value::BoundBuiltin(builtin_id, bound_val, append_target) => {
-                        let call_args: Vec<Value> = if append_target {
-                            let mut a = vec![bound_val.as_ref().clone()];
-                            a.extend(args.iter().cloned());
-                            a
-                        } else {
-                            let mut a = vec![bound_val.as_ref().clone()];
-                            a.extend(args.iter().cloned());
-                            a
-                        };
+                    Value::BoundBuiltin(builtin_id, bound_val, _append_target) => {
+                        let mut call_args = Vec::with_capacity(args.len() + 1);
+                        call_args.push(bound_val.as_ref().clone());
+                        call_args.extend(args);
                         for v in &call_args {
                             state.stack.push(v.clone());
                         }
@@ -2007,8 +2001,8 @@ pub fn interpret_program_with_heap_and_entry(
                         });
                     }
                     Value::BoundFunction(target, _bound_this, bound_args) => {
-                        let mut merged = bound_args.clone();
-                        merged.extend(args.iter().cloned());
+                        let mut merged = bound_args;
+                        merged.extend(args);
                         if let Some(c) = handle_apply_invoke(
                             program,
                             heap,
@@ -2781,16 +2775,10 @@ fn handle_apply_invoke(
                 }
                 return Ok(None);
             }
-            Value::BoundBuiltin(builtin_id, bound_val, append_target) => {
-                let call_args: Vec<Value> = if *append_target {
-                    let mut a = vec![bound_val.as_ref().clone()];
-                    a.extend(args.iter().cloned());
-                    a
-                } else {
-                    let mut a = vec![bound_val.as_ref().clone()];
-                    a.extend(args.iter().cloned());
-                    a
-                };
+            Value::BoundBuiltin(builtin_id, bound_val, _append_target) => {
+                let mut call_args = Vec::with_capacity(args.len() + 1);
+                call_args.push(bound_val.as_ref().clone());
+                call_args.extend(args.iter().cloned());
                 for v in &call_args {
                     state.stack.push(v.clone());
                 }

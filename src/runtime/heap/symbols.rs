@@ -7,14 +7,14 @@ impl Heap {
         }
         let symbol_id = self.alloc_symbol(Some(key.to_string()));
         self.symbol_for_registry.insert(key.to_string(), symbol_id);
+        self.symbol_key_registry.insert(symbol_id, key.to_string());
         symbol_id
     }
 
     pub fn symbol_key_for(&self, symbol_id: usize) -> Option<&str> {
-        self.symbol_for_registry
-            .iter()
-            .find(|(_, value)| **value == symbol_id)
-            .map(|(key, _)| key.as_str())
+        self.symbol_key_registry
+            .get(&symbol_id)
+            .map(|key| key.as_str())
     }
 
     pub fn alloc_symbol(&mut self, description: Option<String>) -> usize {
@@ -27,5 +27,24 @@ impl Heap {
         self.symbols
             .get(symbol_id)
             .and_then(|description| description.as_deref())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbol_for_registers_reverse_lookup() {
+        let mut heap = Heap::new();
+        let symbol_id = heap.symbol_for("alpha");
+        assert_eq!(heap.symbol_key_for(symbol_id), Some("alpha"));
+    }
+
+    #[test]
+    fn symbol_key_for_ignores_non_registry_symbols() {
+        let mut heap = Heap::new();
+        let symbol_id = heap.alloc_symbol(Some("local".to_string()));
+        assert_eq!(heap.symbol_key_for(symbol_id), None);
     }
 }

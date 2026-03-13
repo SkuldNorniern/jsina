@@ -114,7 +114,7 @@ pub fn function_apply(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value,
 }
 
 pub fn function_bind(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, BuiltinError> {
-    if args.len() < 2 {
+    if args.is_empty() {
         return Err(BuiltinError::Throw(Value::String(
             "Function.prototype.bind requires at least one argument".to_string(),
         )));
@@ -126,6 +126,13 @@ pub fn function_bind(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, 
         .ok_or_else(|| BuiltinError::Throw(Value::String("Function.call not found".to_string())))?;
     match target {
         Value::Builtin(builtin_id) => {
+            if !bound_args.is_empty() {
+                return Ok(Value::BoundFunction(
+                    Box::new(target.clone()),
+                    Box::new(bound_this),
+                    bound_args,
+                ));
+            }
             let append_target = *builtin_id == call_id;
             Ok(Value::BoundBuiltin(
                 *builtin_id,
@@ -134,7 +141,15 @@ pub fn function_bind(args: &[Value], ctx: &mut BuiltinContext) -> Result<Value, 
             ))
         }
         Value::BoundBuiltin(builtin_id, bound_val, append) => {
-            Ok(Value::BoundBuiltin(*builtin_id, bound_val.clone(), *append))
+            if !bound_args.is_empty() {
+                Ok(Value::BoundFunction(
+                    Box::new(Value::BoundBuiltin(*builtin_id, bound_val.clone(), *append)),
+                    Box::new(bound_this),
+                    bound_args,
+                ))
+            } else {
+                Ok(Value::BoundBuiltin(*builtin_id, bound_val.clone(), *append))
+            }
         }
         Value::Function(_) | Value::DynamicFunction(_) => Ok(Value::BoundFunction(
             Box::new(target.clone()),
@@ -253,5 +268,33 @@ mod tests {
         )
         .expect("run");
         assert_eq!(result, 6);
+    }
+
+    #[test]
+    fn bind_accepts_missing_this_argument() {
+        let join_id = resolve("Array", "join").expect("join");
+        let mut heap = Heap::new();
+        let mut ctx = BuiltinContext { heap: &mut heap };
+
+        let bound = function_bind(&[Value::Builtin(join_id)], &mut ctx).expect("bind");
+        assert!(matches!(bound, Value::BoundBuiltin(id, _, false) if id == join_id));
+    }
+
+    #[test]
+    fn bind_builtin_with_preset_args_applies_them() {
+        let result = crate::driver::Driver::run(
+            "function main() { var arr = [1,2,3]; var join = arr.join.bind(arr, '-'); return join() === '1-2-3'; }",
+        )
+        .expect("run");
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn bind_call_with_preset_args_invokes_bound_target() {
+        let result = crate::driver::Driver::run(
+            "function main() { function add(a, b) { return a + b; } var callAdd = Function.call.bind(add, null, 2); return callAdd(3); }",
+        )
+        .expect("run");
+        assert_eq!(result, 5);
     }
 }
